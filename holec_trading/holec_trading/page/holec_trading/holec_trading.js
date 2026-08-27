@@ -1,146 +1,141 @@
-frappe.pages['holec-trading'].on_page_load = function(wrapper) {
+frappe.pages['holec_trading'].on_page_load = function (wrapper) {
     let page = frappe.ui.make_app_page({
         parent: wrapper,
         title: __('Holec Trading'),
         single_column: true
     });
 
-    // Holec Trading Module DocTypes
+    // Render HTML Template
+    $(frappe.render_template('holec_trading', {})).appendTo(page.main);
+
+    // List of DocTypes from Holec Trading module
     const doctypes = [
-        'Buy Ticket',
-        'Lot',
-        'Storage Stack',
-        'Cost Ledger Entry',
-        'Charge Master',
-        'Lot Event Log',
-        'Rail Routing Band',
-        'Origin Area',
-        'Origin County'
+        { id: 'storage_stack', label: 'Storage Stack', route: 'List/Storage Stack', icon: 'octicon-stack' },
+        { id: 'origin_area', label: 'Origin Area', route: 'List/Origin Area', icon: 'octicon-location' },
+        { id: 'charge_master', label: 'Charge Master', route: 'List/Charge Master', icon: 'octicon-credit-card' },
+        { id: 'buy_ticket', label: 'Buy Ticket', route: 'List/Buy Ticket', icon: 'octicon-tag' },
+        { id: 'lot_event_log', label: 'Lot Event Log', route: 'List/Lot Event Log', icon: 'octicon-history' },
+        { id: 'lot', label: 'Lot', route: 'List/Lot', icon: 'octicon-package' },
+        { id: 'origin_county', label: 'Origin County', route: 'List/Origin County', icon: 'octicon-globe' },
+        { id: 'rail_routing_band', label: 'Rail Routing Band', route: 'List/Rail Routing Band', icon: 'octicon-milestone' }
     ];
 
-    // Render 2-Column Split Layout
-    let $layout = $(`
-        <div class="row holec-split-layout">
-            <div class="col-md-3 holec-sidebar">
-                <div class="list-group sidebar-doctype-list"></div>
-            </div>
-            <div class="col-md-9 holec-content-area">
-                <div class="card p-3 shadow-sm" id="doctype-view-container">
-                    <p class="text-muted text-center my-4">${__('Select a DocType from the left menu')}</p>
-                </div>
-            </div>
-        </div>
-    `).appendTo(page.main);
+    // Scoped Elements Lookup
+    const $primaryNav = $(page.main).find('#holec-primary-items');
+    const $target = $(page.main).find('#holec-viewport-container');
 
-    // Populate Sidebar
-    let $sidebar = $layout.find('.sidebar-doctype-list');
-    doctypes.forEach((dt) => {
-        let $item = $(`
-            <a href="javascript:void(0)" class="list-group-item list-group-item-action doctype-nav-item d-flex align-items-center justify-content-between" data-doctype="${dt}">
-                <span class="doctype-label font-weight-bold">${__(dt)}</span>
-                <i class="fa fa-chevron-right text-muted" style="font-size: 11px;"></i>
-            </a>
-        `);
+    const cleanCSS = `
+        :root {
+            --sidebar-width: 0px !important;
+            --page-sidebar-width: 0px !important;
+        }
+        .navbar, header.navbar, .sidebar-toggle-btn, .sidebar-collapse-btn {
+            display: none !important;
+            height: 0 !important;
+        }
+        .page-head {
+            display: flex !important;
+            padding: 10px 24px !important;
+            border-bottom: 1px solid #ebedf0 !important;
+            background: #ffffff !important;
+        }
+        .page-head .page-breadcrumbs {
+            display: none !important;
+        }
+        .layout-side-section, .desk-sidebar, .standard-sidebar-section,
+        .body-sidebar, .workspace-sidebar, .desk-sidebar-dropdown {
+            display: none !important;
+            width: 0 !important;
+        }
+        .page-container, .page-body, .desk-page, .layout-main-section-wrapper,
+        .layout-main, .layout-main-section, .workspace-page, .desk-container {
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 16px 24px !important;
+        }
+    `;
 
-        $item.on('click', function() {
-            $sidebar.find('.doctype-nav-item').removeClass('active');
-            $(this).addClass('active');
-            load_doctype_view(dt);
+    function forceCleanDOM(frameDoc) {
+        if (!frameDoc) return;
+        const mainWrappers = frameDoc.querySelectorAll('.layout-main-section, .layout-main-section-wrapper, .workspace-page, .page-container');
+        mainWrappers.forEach(el => {
+            el.style.setProperty('margin-left', '0px', 'important');
+            el.style.setProperty('width', '100%', 'important');
+            el.style.setProperty('max-width', '100%', 'important');
+        });
+    }
+
+    function renderIframe(route) {
+        if (!route) return;
+
+        let cleanRoute = route.replace(/^\/?(desk\/|app\/)?/, '');
+        const targetUrl = `/app/${cleanRoute}`;
+
+        $target.empty();
+
+        const $iframe = $('<iframe>', {
+            src: targetUrl,
+            class: 'tm-viewport-iframe',
+            frameborder: '0',
+            style: 'width: 100%; height: 100%; border: none; opacity: 0; transition: opacity 0.15s ease-in;'
         });
 
-        $sidebar.append($item);
+        $iframe.on('load', function () {
+            const frame = this;
+            try {
+                const frameDoc = frame.contentDocument || frame.contentWindow.document;
+                if (frameDoc) {
+                    const styleId = 'frappe-flush-left-align-style';
+                    let style = frameDoc.getElementById(styleId);
+                    if (!style) {
+                        style = frameDoc.createElement('style');
+                        style.id = styleId;
+                        frameDoc.head.appendChild(style);
+                    }
+                    style.innerHTML = cleanCSS;
+                    forceCleanDOM(frameDoc);
+
+                    requestAnimationFrame(() => { frame.style.opacity = '1'; });
+
+                    const observer = new MutationObserver(() => {
+                        forceCleanDOM(frameDoc);
+                        if (!frameDoc.getElementById(styleId)) {
+                            frameDoc.head.appendChild(style);
+                        }
+                    });
+                    observer.observe(frameDoc.body, { childList: true, subtree: true });
+                }
+            } catch (e) {
+                frame.style.opacity = '1';
+            }
+        });
+
+        $target.html($iframe);
+    }
+
+    // Populate Sidebar DocTypes
+    $primaryNav.empty();
+    doctypes.forEach((item, idx) => {
+        const $btn = $(`
+            <li class="tm-primary-item ${idx === 0 ? 'active' : ''}" data-id="${item.id}">
+                <div class="primary-icon">${frappe.utils.icon(item.icon || 'octicon-file', 'sm')}</div>
+                <span class="primary-label">${__(item.label)}</span>
+            </li>
+        `);
+
+        $btn.on('click', function () {
+            $primaryNav.find('.tm-primary-item').removeClass('active');
+            $(this).addClass('active');
+            renderIframe(item.route);
+        });
+
+        $primaryNav.append($btn);
     });
 
-    // Auto-load the first DocType (Buy Ticket)
+    // Open first DocType by default
     if (doctypes.length > 0) {
-        $sidebar.find('.doctype-nav-item').first().trigger('click');
-    }
-
-    // Load dynamic list view on the right
-    function load_doctype_view(doctype) {
-        let $container = $('#doctype-view-container');
-        $container.empty().html(`
-            <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
-                <h4 class="mb-0 font-weight-bold text-dark">${__(doctype)}</h4>
-                <div class="btn-group">
-                    <button class="btn btn-sm btn-primary" id="btn-new-doc">
-                        <i class="fa fa-plus mr-1"></i> ${__('Add')} ${__(doctype)}
-                    </button>
-                    <a href="/app/${frappe.router.slug(doctype)}" class="btn btn-sm btn-outline-secondary">
-                        <i class="fa fa-external-link mr-1"></i> ${__('Full List')}
-                    </a>
-                </div>
-            </div>
-            <div id="doctype-list-wrapper">
-                <div class="text-center py-4 text-muted"><i class="fa fa-spinner fa-spin"></i> Loading records...</div>
-            </div>
-        `);
-
-        $container.find('#btn-new-doc').on('click', () => {
-            frappe.new_doc(doctype);
-        });
-
-        frappe.model.with_doctype(doctype, function() {
-            let meta = frappe.get_meta(doctype);
-            let columns = ['name'];
-
-            // Fetch standard list fields
-            meta.fields.filter(f => f.in_list_view && f.fieldtype !== 'Table').slice(0, 4).forEach(f => {
-                columns.push(f.fieldname);
-            });
-            columns.push('modified');
-
-            frappe.call({
-                method: 'frappe.client.get_list',
-                args: {
-                    doctype: doctype,
-                    fields: columns,
-                    limit_page_length: 20,
-                    order_by: 'modified desc'
-                },
-                callback: function(r) {
-                    let data = r.message || [];
-                    render_table($container.find('#doctype-list-wrapper'), doctype, columns, data);
-                }
-            });
-        });
-    }
-
-    function render_table($parent, doctype, columns, data) {
-        if (!data.length) {
-            $parent.html(`
-                <div class="text-center text-muted py-5">
-                    <i class="fa fa-folder-open-o fa-2x mb-2"></i>
-                    <p class="mb-0">${__('No records found for')} <strong>${__(doctype)}</strong></p>
-                </div>
-            `);
-            return;
-        }
-
-        let table_html = `
-            <div class="table-responsive">
-                <table class="table table-hover table-bordered mb-0">
-                    <thead class="thead-light">
-                        <tr>
-                            ${columns.map(c => `<th>${frappe.unscrub(c)}</th>`).join('')}
-                            <th class="text-center" style="width: 100px;">${__('Action')}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.map(row => `
-                            <tr>
-                                ${columns.map(c => `<td>${row[c] !== null && row[c] !== undefined ? row[c] : '-'}</td>`).join('')}
-                                <td class="text-center">
-                                    <a href="/app/${frappe.router.slug(doctype)}/${encodeURIComponent(row.name)}" class="btn btn-xs btn-outline-primary">
-                                        ${__('Open')}
-                                    </a>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-        $parent.html(table_html);
+        renderIframe(doctypes[0].route);
     }
 };

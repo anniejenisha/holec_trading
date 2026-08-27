@@ -1,36 +1,59 @@
 {
-  "doctype": "DocType",
-  "name": "Storage Stack",
-  "module": "Holec Trading",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "autoname": "field:stack_name",
-  "fields": [
-    {
-      "fieldname": "stack_name",
-      "label": "Stack Name",
-      "fieldtype": "Data",
-      "reqd": 1,
-      "unique": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "rate",
-      "label": "Rate",
-      "fieldtype": "Currency",
-      "description": "Phase 2: holding rate for lots sitting in this stack."
-    },
-    {
-      "fieldname": "rate_basis",
-      "label": "Rate Basis",
-      "fieldtype": "Select",
-      "options": "Per Bag Per Day\nPer Tonne Per Period",
-      "description": "Own warehouse = per bag/day. NCPB silo = per tonne/period, typically with separate handling charges."
-    }
-  ],
-  "permissions": [
-    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
-    { "role": "Trading Officer", "read": 1 }
-  ]
+ "actions": [],
+ "autoname": "field:stack_name",
+ "creation": "2026-08-20 16:54:48.326966",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "stack_name",
+  "rate",
+  "rate_basis"
+ ],
+ "fields": [
+  {
+   "fieldname": "stack_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Stack Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Phase 2: holding rate for lots sitting in this stack.",
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "label": "Rate"
+  },
+  {
+   "description": "Own warehouse = per bag/day. NCPB silo = per tonne/period, typically with separate handling charges.",
+   "fieldname": "rate_basis",
+   "fieldtype": "Select",
+   "label": "Rate Basis",
+   "options": "Per Bag Per Day\nPer Tonne Per Period"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-21 09:39:42.686919",
+ "modified_by": "Administrator",
+ "module": "Holec Trading",
+ "name": "Storage Stack",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Trading Officer"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
 }

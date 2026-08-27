@@ -1,0 +1,98 @@
+[
+ {
+  "doctype": "Bank Branch",
+  "bank": "KCB Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "KCBLKENX",
+  "name": "KCB Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Standard Chartered Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "SCBLKENX",
+  "name": "Standard Chartered Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Absa Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "BARCKENX",
+  "name": "Absa Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Co-operative Bank of Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "KCOOKENA",
+  "name": "Co-operative Bank of Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "National Bank of Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "",
+  "name": "National Bank of Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Stanbic Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "SBICKENX",
+  "name": "Stanbic Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "NCBA Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "CBAFKENX",
+  "name": "NCBA Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "I&M Bank",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "",
+  "name": "I&M Bank - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Diamond Trust Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "DTKEKENA",
+  "name": "Diamond Trust Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Equity Bank Kenya",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "EQBLKENA",
+  "name": "Equity Bank Kenya - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Family Bank",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "",
+  "name": "Family Bank - Head Office"
+ },
+ {
+  "doctype": "Bank Branch",
+  "bank": "Sidian Bank",
+  "branch_name": "Head Office",
+  "branch_code": "",
+  "swift_code": "",
+  "name": "Sidian Bank - Head Office"
+ }
+]

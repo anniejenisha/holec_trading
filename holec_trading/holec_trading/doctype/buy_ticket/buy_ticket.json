@@ -22,10 +22,12 @@
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
-      "options": "Draft\nOpen\nConverted\nCancelled",
+      "options": "Draft\nOffered\nTicket\nConverted\nCancelled",
       "default": "Draft",
       "in_list_view": 1,
-      "read_only": 1
+      "in_standard_filter": 1,
+      "read_only": 1,
+      "description": "Offered = created by a Supplier, awaiting Purchase User confirmation. Ticket = confirmed, entered the Lot lifecycle."
     },
     {
       "fieldname": "col_break_1",
@@ -38,7 +40,7 @@
       "options": "Supplier",
       "reqd": 1,
       "in_list_view": 1,
-      "description": "Must be an Approved Supplier record."
+      "description": "Must be an Approved/Active Supplier record."
     },
     {
       "fieldname": "sec_break_trade",
@@ -55,13 +57,16 @@
     },
     {
       "fieldname": "region",
-      "label": "Buying Region",
-      "fieldtype": "Data",
-      "description": "Buying region, distinct from the Lot's later origin (county/area) captured at intake."
+      "label": "Region",
+      "fieldtype": "Link",
+      "options": "Origin County",
+      "read_only": 1,
+      "fetch_from": "supplier.county",
+      "description": "Fetched from the Supplier record - not entered per ticket."
     },
     {
       "fieldname": "quantity_kg",
-      "label": "Quantity (kg)",
+      "label": "Quantity Offered (kg)",
       "fieldtype": "Float",
       "reqd": 1,
       "in_list_view": 1
@@ -72,24 +77,10 @@
     },
     {
       "fieldname": "negotiated_price",
-      "label": "Negotiated Price (KES/kg)",
+      "label": "Price Offered (KES/kg)",
       "fieldtype": "Currency",
       "reqd": 1,
       "in_list_view": 1
-    },
-    {
-      "fieldname": "reference_rate",
-      "label": "Reference Rate (KES/kg)",
-      "fieldtype": "Currency",
-      "description": "Pulled from the active Rate Card at time of entry."
-    },
-    {
-      "fieldname": "estimated_margin_pct",
-      "label": "Estimated Margin %",
-      "fieldtype": "Percent",
-      "read_only": 1,
-      "in_list_view": 1,
-      "description": "(negotiated_price - reference_rate) / reference_rate. Shown at point of decision, before money is committed."
     }
   ],
   "permissions": [
@@ -100,6 +91,11 @@
     {
       "role": "Trading Officer",
       "read": 1, "write": 1, "create": 1
+    },
+    {
+      "role": "Supplier",
+      "read": 1, "write": 1, "create": 1,
+      "if_owner": 1
     }
   ]
 }

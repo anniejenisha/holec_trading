@@ -1,0 +1,30 @@
+[
+ {
+  "doctype": "Supplier Group",
+  "supplier_group_name": "Farmer",
+  "parent_supplier_group": "All Supplier Groups",
+  "is_group": 0,
+  "name": "Farmer"
+ },
+ {
+  "doctype": "Supplier Group",
+  "supplier_group_name": "Aggregator",
+  "parent_supplier_group": "All Supplier Groups",
+  "is_group": 0,
+  "name": "Aggregator"
+ },
+ {
+  "doctype": "Supplier Group",
+  "supplier_group_name": "Trader",
+  "parent_supplier_group": "All Supplier Groups",
+  "is_group": 0,
+  "name": "Trader"
+ },
+ {
+  "doctype": "Supplier Group",
+  "supplier_group_name": "Transporter",
+  "parent_supplier_group": "All Supplier Groups",
+  "is_group": 0,
+  "name": "Transporter"
+ }
+]

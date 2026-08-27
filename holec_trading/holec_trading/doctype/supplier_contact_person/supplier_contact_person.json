@@ -1,0 +1,61 @@
+{
+  "doctype": "DocType",
+  "name": "Supplier Contact Person",
+  "module": "Holec Trading",
+  "custom": 0,
+  "istable": 1,
+  "issingle": 0,
+  "editable_grid": 1,
+  "fields": [
+    {
+      "fieldname": "contact_name",
+      "label": "Name",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "role",
+      "label": "Role",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "phone",
+      "label": "Phone",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "Kenyan format, e.g. +254712345678"
+    },
+    {
+      "fieldname": "same_as_phone",
+      "label": "WhatsApp same as phone",
+      "fieldtype": "Check",
+      "default": "0",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "whatsapp",
+      "label": "WhatsApp",
+      "fieldtype": "Data",
+      "depends_on": "eval:!doc.same_as_phone",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "email",
+      "label": "Email",
+      "fieldtype": "Data",
+      "options": "Email",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "is_primary",
+      "label": "Primary Contact",
+      "fieldtype": "Check",
+      "default": "0",
+      "in_list_view": 1,
+      "description": "Exactly one contact per supplier must be marked primary."
+    }
+  ]
+}

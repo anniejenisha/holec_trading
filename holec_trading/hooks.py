@@ -19,15 +19,47 @@ app_license = "MIT"
 
 doc_events = {
 	"Lot": {
-		"validate": "holec_trading.doctype.lot.lot.validate_state_transition",
-		"on_update": "holec_trading.doctype.lot.lot.on_lot_state_change",
+		"validate": "holec_trading.holec_trading.doctype.lot.lot.validate_state_transition",
+		"on_update": "holec_trading.holec_trading.doctype.lot.lot.on_lot_state_change",
 	},
 	"Cost Ledger Entry": {
-		"validate": "holec_trading.doctype.cost_ledger_entry.cost_ledger_entry.validate_no_edit_after_post",
+		"validate": "holec_trading.holec_trading.doctype.cost_ledger_entry.cost_ledger_entry.validate_no_edit_after_post",
 	},
-	"Buy Ticket": {
-		"validate": "holec_trading.doctype.buy_ticket.buy_ticket.calculate_estimated_margin",
+	# Buy Ticket handles its own validate/on_update via BuyTicket.validate()
+	# and BuyTicket.on_update() in buy_ticket.py - no doc_events entry
+	# needed (and would double-fire validate_buy_ticket if added here).
+	"Supplier": {
+		"validate": "holec_trading.holec_trading.supplier_hooks.validate_supplier",
 	},
+}
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+# Installed/updated on every `bench migrate`. Custom Field is scoped to just
+# the doctypes this app extends, so we don't pick up unrelated custom fields
+# from other apps on export.
+
+fixtures = [
+	{"doctype": "Custom Field", "filters": [["dt", "in", ["Supplier", "Bank", "Buy Ticket"]]]},
+	{"doctype": "Role", "filters": [["role_name", "=", "Supplier"]]},
+	"Supplier Group",
+	"Bank",
+	"Bank Branch",
+	"Charge Master",
+]
+
+# ---------------------------------------------------------------------------
+# Client scripts (desk form behaviour: OCR triggers, role-based field
+# visibility, dependent-link filtering)
+# ---------------------------------------------------------------------------
+
+doctype_js = {
+	# Supplier is a native doctype, so its form script must be hooked in
+	# explicitly. Our own doctypes (Buy Ticket, Lot, ...) don't need an
+	# entry here - Frappe auto-loads <doctype>/<doctype>.js from their own
+	# doctype folder.
+	"Supplier": "public/js/supplier.js",
 }
 
 # ---------------------------------------------------------------------------
@@ -35,6 +67,6 @@ doc_events = {
 # ---------------------------------------------------------------------------
 # scheduler_events = {
 # 	"daily": [
-# 		"holec_trading.tasks.accrue_daily_holding_cost",
+# 		"holec_trading.holec_trading.tasks.accrue_daily_holding_cost",
 # 	]
 # }

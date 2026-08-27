@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.19 0.02 264);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.19 0.02 264);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.02 264);
+
+  /* Holec navy #1F3A5F as primary */
+  --primary: oklch(0.34 0.06 253);
+  --primary-foreground: oklch(0.98 0.005 253);
+
+  --secondary: oklch(0.96 0.005 253);
+  --secondary-foreground: oklch(0.28 0.03 253);
+
+  --muted: oklch(0.96 0.005 253);
+  --muted-foreground: oklch(0.5 0.02 253);
+
+  --accent: oklch(0.96 0.005 253);
+  --accent-foreground: oklch(0.28 0.03 253);
+
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.98 0.005 253);
+
+  --border: oklch(0.9 0.005 253);
+  --input: oklch(0.9 0.005 253);
+  --ring: oklch(0.34 0.06 253 / 0.4);
+
+  /* status greens/ambers/reds for tier tags */
+  --tier-native: oklch(0.55 0.14 150);
+  --tier-native-bg: oklch(0.95 0.04 150);
+  --tier-configure: oklch(0.6 0.15 75);
+  --tier-configure-bg: oklch(0.95 0.06 75);
+  --tier-build: oklch(0.55 0.2 25);
+  --tier-build-bg: oklch(0.95 0.05 25);
+}
+
+.dark {
+  --background: oklch(0.16 0.015 253);
+  --foreground: oklch(0.95 0.005 253);
+
+  --card: oklch(0.19 0.015 253);
+  --card-foreground: oklch(0.95 0.005 253);
+
+  --popover: oklch(0.19 0.015 253);
+  --popover-foreground: oklch(0.95 0.005 253);
+
+  --primary: oklch(0.62 0.07 253);
+  --primary-foreground: oklch(0.16 0.015 253);
+
+  --secondary: oklch(0.25 0.015 253);
+  --secondary-foreground: oklch(0.95 0.005 253);
+
+  --muted: oklch(0.25 0.015 253);
+  --muted-foreground: oklch(0.65 0.01 253);
+
+  --accent: oklch(0.25 0.015 253);
+  --accent-foreground: oklch(0.95 0.005 253);
+
+  --destructive: oklch(0.6 0.2 27);
+  --destructive-foreground: oklch(0.95 0.005 253);
+
+  --border: oklch(0.3 0.015 253);
+  --input: oklch(0.3 0.015 253);
+  --ring: oklch(0.62 0.07 253 / 0.5);
+
+  --tier-native: oklch(0.65 0.14 150);
+  --tier-native-bg: oklch(0.28 0.05 150);
+  --tier-configure: oklch(0.72 0.14 75);
+  --tier-configure-bg: oklch(0.3 0.06 75);
+  --tier-build: oklch(0.68 0.18 25);
+  --tier-build-bg: oklch(0.3 0.06 25);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-tier-native: var(--tier-native);
+  --color-tier-native-bg: var(--tier-native-bg);
+  --color-tier-configure: var(--tier-configure);
+  --color-tier-configure-bg: var(--tier-configure-bg);
+  --color-tier-build: var(--tier-build);
+  --color-tier-build-bg: var(--tier-build-bg);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  }
+}

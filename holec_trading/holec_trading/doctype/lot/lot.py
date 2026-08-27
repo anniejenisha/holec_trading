@@ -14,6 +14,14 @@ import frappe
 from frappe.model.document import Document
 from frappe import _
 
+from holec_trading.holec_trading.deductions import (
+	calculate_bag_count,
+	compute_moisture_deduction,
+	moisture_exceeds_hard_limit,
+)
+
+AFLATOXIN_LIMIT_PPB = 10
+
 # States that are allowed to have zero Cost Ledger postings.
 STATES_WITH_NO_REQUIRED_POSTING = {"Ticket", "Intake"}
 
@@ -38,17 +46,23 @@ AUTO_CHARGES_BY_STATE = {
 
 class Lot(Document):
 	def before_save(self):
+		self.recalculate_net_weight()
 		self.set_moisture_band()
+		self.set_aflatoxin_result()
 		self.recalculate_payable_weight()
 		self.recalculate_landed_cost()
 
+	def recalculate_net_weight(self):
+		if self.gross_weight_kg is not None and self.tare_weight_kg is not None:
+			self.net_weight_kg = self.gross_weight_kg - self.tare_weight_kg
+
 	def set_moisture_band(self):
 		"""
-		Buy-side moisture rule, resolved with Minal:
+		Buy-side moisture rule:
 		  <= 14%   -> straight in, no drying
 		  14-20%   -> drying band, price negotiated commercially
-		  > 20%    -> no automatic rejection, but requires case-by-case
-		              approval (Minal's call)
+		  > 20%    -> hard-blocked at Intake submission unless explicitly
+		              overridden with a reason code (see submit_intake below)
 		"""
 		if self.moisture_pct is None:
 			return
@@ -62,6 +76,16 @@ class Lot(Document):
 		else:
 			self.moisture_band = "Over 20 - Requires Approval"
 			self.requires_moisture_approval = 1
+
+	def set_aflatoxin_result(self):
+		if not self.aflatoxin_result_available:
+			self.aflatoxin_result = None
+			self.aflatoxin_tested = 0
+			return
+		if self.aflatoxin_ppb is None:
+			return
+		self.aflatoxin_tested = 1
+		self.aflatoxin_result = "Fail" if self.aflatoxin_ppb > AFLATOXIN_LIMIT_PPB else "Pass"
 
 	def recalculate_payable_weight(self):
 		"""
@@ -227,7 +251,7 @@ def _create_state_cost_entries(lot, state):
 		if already_entered:
 			continue
 
-		lot.append("cost_entries", {
+		entry = {
 			"charge_type": charge_name,
 			"direction": charge_defaults["direction"],
 			"borne_by": charge_defaults["borne_by"],
@@ -235,9 +259,134 @@ def _create_state_cost_entries(lot, state):
 			"gl_account": charge_defaults["gl_account"],
 			"posted_at_state": state,
 			# amount left at 0 here deliberately - real amounts for
-			# moisture/haulage etc. depend on rates and weights entered
-			# by the user; this just guarantees the LINE exists so the
-			# enforcement check passes, and finance can fill the amount
-			# in before the Lot is allowed to move past Settled review.
+			# haulage etc. depend on rates entered by the user; this just
+			# guarantees the LINE exists so the enforcement check passes,
+			# and finance can fill the amount in before the Lot is allowed
+			# to move past Settled review.
 			"amount": 0,
-		})
+		}
+
+		if charge_name == "Moisture Deduction":
+			# The one place the shared moisture-deduction formula is
+			# actually posted as a cost. Uses the same function the Intake
+			# submission uses to decide the pass/block banner - see
+			# holec_trading.holec_trading.deductions.
+			deduction = compute_moisture_deduction(lot.net_weight_kg, lot.moisture_pct)
+			entry["weight_deduction_kg"] = deduction["moisture_deduction_kg"]
+
+		lot.append("cost_entries", entry)
+
+
+# ---------------------------------------------------------------------------
+# Intake submission (Ticket -> Intake)
+# ---------------------------------------------------------------------------
+# The weighbridge/quality capture screen calls submit_intake() once the
+# field team has entered (or OCR has filled) gross/tare weight, moisture,
+# foreign matter, and aflatoxin. Two things can stop this from reaching
+# Intake state: moisture > 20% and aflatoxin failing the limit - both use
+# the same reused pattern (hard block, explicit override action, reason
+# code mandatory, override logged to the Trade Event Log). A missing
+# aflatoxin lab result doesn't block - it parks the Lot at Ticket state
+# with aflatoxin_pending=1 until complete_pending_aflatoxin() is called.
+
+
+@frappe.whitelist()
+def submit_intake(lot_name: str, override_reason: str | None = None):
+	lot = frappe.get_doc("Lot", lot_name)
+	if lot.state != "Ticket":
+		frappe.throw(_("This Lot has already moved past Ticket state."))
+
+	if override_reason:
+		lot.override_reason = override_reason
+
+	lot.recalculate_net_weight()
+	_check_bag_count_variance(lot)
+	_enforce_moisture_limit(lot)
+
+	if not lot.aflatoxin_result_available:
+		lot.aflatoxin_pending = 1
+		lot.save()
+		return {"pending": True, "lot": lot.name}
+
+	_enforce_aflatoxin_limit(lot)
+	lot.aflatoxin_pending = 0
+	lot.state = "Intake"
+	lot.save()
+	return {"pending": False, "lot": lot.name}
+
+
+@frappe.whitelist()
+def complete_pending_aflatoxin(lot_name: str, aflatoxin_ppb: float, override_reason: str | None = None):
+	lot = frappe.get_doc("Lot", lot_name)
+	if not lot.aflatoxin_pending:
+		frappe.throw(_("This Lot is not awaiting an aflatoxin lab result."))
+	if lot.state != "Ticket":
+		frappe.throw(_("This Lot has already moved past Ticket state."))
+
+	lot.aflatoxin_result_available = 1
+	lot.aflatoxin_ppb = float(aflatoxin_ppb)
+	if override_reason:
+		lot.override_reason = override_reason
+
+	lot.set_aflatoxin_result()
+	_enforce_aflatoxin_limit(lot)
+
+	lot.aflatoxin_pending = 0
+	lot.state = "Intake"
+	lot.save()
+	return {"lot": lot.name}
+
+
+def _check_bag_count_variance(lot):
+	if not lot.net_weight_kg:
+		return
+	expected = calculate_bag_count(lot.net_weight_kg)
+	if not lot.bag_count:
+		lot.bag_count = expected
+		return
+	if abs(lot.bag_count - expected) > 1:
+		frappe.msgprint(
+			_("Counted bags ({0}) differ from the expected count ({1}) by more than 1 - please confirm.")
+			.format(lot.bag_count, expected),
+			indicator="orange",
+			alert=True,
+		)
+
+
+def _enforce_moisture_limit(lot):
+	if not moisture_exceeds_hard_limit(lot.moisture_pct):
+		return
+	if not lot.override_reason:
+		frappe.throw(
+			_("Moisture of {0}% exceeds the 20% limit. This lot cannot proceed past intake without "
+			  "an override and reason code.").format(lot.moisture_pct)
+		)
+	_log_override_event(lot, "Moisture override", f"Moisture {lot.moisture_pct}% - {lot.override_reason}")
+
+
+def _enforce_aflatoxin_limit(lot):
+	if lot.aflatoxin_result != "Fail":
+		return
+	if not lot.override_reason:
+		frappe.throw(
+			_("Aflatoxin at {0} ppb exceeds the {1} ppb limit. This lot cannot proceed past intake "
+			  "without an override and reason code.").format(lot.aflatoxin_ppb, AFLATOXIN_LIMIT_PPB)
+		)
+	_log_override_event(lot, "Aflatoxin override", f"Aflatoxin {lot.aflatoxin_ppb}ppb - {lot.override_reason}")
+
+
+def _log_override_event(lot, action, detail):
+	frappe.get_doc({
+		"doctype": "Lot Event Log",
+		"lot": lot.name,
+		"state": lot.state,
+		"changed_by": frappe.session.user,
+		"changed_at": frappe.utils.now(),
+	}).insert(ignore_permissions=True)
+	frappe.get_doc({
+		"doctype": "Comment",
+		"comment_type": "Info",
+		"reference_doctype": "Lot",
+		"reference_name": lot.name,
+		"content": f"{action}: {detail} (by {frappe.session.user})",
+	}).insert(ignore_permissions=True)

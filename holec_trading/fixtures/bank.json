@@ -1,0 +1,14 @@
+[
+  { "doctype": "Bank", "name": "KCB Bank Kenya", "bank_name": "KCB Bank Kenya", "swift_number": "KCBLKENX", "bank_code": "01" },
+  { "doctype": "Bank", "name": "Standard Chartered Bank Kenya", "bank_name": "Standard Chartered Bank Kenya", "swift_number": "SCBLKENX", "bank_code": "02" },
+  { "doctype": "Bank", "name": "Absa Bank Kenya", "bank_name": "Absa Bank Kenya", "swift_number": "BARCKENX", "bank_code": "03" },
+  { "doctype": "Bank", "name": "Co-operative Bank of Kenya", "bank_name": "Co-operative Bank of Kenya", "swift_number": "KCOOKENA", "bank_code": "11" },
+  { "doctype": "Bank", "name": "National Bank of Kenya", "bank_name": "National Bank of Kenya", "swift_number": "", "bank_code": "12" },
+  { "doctype": "Bank", "name": "Stanbic Bank Kenya", "bank_name": "Stanbic Bank Kenya", "swift_number": "SBICKENX", "bank_code": "31" },
+  { "doctype": "Bank", "name": "NCBA Bank Kenya", "bank_name": "NCBA Bank Kenya", "swift_number": "CBAFKENX", "bank_code": "07" },
+  { "doctype": "Bank", "name": "I&M Bank", "bank_name": "I&M Bank", "swift_number": "", "bank_code": "57" },
+  { "doctype": "Bank", "name": "Diamond Trust Bank Kenya", "bank_name": "Diamond Trust Bank Kenya", "swift_number": "DTKEKENA", "bank_code": "63" },
+  { "doctype": "Bank", "name": "Equity Bank Kenya", "bank_name": "Equity Bank Kenya", "swift_number": "EQBLKENA", "bank_code": "68" },
+  { "doctype": "Bank", "name": "Family Bank", "bank_name": "Family Bank", "swift_number": "", "bank_code": "70" },
+  { "doctype": "Bank", "name": "Sidian Bank", "bank_name": "Sidian Bank", "swift_number": "", "bank_code": "" }
+]

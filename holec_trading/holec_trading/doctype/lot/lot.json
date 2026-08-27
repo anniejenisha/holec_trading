@@ -84,16 +84,19 @@
       "label": "County",
       "fieldtype": "Link",
       "options": "Origin County",
-      "reqd": 1,
-      "in_list_view": 1
+      "read_only": 1,
+      "fetch_from": "supplier.county",
+      "in_list_view": 1,
+      "description": "Supplier-level attribute, not entered per Lot."
     },
     {
       "fieldname": "area",
       "label": "Area",
       "fieldtype": "Link",
       "options": "Origin Area",
-      "reqd": 1,
-      "description": "Picklist that grows over time. New areas are added as records, never free text."
+      "read_only": 1,
+      "fetch_from": "supplier.area",
+      "description": "Supplier-level attribute, not entered per Lot."
     },
     {
       "fieldname": "col_break_3",
@@ -120,7 +123,28 @@
     {
       "fieldname": "sec_break_weight",
       "fieldtype": "Section Break",
-      "label": "Weight & Storage"
+      "label": "Weighbridge Capture"
+    },
+    {
+      "fieldname": "weighbridge_photo",
+      "label": "Weighbridge Ticket Photo",
+      "fieldtype": "Attach",
+      "description": "Uploading auto-fills gross weight, tare weight, vehicle registration, and ticket number below via OCR - all remain editable."
+    },
+    {
+      "fieldname": "weighbridge_ticket_number",
+      "label": "Weighbridge Ticket Number",
+      "fieldtype": "Data",
+      "unique": 1
+    },
+    {
+      "fieldname": "vehicle_registration",
+      "label": "Vehicle Registration",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "col_break_weight_1",
+      "fieldtype": "Column Break"
     },
     {
       "fieldname": "gross_weight_kg",
@@ -130,9 +154,27 @@
       "in_list_view": 1
     },
     {
+      "fieldname": "tare_weight_kg",
+      "label": "Tare Weight (kg)",
+      "fieldtype": "Float",
+      "reqd": 1
+    },
+    {
+      "fieldname": "net_weight_kg",
+      "label": "Net Weight (kg)",
+      "fieldtype": "Float",
+      "read_only": 1,
+      "description": "Gross minus tare, calculated."
+    },
+    {
+      "fieldname": "col_break_weight_2",
+      "fieldtype": "Column Break"
+    },
+    {
       "fieldname": "bag_count",
       "label": "Bag Count",
-      "fieldtype": "Int"
+      "fieldtype": "Int",
+      "description": "Defaults to FLOOR(net weight / 90kg) - editable; a variance of more than 1 bag from that estimate is flagged, not blocked."
     },
     {
       "fieldname": "payable_weight_kg",
@@ -189,17 +231,49 @@
       "fieldtype": "Column Break"
     },
     {
+      "fieldname": "aflatoxin_result_available",
+      "label": "Result Available Now",
+      "fieldtype": "Check",
+      "default": "1",
+      "description": "Untick if sent to an external lab - intake will stay open until the result is entered."
+    },
+    {
+      "fieldname": "aflatoxin_ppb",
+      "label": "Aflatoxin (ppb)",
+      "fieldtype": "Float",
+      "depends_on": "eval:doc.aflatoxin_result_available",
+      "mandatory_depends_on": "eval:doc.aflatoxin_result_available",
+      "description": "Limit is 10 ppb."
+    },
+    {
       "fieldname": "aflatoxin_tested",
       "label": "Aflatoxin Tested",
       "fieldtype": "Check",
-      "default": "0"
+      "default": "0",
+      "hidden": 1,
+      "description": "Kept for the Cost Ledger test-fee calc; set automatically once a result is entered."
     },
     {
       "fieldname": "aflatoxin_result",
       "label": "Aflatoxin Result",
       "fieldtype": "Select",
       "options": "\nPass\nFail",
-      "depends_on": "aflatoxin_tested"
+      "read_only": 1,
+      "description": "Set automatically from the ppb reading against the 10 ppb limit."
+    },
+    {
+      "fieldname": "aflatoxin_pending",
+      "label": "Awaiting Lab Result",
+      "fieldtype": "Check",
+      "read_only": 1,
+      "default": "0",
+      "description": "Set automatically when Result Available Now is unticked. The Lot stays at Ticket state until this is completed."
+    },
+    {
+      "fieldname": "override_reason",
+      "label": "Override Reason",
+      "fieldtype": "Small Text",
+      "description": "Required to proceed when moisture exceeds 20% or aflatoxin fails the limit."
     },
     {
       "fieldname": "foreign_matter_pct",

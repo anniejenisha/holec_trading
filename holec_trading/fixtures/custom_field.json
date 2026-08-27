@@ -1,0 +1,306 @@
+[
+ {
+  "doctype": "Custom Field",
+  "dt": "Bank",
+  "fieldname": "bank_code",
+  "label": "Bank Code",
+  "fieldtype": "Data",
+  "insert_after": "swift_number",
+  "description": "CBK-assigned bank code.",
+  "name": "Bank-bank_code"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_contacts_sb",
+  "label": "Contact Persons",
+  "fieldtype": "Section Break",
+  "insert_after": "supplier_name",
+  "name": "Supplier-holec_contacts_sb"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_contacts",
+  "label": "Contact Persons",
+  "fieldtype": "Table",
+  "options": "Supplier Contact Person",
+  "insert_after": "holec_contacts_sb",
+  "description": "At least 1, at most 3. Exactly one must be marked Primary Contact.",
+  "name": "Supplier-holec_contacts"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_basic_sb",
+  "label": "Additional Details",
+  "fieldtype": "Section Break",
+  "insert_after": "holec_contacts",
+  "name": "Supplier-holec_basic_sb"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "county",
+  "label": "County",
+  "fieldtype": "Link",
+  "options": "Origin County",
+  "insert_after": "holec_basic_sb",
+  "name": "Supplier-county"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "area",
+  "label": "Area",
+  "fieldtype": "Link",
+  "options": "Origin Area",
+  "insert_after": "county",
+  "description": "Filtered to the selected County.",
+  "name": "Supplier-area"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_cb1",
+  "fieldtype": "Column Break",
+  "insert_after": "area",
+  "name": "Supplier-holec_cb1"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "business_reg_national_id",
+  "label": "Business Reg / National ID Number",
+  "fieldtype": "Data",
+  "insert_after": "holec_cb1",
+  "name": "Supplier-business_reg_national_id"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "national_id_document",
+  "label": "National ID / Registration Document",
+  "fieldtype": "Attach",
+  "insert_after": "business_reg_national_id",
+  "name": "Supplier-national_id_document"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "physical_address",
+  "label": "Physical Address",
+  "fieldtype": "Small Text",
+  "insert_after": "national_id_document",
+  "name": "Supplier-physical_address"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_cb2",
+  "fieldtype": "Column Break",
+  "insert_after": "physical_address",
+  "name": "Supplier-holec_cb2"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "kra_pin_certificate",
+  "label": "KRA PIN Certificate",
+  "fieldtype": "Attach",
+  "insert_after": "holec_cb2",
+  "description": "Upload triggers OCR extraction of the KRA PIN below.",
+  "name": "Supplier-kra_pin_certificate"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "kra_pin",
+  "label": "KRA PIN",
+  "fieldtype": "Data",
+  "insert_after": "kra_pin_certificate",
+  "reqd": 1,
+  "description": "Auto-filled from the certificate above; click Edit to override.",
+  "name": "Supplier-kra_pin"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_compliance_sb",
+  "label": "Compliance",
+  "fieldtype": "Section Break",
+  "insert_after": "kra_pin",
+  "name": "Supplier-holec_compliance_sb"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "vat_status",
+  "label": "VAT Status",
+  "fieldtype": "Select",
+  "options": "\nRegistered\nNot Registered",
+  "insert_after": "holec_compliance_sb",
+  "name": "Supplier-vat_status"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "etims_device_available",
+  "label": "eTIMS Device Available?",
+  "fieldtype": "Check",
+  "insert_after": "vat_status",
+  "name": "Supplier-etims_device_available"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_cb3",
+  "fieldtype": "Column Break",
+  "insert_after": "etims_device_available",
+  "name": "Supplier-holec_cb3"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "aflatoxin_licence_on_file",
+  "label": "Aflatoxin / Food-Safety Licence On File",
+  "fieldtype": "Check",
+  "insert_after": "holec_cb3",
+  "depends_on": "eval:[\"Farmer\",\"Aggregator\"].includes(doc.supplier_group)",
+  "name": "Supplier-aflatoxin_licence_on_file"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "aflatoxin_licence_upload",
+  "label": "Upload Aflatoxin / Food-Safety Licence",
+  "fieldtype": "Attach",
+  "insert_after": "aflatoxin_licence_on_file",
+  "depends_on": "eval:doc.aflatoxin_licence_on_file && [\"Farmer\",\"Aggregator\"].includes(doc.supplier_group)",
+  "mandatory_depends_on": "eval:doc.aflatoxin_licence_on_file && [\"Farmer\",\"Aggregator\"].includes(doc.supplier_group)",
+  "name": "Supplier-aflatoxin_licence_upload"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_banking_sb",
+  "label": "Banking",
+  "fieldtype": "Section Break",
+  "insert_after": "aflatoxin_licence_upload",
+  "name": "Supplier-holec_banking_sb"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "bank",
+  "label": "Bank",
+  "fieldtype": "Link",
+  "options": "Bank",
+  "reqd": 1,
+  "insert_after": "holec_banking_sb",
+  "name": "Supplier-bank"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "bank_code",
+  "label": "Bank Code",
+  "fieldtype": "Data",
+  "read_only": 1,
+  "fetch_from": "bank.bank_code",
+  "insert_after": "bank",
+  "name": "Supplier-bank_code"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "bank_branch",
+  "label": "Branch",
+  "fieldtype": "Link",
+  "options": "Bank Branch",
+  "reqd": 1,
+  "insert_after": "bank_code",
+  "description": "Filtered to the selected Bank.",
+  "name": "Supplier-bank_branch"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "branch_code",
+  "label": "Branch Code",
+  "fieldtype": "Data",
+  "read_only": 1,
+  "fetch_from": "bank_branch.branch_code",
+  "insert_after": "bank_branch",
+  "name": "Supplier-branch_code"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "holec_cb4",
+  "fieldtype": "Column Break",
+  "insert_after": "branch_code",
+  "name": "Supplier-holec_cb4"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "swift_code",
+  "label": "SWIFT Code",
+  "fieldtype": "Data",
+  "insert_after": "holec_cb4",
+  "description": "Defaults from the branch/bank; editable if this account uses a different SWIFT code.",
+  "name": "Supplier-swift_code"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "account_number",
+  "label": "Account Number",
+  "fieldtype": "Data",
+  "reqd": 1,
+  "insert_after": "swift_code",
+  "name": "Supplier-account_number"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "account_name",
+  "label": "Account Name",
+  "fieldtype": "Data",
+  "reqd": 1,
+  "insert_after": "account_number",
+  "description": "Should closely match the Supplier name.",
+  "name": "Supplier-account_name"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "bank_letter",
+  "label": "Bank Letter / Statement",
+  "fieldtype": "Attach",
+  "reqd": 1,
+  "insert_after": "account_name",
+  "name": "Supplier-bank_letter"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Supplier",
+  "fieldname": "first_payment_callback_confirmed",
+  "label": "First-Payment Call-Back Confirmed",
+  "fieldtype": "Check",
+  "insert_after": "bank_letter",
+  "name": "Supplier-first_payment_callback_confirmed"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Buy Ticket",
+  "fieldname": "created_via_supplier_portal",
+  "label": "Created via Supplier Portal",
+  "fieldtype": "Check",
+  "read_only": 1,
+  "insert_after": "status",
+  "hidden": 1,
+  "name": "Buy Ticket-created_via_supplier_portal"
+ }
+]

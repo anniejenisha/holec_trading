@@ -1,0 +1,47 @@
+{
+  "doctype": "DocType",
+  "name": "Bank Branch",
+  "module": "Holec Trading",
+  "custom": 0,
+  "istable": 0,
+  "issingle": 0,
+  "autoname": "hash",
+  "sort_field": "modified",
+  "sort_order": "ASC",
+  "fields": [
+    {
+      "fieldname": "bank",
+      "label": "Bank",
+      "fieldtype": "Link",
+      "options": "Bank",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "branch_name",
+      "label": "Branch Name",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "branch_code",
+      "label": "Branch Code",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "description": "CBK bank sort-code branch suffix, where known."
+    },
+    {
+      "fieldname": "swift_code",
+      "label": "SWIFT Code",
+      "fieldtype": "Data",
+      "description": "Defaults to the bank's SWIFT code; override here only if this branch has its own."
+    }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
+    { "role": "Accounts Manager", "read": 1, "write": 1, "create": 1 },
+    { "role": "Trading Officer", "read": 1 }
+  ]
+}

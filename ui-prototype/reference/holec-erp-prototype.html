@@ -1,0 +1,1952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holec — ERP prototype</title>
+<style>
+:root{
+  --navy:#1F3A5F; --navy-dark:#152944; --navy-light:#EAF0F8;
+  --bg:#F4F5F7; --panel:#FFFFFF; --border:#E2E5EA; --border-strong:#CBD1DA;
+  --text:#1B2430; --text-secondary:#5B6472; --text-muted:#8A93A2;
+  --green:#1E7B45; --green-bg:#E7F5EC;
+  --amber:#9A6400; --amber-bg:#FCF1DC;
+  --red:#B23A3A; --red-bg:#FBEAEA;
+  --blue:#1A5FA0; --blue-bg:#E8F1FA;
+  --radius:8px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "SF Mono", Consolas, monospace;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;height:100%;background:var(--bg);font-family:var(--font);color:var(--text);font-size:14px;}
+body{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+button{font-family:inherit;}
+
+/* ---------- Top bar ---------- */
+.topbar{
+  height:52px;flex:0 0 auto;background:var(--navy);color:#fff;
+  display:flex;align-items:center;padding:0 18px;gap:14px;
+}
+.topbar .brand{font-weight:600;font-size:14.5px;letter-spacing:.2px;white-space:nowrap;}
+.topbar .sub{font-size:11.5px;color:#AFC0D6;white-space:nowrap;}
+.topbar .spacer{flex:1;}
+.topbar .user-chip{
+  display:flex;align-items:center;gap:8px;font-size:12.5px;color:#DCE4EE;
+  padding:5px 10px;border:1px solid rgba(255,255,255,.18);border-radius:20px;white-space:nowrap;
+}
+.topbar .avatar{width:20px;height:20px;border-radius:50%;background:#3E5C82;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;}
+
+/* ---------- Body layout ---------- */
+.body{flex:1;display:flex;min-height:0;}
+
+/* ---------- Sidebar ---------- */
+.sidebar{
+  width:236px;flex:0 0 auto;background:var(--panel);border-right:1px solid var(--border);
+  overflow-y:auto;padding:10px 0;
+}
+.sidebar-group-label{
+  font-size:10.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;
+  letter-spacing:.06em;padding:14px 16px 6px;
+}
+.sidebar-group-label:first-child{padding-top:4px;}
+.mod-item{
+  display:flex;align-items:center;gap:9px;padding:8px 16px;cursor:pointer;
+  font-size:13px;color:var(--text);border-left:3px solid transparent;
+}
+.mod-item:hover{background:#F1F3F6;}
+.mod-item.active{background:var(--navy-light);border-left-color:var(--navy);font-weight:600;}
+.mod-item .mod-dot{width:5px;height:5px;border-radius:50%;background:var(--border-strong);flex:0 0 auto;}
+.mod-item.active .mod-dot{background:var(--navy);}
+
+/* ---------- Main ---------- */
+.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;}
+
+/* ---------- Timeline strip ---------- */
+.timeline{
+  flex:0 0 auto;background:var(--panel);border-bottom:1px solid var(--border);
+  padding:11px 20px;display:flex;align-items:center;gap:0;overflow-x:auto;
+}
+.tl-stage{
+  display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:18px;
+  font-size:12px;color:var(--text-secondary);white-space:nowrap;cursor:pointer;
+}
+.tl-stage:hover{background:#F1F3F6;}
+.tl-stage.active{background:var(--navy);color:#fff;}
+.tl-num{
+  width:16px;height:16px;border-radius:50%;background:var(--border-strong);color:#fff;
+  font-size:9.5px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+}
+.tl-stage.active .tl-num{background:rgba(255,255,255,.3);}
+.tl-arrow{color:var(--border-strong);padding:0 3px;font-size:13px;flex:0 0 auto;}
+
+/* ---------- Content area ---------- */
+.content{flex:1;overflow-y:auto;padding:22px 28px 60px;}
+.content-inner{max-width:980px;}
+
+.crumb{font-size:11.5px;color:var(--text-muted);margin-bottom:5px;}
+.page-title{font-size:20px;font-weight:600;margin:0 0 4px;color:var(--navy-dark);}
+.page-title .count-badge{
+  font-size:11px;font-weight:600;background:var(--navy-light);color:var(--navy);
+  padding:2px 9px;border-radius:12px;margin-left:8px;vertical-align:middle;
+}
+.page-sub{font-size:13px;color:var(--text-secondary);margin:0 0 18px;max-width:680px;line-height:1.5;}
+
+.submod-nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;}
+.submod-pill{
+  padding:6px 13px;border-radius:7px;border:1px solid var(--border);background:var(--panel);
+  font-size:12.5px;cursor:pointer;color:var(--text-secondary);
+}
+.submod-pill:hover{border-color:var(--border-strong);}
+.submod-pill.active{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600;}
+
+/* ---------- Cards / forms ---------- */
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 20px;margin-bottom:16px;
+}
+.card h3{font-size:13.5px;font-weight:600;margin:0 0 3px;color:var(--text);}
+.card .card-desc{font-size:12px;color:var(--text-secondary);margin:0 0 16px;}
+
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;}
+.field-grid.single{grid-template-columns:1fr;}
+.field-grid.three{grid-template-columns:1fr 1fr 1fr;}
+.field{display:flex;flex-direction:column;gap:5px;}
+.field.span2{grid-column:span 2;}
+.field label{font-size:12px;font-weight:500;color:var(--text-secondary);display:flex;align-items:center;gap:6px;}
+.field .req{color:var(--red);}
+.field input[type=text],.field input[type=number],.field input[type=date],
+.field select,.field textarea{
+  border:1px solid var(--border-strong);border-radius:6px;padding:8px 10px;font-size:13px;
+  font-family:inherit;background:#fff;color:var(--text);width:100%;
+}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-light);}
+.field input:disabled,.field select:disabled{background:#F4F5F7;color:var(--text-muted);}
+.field textarea{resize:vertical;min-height:56px;}
+.field .helptext{font-size:11px;color:var(--text-muted);}
+.field .calc-value{
+  font-family:var(--mono);font-size:14px;font-weight:600;padding:8px 10px;
+  background:#F7F8FA;border:1px solid var(--border);border-radius:6px;color:var(--navy-dark);
+}
+
+.tier-tag{
+  display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:10px;
+  font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;
+}
+.tier-tag.N{background:var(--green-bg);color:var(--green);}
+.tier-tag.C{background:var(--amber-bg);color:var(--amber);}
+.tier-tag.B{background:var(--red-bg);color:var(--red);}
+
+/* ---------- Buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;
+  font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border-strong);
+  background:#fff;color:var(--text);
+}
+.btn:hover{background:#F4F5F7;}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff;}
+.btn.primary:hover{background:var(--navy-dark);}
+.btn.ghost{border-color:transparent;background:transparent;}
+.btn.ghost:hover{background:#F4F5F7;}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+.btn.sm{padding:5px 11px;font-size:12px;}
+.btn-row{display:flex;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
+
+/* ---------- Status badges ---------- */
+.status-badge{
+  display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;
+  font-size:11.5px;font-weight:600;white-space:nowrap;
+}
+.status-badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+.status-badge.draft{background:#EFF0F2;color:#6B7280;}
+.status-badge.verified{background:var(--blue-bg);color:var(--blue);}
+.status-badge.approved{background:var(--green-bg);color:var(--green);}
+.status-badge.ticket{background:#EFF0F2;color:#6B7280;}
+.status-badge.intake{background:var(--blue-bg);color:var(--blue);}
+.status-badge.lot{background:#EFEAFB;color:#6B4FBB;}
+.status-badge.position{background:var(--amber-bg);color:var(--amber);}
+.status-badge.invoiced{background:#FCE9F0;color:#B23A6B;}
+.status-badge.settled{background:var(--green-bg);color:var(--green);}
+.status-badge.blocked{background:var(--red-bg);color:var(--red);}
+
+/* ---------- Tables / lists ---------- */
+.data-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+.data-table thead th{
+  text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--text-muted);font-weight:600;padding:0 10px 8px 0;border-bottom:1px solid var(--border);
+  white-space:nowrap;
+}
+.data-table tbody td{padding:11px 10px 11px 0;border-bottom:1px solid #F0F1F3;vertical-align:middle;}
+.data-table tbody tr:last-child td{border-bottom:none;}
+.data-table tbody tr.clickable{cursor:pointer;}
+.data-table tbody tr.clickable:hover{background:#FAFBFC;}
+.data-table td.num{font-family:var(--mono);text-align:right;}
+.data-table td.mono{font-family:var(--mono);font-size:12px;}
+
+.list-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.list-toolbar input[type=text]{
+  border:1px solid var(--border-strong);border-radius:6px;padding:7px 10px;font-size:12.5px;
+  width:220px;font-family:inherit;
+}
+.list-toolbar .spacer{flex:1;}
+.list-count{font-size:12px;color:var(--text-muted);}
+
+.empty-state{color:var(--text-muted);font-size:13px;padding:36px 20px;text-align:center;}
+.empty-state .big{font-size:14px;color:var(--text-secondary);margin-bottom:6px;font-weight:500;}
+
+/* ---------- Ledger / breakdown rows ---------- */
+.calc-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #F0F1F3;font-size:13px;}
+.calc-row:last-child{border-bottom:none;}
+.calc-row.total{font-weight:700;padding-top:12px;border-top:2px solid var(--border-strong);border-bottom:none;font-size:14px;}
+.calc-row .label{color:var(--text-secondary);}
+.calc-row.total .label{color:var(--text);}
+.calc-row .val{font-family:var(--mono);font-weight:600;}
+.calc-row .val.neg{color:var(--red);}
+.calc-row .sub{font-size:11px;color:var(--text-muted);margin-top:2px;}
+
+/* ---------- Toast ---------- */
+.toast{
+  position:absolute;bottom:20px;right:20px;background:var(--navy-dark);color:#fff;
+  padding:12px 18px;border-radius:8px;font-size:13px;font-weight:500;
+  box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;align-items:center;gap:10px;
+  opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:50;
+}
+.toast.show{opacity:1;transform:translateY(0);}
+.toast .check{width:16px;height:16px;border-radius:50%;background:#3BAE6A;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;}
+
+/* ---------- Detail panel (record view) ---------- */
+.detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;}
+.detail-header .htitle{font-size:18px;font-weight:600;color:var(--navy-dark);margin:0 0 4px;}
+.detail-header .hmeta{font-size:12px;color:var(--text-muted);}
+
+.progress-track{display:flex;align-items:center;margin:4px 0 20px;}
+.progress-step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;position:relative;}
+.progress-step .pdot{width:22px;height:22px;border-radius:50%;background:var(--border);color:var(--text-muted);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:1;}
+.progress-step.done .pdot{background:var(--green);color:#fff;}
+.progress-step.current .pdot{background:var(--navy);color:#fff;}
+.progress-step .plabel{font-size:10.5px;color:var(--text-muted);white-space:nowrap;}
+.progress-step.done .plabel,.progress-step.current .plabel{color:var(--text);font-weight:600;}
+.progress-line{position:absolute;top:11px;left:-50%;width:100%;height:2px;background:var(--border);z-index:0;}
+.progress-step:first-child .progress-line{display:none;}
+.progress-step.done .progress-line{background:var(--green);}
+
+.kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;font-size:12.5px;}
+.kv-grid .kv{display:flex;flex-direction:column;gap:2px;}
+.kv-grid .kv .k{color:var(--text-muted);font-size:11px;}
+.kv-grid .kv .v{color:var(--text);font-weight:500;}
+
+.section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:20px 0 10px;}
+.section-label:first-child{margin-top:0;}
+
+.banner{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:7px;font-size:12.5px;margin-bottom:16px;
+}
+.banner.warn{background:var(--amber-bg);color:var(--amber);}
+.banner.info{background:var(--blue-bg);color:var(--blue);}
+.banner.block{background:var(--red-bg);color:var(--red);}
+.banner.ok{background:var(--green-bg);color:var(--green);}
+
+::-webkit-scrollbar{width:9px;height:9px;}
+::-webkit-scrollbar-thumb{background:#D3D7DD;border-radius:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+
+@media (max-width: 900px){
+  .sidebar{width:190px;}
+  .content{padding:16px;}
+  .field-grid{grid-template-columns:1fr;}
+  .field-grid.three{grid-template-columns:1fr;}
+  .field.span2{grid-column:span 1;}
+}
+
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Holec ERP</div>
+  <div class="sub">Maize trading &middot; prototype</div>
+  <div class="spacer"></div>
+  <div class="user-chip"><span class="avatar">YO</span>You &middot; Purchase User</div>
+</div>
+
+<div class="body">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main">
+    <div class="timeline" id="timeline"></div>
+    <div class="content"><div class="content-inner" id="content"></div></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// HOLEC ERP PROTOTYPE — CENTRAL STORE
+// In-memory reactive store. No backend; persists for the session.
+// ============================================================
+
+const uid = (prefix) => prefix + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+const fmtKES = (n) => 'KES ' + Math.round(n).toLocaleString('en-KE');
+const fmtKg = (n) => Math.round(n).toLocaleString('en-KE') + ' kg';
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const STORE = {
+  suppliers: [],
+  customers: [],
+  lots: [],
+  payments: [],
+  events: [],   // trade event log — append only
+  seq: { ticket: 1004, lot: 2031, invoice: 5501, payment: 7201 }
+};
+
+const listeners = [];
+function subscribe(fn){ listeners.push(fn); }
+function notify(){ listeners.forEach(fn => fn()); }
+
+function logEvent(lotId, action, detail){
+  STORE.events.push({
+    id: uid('EVT'), lotId, action, detail,
+    who: 'You (Purchase User)', at: new Date().toLocaleString('en-KE', { hour12:false })
+  });
+}
+
+// ---------------- Seed data ----------------
+function seed(){
+  STORE.suppliers = [
+    { id:'SUP-0001', name:'Wanjiru Grain Traders', group:'Aggregator', kraPin:'A011223344B', idNo:'22334455', county:'Nakuru',
+      address:'Njoro Rd, Nakuru', etims:'Registered', vat:'Registered', aflatoxinLicence:true,
+      bank:'Equity Bank — 0110xxxxxx', bankLetter:true, callbackDone:true, rail:'PesaLink',
+      transferBorneBy:'Supplier', status:'Approved', createdBy:'Grace (Ops)', approvedBy:'Finance' },
+    { id:'SUP-0002', name:'Kiptoo Farmers Cooperative', group:'Farmer', kraPin:'A022334455C', idNo:'11223366', county:'Uasin Gishu',
+      address:'Eldoret-Ziwa Rd', etims:'Buyer-Generated', vat:'Not registered', aflatoxinLicence:false,
+      bank:'KCB — 0220xxxxxx', bankLetter:true, callbackDone:true, rail:'Mpesa',
+      transferBorneBy:'Us', status:'Approved', createdBy:'Grace (Ops)', approvedBy:'Finance' },
+    { id:'SUP-0003', name:'Rift Valley Logistics (Transport)', group:'Transporter', kraPin:'A033445566D', idNo:'33445566', county:'Nakuru',
+      address:'Industrial Area, Nakuru', etims:'Registered', vat:'Registered', aflatoxinLicence:false,
+      bank:'I&M Bank — 0330xxxxxx', bankLetter:true, callbackDone:true, rail:'Bank Transfer',
+      transferBorneBy:'Us', status:'Approved', createdBy:'Grace (Ops)', approvedBy:'Finance' },
+    { id:'SUP-0004', name:'Cherono Bulk Suppliers', group:'Trader', kraPin:'A044556677E', idNo:'44556677', county:'Trans Nzoia',
+      address:'Kitale Town', etims:'Registered', vat:'Registered', aflatoxinLicence:true,
+      bank:'', bankLetter:false, callbackDone:false, rail:'PesaLink',
+      transferBorneBy:'Supplier', status:'Verified', createdBy:'Grace (Ops)', approvedBy:'' },
+    { id:'SUP-0005', name:'Chebet & Sons', group:'Farmer', kraPin:'', idNo:'',
+      county:'Nakuru', address:'', etims:'', vat:'', aflatoxinLicence:false,
+      bank:'', bankLetter:false, callbackDone:false, rail:'',
+      transferBorneBy:'', status:'Draft', createdBy:'Grace (Ops)', approvedBy:'' }
+  ];
+
+  STORE.customers = [
+    { id:'CUS-0001', name:'Pembe Flour Mills Ltd', group:'Miller', kraPin:'P051667788F',
+      address:'Athi River, Machakos', creditLimit:8000000, creditTerms:'Net 14', exposureLimit:12000000,
+      guarantee:'Bank guarantee — KES 5,000,000', moistureRule:'13.5% max', fmRule:'2.0% max',
+      offloadingBorneBy:'Customer', status:'Approved', createdBy:'Sales User', approvedBy:'Finance' },
+    { id:'CUS-0002', name:'Unga Group Kenya', group:'Miller', kraPin:'P062778899G',
+      address:'Industrial Area, Nairobi', creditLimit:5000000, creditTerms:'Net 7', exposureLimit:6000000,
+      guarantee:'Trade reference on file', moistureRule:'13.0% max', fmRule:'1.5% max',
+      offloadingBorneBy:'Us', status:'Approved', createdBy:'Sales User', approvedBy:'Finance' },
+    { id:'CUS-0003', name:'Mombasa Grain Exports', group:'Exporter', kraPin:'',
+      address:'Mombasa', creditLimit:0, creditTerms:'', exposureLimit:0,
+      guarantee:'', moistureRule:'', fmRule:'', offloadingBorneBy:'',
+      status:'Draft', createdBy:'Sales User', approvedBy:'' }
+  ];
+
+  // A handful of lots spanning every stage, so every screen has something to show
+  const L = [];
+
+  L.push(makeLot({
+    ticketNo:'TCK-1001', supplierId:'SUP-0001', state:'SETTLED',
+    grossKg:9200, tareKg:200, bags:100, moisturePct:14.8, fmPct:1.1, aflatoxinPpb:3, aflatoxinTested:true,
+    county:'Nakuru', area:'Njoro', transporterId:'SUP-0003', vehicleReg:'KDA 221C',
+    haulage:18000, cess:4500, offloading:3000, customerId:'CUS-0001', sellRatePerKg:52, daysAgo:9
+  }));
+  L.push(makeLot({
+    ticketNo:'TCK-1002', supplierId:'SUP-0002', state:'INVOICED',
+    grossKg:5400, tareKg:120, bags:60, moisturePct:13.2, fmPct:0.8, aflatoxinPpb:2, aflatoxinTested:true,
+    county:'Uasin Gishu', area:'Ziwa', transporterId:'SUP-0003', vehicleReg:'KDB 552F',
+    haulage:11000, cess:2700, offloading:1800, customerId:'CUS-0002', sellRatePerKg:51, daysAgo:5
+  }));
+  L.push(makeLot({
+    ticketNo:'TCK-1003', supplierId:'SUP-0001', state:'POSITION',
+    grossKg:12000, tareKg:240, bags:130, moisturePct:21.4, fmPct:1.6, aflatoxinPpb:4, aflatoxinTested:true,
+    county:'Nakuru', area:'Njoro', transporterId:'SUP-0003', vehicleReg:'KDA 221C',
+    haulage:24000, cess:6000, offloading:0, daysAgo:3
+  }));
+  L.push(makeLot({
+    ticketNo:'TCK-1004', supplierId:'SUP-0002', state:'LOT',
+    grossKg:6800, tareKg:150, bags:75, moisturePct:13.9, fmPct:0.9, aflatoxinPpb:1, aflatoxinTested:true,
+    county:'Uasin Gishu', area:'Ziwa', transporterId:null, vehicleReg:'', daysAgo:1
+  }));
+  L.push(makeLot({
+    ticketNo:'TCK-1005', supplierId:'SUP-0001', state:'INTAKE',
+    grossKg:8100, tareKg:190, bags:90, moisturePct:16.0, fmPct:1.3, aflatoxinPpb:2, aflatoxinTested:true,
+    county:'Nakuru', area:'Njoro', transporterId:null, vehicleReg:'', daysAgo:0
+  }));
+  L.push({
+    id: uid('LOT'), ticketNo:'TCK-1006', supplierId:'SUP-0004', state:'TICKET',
+    itemQty: 7000, item:'Maize', createdAt: new Date().toLocaleString('en-KE',{hour12:false})
+  });
+
+  STORE.lots = L;
+  L.forEach(l => {
+    if(l.state !== 'TICKET') logEvent(l.id, 'Lot lifecycle seeded to ' + l.state, 'Initial demo data');
+    if(l.state === 'INVOICED' || l.state === 'SETTLED'){
+      l.invoiceNo = 'INV-' + (STORE.seq.invoice++);
+      l.etimsControlNo = 'KRA-CU-' + Math.floor(100000 + Math.random()*899999);
+    }
+  });
+
+  STORE.payments = [
+    { id:'PAY-7101', partyType:'Supplier', partyId:'SUP-0001', lotId: L[0].id, amount: computePayable(L[0]).netPayable, rail:'PesaLink', status:'Completed', daysAgo:8 },
+    { id:'PAY-7102', partyType:'Supplier', partyId:'SUP-0002', lotId: L[1].id, amount: computePayable(L[1]).netPayable, rail:'Mpesa', status:'Completed', daysAgo:4 }
+  ];
+}
+
+// ---------------- Derived calculations ----------------
+
+function computeIntake(lot){
+  const netKg = lot.grossKg - lot.tareKg;
+  return { netKg };
+}
+
+// Deduction engine — mirrors Module 8 (payable engine)
+function computePayable(lot){
+  const netKg = lot.grossKg - lot.tareKg;
+  let moistureStd = 13.5;
+  let moisturePenaltyPct = 0;
+  let band = '≤14%';
+  if(lot.moisturePct > 20){ band = '>20% (wet buy)'; moisturePenaltyPct = (lot.moisturePct - moistureStd) * 1.6; }
+  else if(lot.moisturePct > 14){ band = '14–20%'; moisturePenaltyPct = (lot.moisturePct - moistureStd) * 1.2; }
+  else { moisturePenaltyPct = Math.max(0, (lot.moisturePct - moistureStd) * 1.0); }
+  moisturePenaltyPct = Math.max(0, moisturePenaltyPct);
+
+  const moistureDeductionKg = netKg * (moisturePenaltyPct / 100);
+  const fmDeductionKg = netKg * (Math.max(0, lot.fmPct - 0.5) / 100) * 1.5;
+  const acceptedNetKg = Math.max(0, netKg - moistureDeductionKg - fmDeductionKg);
+
+  const refRatePerKg = 48; // reference rate KES/kg
+  const grossValue = acceptedNetKg * refRatePerKg;
+  const baggingRatePerBag = 25;
+  const baggingDeduction = lot.bags * baggingRatePerBag;
+  const aflatoxinTestFee = lot.aflatoxinTested ? 300 : 0;
+  const aflatoxinPass = lot.aflatoxinPpb <= 10;
+
+  const netPayable = Math.max(0, grossValue - baggingDeduction - aflatoxinTestFee);
+
+  return {
+    netKg, band, moisturePenaltyPct, moistureDeductionKg, fmDeductionKg, acceptedNetKg,
+    refRatePerKg, grossValue, baggingDeduction, aflatoxinTestFee, aflatoxinPass, netPayable
+  };
+}
+
+function computeTransport(lot){
+  const haulage = lot.haulage || 0;
+  const cess = lot.cess || 0;
+  const offloading = lot.offloading || 0;
+  const total = haulage + cess + offloading;
+  const tolerance = 80;
+  const expectedKg = computePayable(lot).acceptedNetKg;
+  const deliveredKg = expectedKg; // demo: no shrinkage variance modeled beyond seed
+  return { haulage, cess, offloading, total, tolerance, expectedKg, deliveredKg, lossKg: 0, recoveredKES: 0 };
+}
+
+function computeLandedCost(lot){
+  const payable = computePayable(lot);
+  const transport = computeTransport(lot);
+  const totalCost = payable.netPayable + transport.total;
+  const kg = payable.acceptedNetKg || 1;
+  return { totalCost, perKg: totalCost / kg, kg };
+}
+
+function computeSale(lot){
+  if(!lot.customerId || !lot.sellRatePerKg) return null;
+  const kg = computePayable(lot).acceptedNetKg;
+  const revenue = kg * lot.sellRatePerKg;
+  const landed = computeLandedCost(lot);
+  const cogs = landed.totalCost;
+  const margin = revenue - cogs;
+  const marginPerTonne = (margin / kg) * 1000;
+  return { kg, revenue, cogs, margin, marginPerTonne };
+}
+
+function makeLot(opts){
+  const id = uid('LOT');
+  const lot = {
+    id, ticketNo: opts.ticketNo, item:'Maize', state: opts.state,
+    supplierId: opts.supplierId, customerId: opts.customerId || null,
+    grossKg: opts.grossKg, tareKg: opts.tareKg, bags: opts.bags,
+    moisturePct: opts.moisturePct, fmPct: opts.fmPct,
+    aflatoxinPpb: opts.aflatoxinPpb, aflatoxinTested: opts.aflatoxinTested,
+    county: opts.county, area: opts.area,
+    transporterId: opts.transporterId, vehicleReg: opts.vehicleReg,
+    haulage: opts.haulage || 0, cess: opts.cess || 0, offloading: opts.offloading || 0,
+    sellRatePerKg: opts.sellRatePerKg || null,
+    createdAt: new Date(Date.now() - (opts.daysAgo||0)*86400000).toLocaleString('en-KE',{hour12:false}),
+    reasonCodes: []
+  };
+  return lot;
+}
+
+function findLot(id){ return STORE.lots.find(l => l.id === id); }
+function findSupplier(id){ return STORE.suppliers.find(s => s.id === id); }
+function findCustomer(id){ return STORE.customers.find(c => c.id === id); }
+
+const STAGE_ORDER = ['TICKET','INTAKE','LOT','POSITION','INVOICED','SETTLED'];
+function stageIndex(state){ return STAGE_ORDER.indexOf(state); }
+
+seed();
+
+
+// ============================================================
+// UI HELPERS — shared rendering functions for all modules
+// ============================================================
+
+function el(html){
+  const t = document.createElement('template');
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild;
+}
+
+function tierTag(tier){
+  const label = tier === 'N' ? 'Native' : tier === 'C' ? 'Configure' : 'Build';
+  return `<span class="tier-tag ${tier}">${label}</span>`;
+}
+
+function statusBadge(status){
+  const cls = status.toLowerCase().replace(/\s+/g,'-');
+  return `<span class="status-badge ${cls}"><span class="dot"></span>${status}</span>`;
+}
+
+function showToast(msg){
+  let t = document.getElementById('global-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'global-toast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.innerHTML = `<span class="check">✓</span>${msg}`;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+// Text/number/select/textarea field renderer with tier tag
+function field(opts){
+  const {
+    label, id, type='text', value='', tier=null, required=false,
+    options=null, placeholder='', disabled=false, help=null, span=false, rows=null
+  } = opts;
+  const reqMark = required ? '<span class="req">*</span>' : '';
+  const tierHtml = tier ? tierTag(tier) : '';
+  let input;
+  if(type === 'select'){
+    const opts_html = (options||[]).map(o => {
+      const val = typeof o === 'object' ? o.value : o;
+      const lbl = typeof o === 'object' ? o.label : o;
+      const sel = val === value ? 'selected' : '';
+      return `<option value="${val}" ${sel}>${lbl}</option>`;
+    }).join('');
+    input = `<select id="${id}" ${disabled?'disabled':''}><option value="">Select…</option>${opts_html}</select>`;
+  } else if(type === 'textarea'){
+    input = `<textarea id="${id}" rows="${rows||3}" placeholder="${placeholder}" ${disabled?'disabled':''}>${value}</textarea>`;
+  } else if(type === 'checkbox'){
+    return `
+      <div class="field" style="flex-direction:row;align-items:center;gap:8px;${span?'grid-column:span 2;':''}">
+        <input type="checkbox" id="${id}" ${value?'checked':''} ${disabled?'disabled':''} style="width:16px;height:16px;">
+        <label for="${id}" style="margin:0;">${label} ${tierHtml}</label>
+      </div>`;
+  } else if(type === 'calc'){
+    return `
+      <div class="field ${span?'span2':''}">
+        <label>${label} ${tierHtml}</label>
+        <div class="calc-value">${value}</div>
+        ${help ? `<span class="helptext">${help}</span>` : ''}
+      </div>`;
+  } else {
+    input = `<input type="${type}" id="${id}" value="${value}" placeholder="${placeholder}" ${disabled?'disabled':''}>`;
+  }
+  return `
+    <div class="field ${span?'span2':''}">
+      <label for="${id}">${label} ${reqMark} ${tierHtml}</label>
+      ${input}
+      ${help ? `<span class="helptext">${help}</span>` : ''}
+    </div>`;
+}
+
+function card(title, desc, innerHtml){
+  return `
+    <div class="card">
+      <h3>${title}</h3>
+      ${desc ? `<p class="card-desc">${desc}</p>` : ''}
+      ${innerHtml}
+    </div>`;
+}
+
+function progressTrack(stages, currentState){
+  const idx = stageIndex(currentState);
+  return `
+    <div class="progress-track">
+      ${stages.map((s, i) => `
+        <div class="progress-step ${i < idx ? 'done' : i === idx ? 'current' : ''}">
+          <div class="progress-line"></div>
+          <div class="pdot">${i < idx ? '✓' : i+1}</div>
+          <div class="plabel">${s}</div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+function calcRow(label, val, opts={}){
+  const negClass = opts.neg ? 'neg' : '';
+  return `
+    <div class="calc-row ${opts.total?'total':''}">
+      <div>
+        <div class="label">${label}</div>
+        ${opts.sub ? `<div class="sub">${opts.sub}</div>` : ''}
+      </div>
+      <div class="val ${negClass}">${val}</div>
+    </div>`;
+}
+
+function banner(type, text){
+  const icons = { warn:'⚠', info:'ℹ', block:'✕', ok:'✓' };
+  return `<div class="banner ${type}"><span>${icons[type]||''}</span><span>${text}</span></div>`;
+}
+
+
+// ============================================================
+// MODULE 2 — SUPPLIER
+// ============================================================
+
+function renderSuppliers(container, params){
+  if(params.id) return renderSupplierDetail(container, params.id);
+  renderSupplierList(container);
+}
+
+function renderSupplierList(container){
+  const rows = STORE.suppliers.map(s => `
+    <tr class="clickable" data-id="${s.id}">
+      <td class="mono">${s.id}</td>
+      <td><strong>${s.name}</strong></td>
+      <td>${s.group}</td>
+      <td>${s.county||'—'}</td>
+      <td class="mono">${s.kraPin||'—'}</td>
+      <td>${statusBadge(s.status)}</td>
+    </tr>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="crumb">Parties &rsaquo; Suppliers</div>
+    <h1 class="page-title">Suppliers<span class="count-badge">${STORE.suppliers.length}</span></h1>
+    <p class="page-sub">Farmers, aggregators, traders, and transporters. Nobody transacts until Approved.</p>
+    <div class="list-toolbar">
+      <input type="text" id="supplier-search" placeholder="Search by name or KRA PIN">
+      <span class="spacer"></span>
+      <button class="btn primary" id="new-supplier-btn">+ New supplier</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="data-table" style="padding:16px 20px 8px;" id="supplier-table-wrap">
+        <thead><tr><th style="padding-left:20px;">ID</th><th>Name</th><th>Group</th><th>County</th><th>KRA PIN</th><th>Status</th></tr></thead>
+        <tbody id="supplier-tbody">${rows}</tbody>
+      </table>
+    </div>
+  `;
+  container.querySelectorAll('#supplier-tbody tr').forEach(tr => {
+    tr.addEventListener('click', () => navigate('suppliers', { id: tr.dataset.id }));
+  });
+  document.getElementById('new-supplier-btn').addEventListener('click', () => navigate('suppliers', { id: 'new' }));
+
+  const searchInput = document.getElementById('supplier-search');
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.toLowerCase();
+    const filtered = STORE.suppliers.filter(s => s.name.toLowerCase().includes(q) || (s.kraPin||'').toLowerCase().includes(q));
+    document.getElementById('supplier-tbody').innerHTML = filtered.map(s => `
+      <tr class="clickable" data-id="${s.id}">
+        <td class="mono">${s.id}</td><td><strong>${s.name}</strong></td><td>${s.group}</td>
+        <td>${s.county||'—'}</td><td class="mono">${s.kraPin||'—'}</td><td>${statusBadge(s.status)}</td>
+      </tr>`).join('');
+    document.querySelectorAll('#supplier-tbody tr').forEach(tr => {
+      tr.addEventListener('click', () => navigate('suppliers', { id: tr.dataset.id }));
+    });
+  });
+}
+
+function renderSupplierDetail(container, id){
+  const isNew = id === 'new';
+  const s = isNew ? {
+    id: uid('SUP'), name:'', group:'', kraPin:'', idNo:'', county:'', address:'',
+    etims:'', vat:'', aflatoxinLicence:false, bank:'', bankLetter:false, callbackDone:false,
+    rail:'', transferBorneBy:'', status:'Draft', createdBy:'You (Purchase User)', approvedBy:''
+  } : findSupplier(id);
+
+  if(!s){ container.innerHTML = `<div class="empty-state">Supplier not found.</div>`; return; }
+
+  const canApprove = s.status === 'Verified' && s.createdBy !== 'You (Purchase User)';
+  const isDraft = s.status === 'Draft';
+
+  container.innerHTML = `
+    <div class="crumb"><a href="#" id="back-link" style="color:inherit;text-decoration:none;">Suppliers</a> &rsaquo; ${isNew ? 'New supplier' : s.name}</div>
+    <div class="detail-header">
+      <div>
+        <h1 class="htitle" style="font-size:20px;font-weight:600;margin:0 0 4px;color:var(--navy-dark);">${isNew ? 'New supplier' : s.name}</h1>
+        <span class="hmeta">${isNew ? 'Fill in details and submit for verification' : `${s.id} &middot; created by ${s.createdBy}`}</span>
+      </div>
+      ${!isNew ? statusBadge(s.status) : ''}
+    </div>
+
+    ${!isNew && s.status === 'Draft' ? banner('warn', 'This supplier is in Draft. They cannot transact until Verified and Approved.') : ''}
+    ${!isNew && s.status === 'Verified' ? banner('info', 'Awaiting Finance approval. The person who created this record cannot approve it themselves.') : ''}
+    ${!isNew && s.status === 'Approved' ? banner('ok', `Approved by ${s.approvedBy}. This supplier can now transact.`) : ''}
+
+    <div class="section-label">Basic details</div>
+    ${card('', '', `
+      <div class="field-grid">
+        ${field({label:'Supplier name', id:'f-name', value:s.name, tier:'N', required:true})}
+        ${field({label:'Supplier group', id:'f-group', type:'select', value:s.group, tier:'N', required:true,
+          options:['Farmer','Aggregator','Trader','Transporter']})}
+        ${field({label:'KRA PIN', id:'f-pin', value:s.kraPin, tier:'C', required:true, help:'Must be unique across all suppliers'})}
+        ${field({label:'Business reg / national ID', id:'f-idno', value:s.idNo, tier:'C'})}
+        ${field({label:'County', id:'f-county', type:'select', value:s.county, tier:'C',
+          options:['Nakuru','Uasin Gishu','Trans Nzoia','Kitale','Bungoma']})}
+        ${field({label:'Physical address', id:'f-address', value:s.address, tier:'N'})}
+      </div>
+    `)}
+
+    <div class="section-label">Compliance</div>
+    ${card('', '', `
+      <div class="field-grid">
+        ${field({label:'eTIMS registration status', id:'f-etims', type:'select', value:s.etims, tier:'C',
+          options:['Registered','Buyer-Generated','Blocked'], help:'Feeds the payment interlock'})}
+        ${field({label:'VAT status', id:'f-vat', type:'select', value:s.vat, tier:'C', options:['Registered','Not registered']})}
+        ${field({label:'Aflatoxin / food-safety licence on file', id:'f-afla', type:'checkbox', value:s.aflatoxinLicence, tier:'C', span:true})}
+      </div>
+    `)}
+
+    <div class="section-label">Banking</div>
+    ${card('', '', `
+      <div class="field-grid">
+        ${field({label:'Bank details', id:'f-bank', value:s.bank, tier:'C', placeholder:'Bank — account number'})}
+        ${field({label:'Preferred payment rail', id:'f-rail', type:'select', value:s.rail, tier:'C',
+          options:['Mpesa','PesaLink','Bank Transfer','Cash']})}
+        ${field({label:'Bank letter attached', id:'f-bankletter', type:'checkbox', value:s.bankLetter, tier:'C'})}
+        ${field({label:'First-payment call-back confirmed', id:'f-callback', type:'checkbox', value:s.callbackDone, tier:'C'})}
+        ${field({label:'Transfer charge borne by', id:'f-transferborne', type:'select', value:s.transferBorneBy, tier:'C',
+          options:['Supplier','Us']})}
+      </div>
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="save-btn">${isNew ? 'Submit as Draft' : 'Save changes'}</button>
+      ${!isNew && isDraft ? `<button class="btn" id="verify-btn">Submit for verification</button>` : ''}
+      ${!isNew && s.status === 'Verified' ? `<button class="btn primary" id="approve-btn" ${!canApprove?'disabled':''}>Approve</button>` : ''}
+      <button class="btn ghost" id="cancel-btn">Cancel</button>
+    </div>
+    ${!isNew && s.status === 'Verified' && !canApprove ? `<p class="helptext" style="margin-top:8px;">You created this record, so you cannot approve it. A different Finance user must.</p>` : ''}
+  `;
+
+  document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('suppliers'); });
+  document.getElementById('cancel-btn').addEventListener('click', () => navigate('suppliers'));
+
+  document.getElementById('save-btn').addEventListener('click', () => {
+    const updated = readSupplierForm(s);
+    if(!updated.name || !updated.group){ showToast('Name and group are required'); return; }
+    if(isNew){
+      STORE.suppliers.push(updated);
+      showToast('Supplier created as Draft');
+      navigate('suppliers', { id: updated.id });
+    } else {
+      Object.assign(s, updated);
+      showToast('Changes saved');
+      navigate('suppliers', { id: s.id });
+    }
+  });
+
+  const verifyBtn = document.getElementById('verify-btn');
+  if(verifyBtn) verifyBtn.addEventListener('click', () => {
+    Object.assign(s, readSupplierForm(s));
+    if(!s.kraPin){ showToast('KRA PIN required before verification'); return; }
+    const dup = STORE.suppliers.find(x => x.id !== s.id && x.kraPin === s.kraPin);
+    if(dup){ showToast('Blocked: another supplier already uses this KRA PIN'); return; }
+    s.status = 'Verified';
+    showToast('Submitted for verification');
+    navigate('suppliers', { id: s.id });
+  });
+
+  const approveBtn = document.getElementById('approve-btn');
+  if(approveBtn) approveBtn.addEventListener('click', () => {
+    if(approveBtn.disabled) return;
+    s.status = 'Approved';
+    s.approvedBy = 'Finance (you)';
+    showToast('Supplier approved — can now transact');
+    navigate('suppliers', { id: s.id });
+  });
+}
+
+function readSupplierForm(existing){
+  const g = (id) => document.getElementById(id);
+  return {
+    ...existing,
+    name: g('f-name').value,
+    group: g('f-group').value,
+    kraPin: g('f-pin').value,
+    idNo: g('f-idno').value,
+    county: g('f-county').value,
+    address: g('f-address').value,
+    etims: g('f-etims').value,
+    vat: g('f-vat').value,
+    aflatoxinLicence: g('f-afla').checked,
+    bank: g('f-bank').value,
+    rail: g('f-rail').value,
+    bankLetter: g('f-bankletter').checked,
+    callbackDone: g('f-callback').checked,
+    transferBorneBy: g('f-transferborne').value
+  };
+}
+
+
+// ============================================================
+// MODULE 3 — CUSTOMER
+// ============================================================
+
+function renderCustomers(container, params){
+  if(params.id) return renderCustomerDetail(container, params.id);
+  renderCustomerList(container);
+}
+
+function renderCustomerList(container){
+  const rows = STORE.customers.map(c => `
+    <tr class="clickable" data-id="${c.id}">
+      <td class="mono">${c.id}</td>
+      <td><strong>${c.name}</strong></td>
+      <td>${c.group}</td>
+      <td class="num">${c.creditLimit ? fmtKES(c.creditLimit) : '—'}</td>
+      <td>${c.creditTerms||'—'}</td>
+      <td>${statusBadge(c.status)}</td>
+    </tr>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="crumb">Parties &rsaquo; Customers</div>
+    <h1 class="page-title">Customers<span class="count-badge">${STORE.customers.length}</span></h1>
+    <p class="page-sub">Who we sell to — their credit terms and the quality standards they hold us to.</p>
+    <div class="list-toolbar">
+      <input type="text" id="customer-search" placeholder="Search by name">
+      <span class="spacer"></span>
+      <button class="btn primary" id="new-customer-btn">+ New customer</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="data-table" style="padding:16px 20px 8px;">
+        <thead><tr><th style="padding-left:20px;">ID</th><th>Name</th><th>Group</th><th>Credit limit</th><th>Terms</th><th>Status</th></tr></thead>
+        <tbody id="customer-tbody">${rows}</tbody>
+      </table>
+    </div>
+  `;
+  container.querySelectorAll('#customer-tbody tr').forEach(tr => {
+    tr.addEventListener('click', () => navigate('customers', { id: tr.dataset.id }));
+  });
+  document.getElementById('new-customer-btn').addEventListener('click', () => navigate('customers', { id:'new' }));
+
+  const searchInput = document.getElementById('customer-search');
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.toLowerCase();
+    const filtered = STORE.customers.filter(c => c.name.toLowerCase().includes(q));
+    document.getElementById('customer-tbody').innerHTML = filtered.map(c => `
+      <tr class="clickable" data-id="${c.id}">
+        <td class="mono">${c.id}</td><td><strong>${c.name}</strong></td><td>${c.group}</td>
+        <td class="num">${c.creditLimit?fmtKES(c.creditLimit):'—'}</td><td>${c.creditTerms||'—'}</td><td>${statusBadge(c.status)}</td>
+      </tr>`).join('');
+    document.querySelectorAll('#customer-tbody tr').forEach(tr => {
+      tr.addEventListener('click', () => navigate('customers', { id: tr.dataset.id }));
+    });
+  });
+}
+
+function renderCustomerDetail(container, id){
+  const isNew = id === 'new';
+  const c = isNew ? {
+    id: uid('CUS'), name:'', group:'', kraPin:'', address:'', creditLimit:0, creditTerms:'',
+    exposureLimit:0, guarantee:'', moistureRule:'', fmRule:'', offloadingBorneBy:'',
+    status:'Draft', createdBy:'You (Sales User)', approvedBy:''
+  } : findCustomer(id);
+
+  if(!c){ container.innerHTML = `<div class="empty-state">Customer not found.</div>`; return; }
+  const canApprove = c.status === 'Verified';
+
+  container.innerHTML = `
+    <div class="crumb"><a href="#" id="back-link" style="color:inherit;text-decoration:none;">Customers</a> &rsaquo; ${isNew ? 'New customer' : c.name}</div>
+    <div class="detail-header">
+      <div>
+        <h1 style="font-size:20px;font-weight:600;margin:0 0 4px;color:var(--navy-dark);">${isNew ? 'New customer' : c.name}</h1>
+        <span class="hmeta">${isNew ? 'Fill in details and submit for verification' : c.id}</span>
+      </div>
+      ${!isNew ? statusBadge(c.status) : ''}
+    </div>
+
+    ${!isNew && c.status==='Draft' ? banner('warn','This customer is in Draft and cannot be invoiced yet.') : ''}
+    ${!isNew && c.status==='Approved' ? banner('ok', `Approved by ${c.approvedBy}. Ready to invoice.`) : ''}
+
+    <div class="section-label">Basic details</div>
+    ${card('','', `
+      <div class="field-grid">
+        ${field({label:'Customer name', id:'f-name', value:c.name, tier:'N', required:true})}
+        ${field({label:'Customer group', id:'f-group', type:'select', value:c.group, tier:'N',
+          options:['Miller','Exporter','Feed Manufacturer','Trader']})}
+        ${field({label:'KRA PIN', id:'f-pin', value:c.kraPin, tier:'N', help:'Required for eTIMS invoicing'})}
+        ${field({label:'Address', id:'f-address', value:c.address, tier:'N'})}
+      </div>
+    `)}
+
+    <div class="section-label">Commercial terms</div>
+    ${card('','', `
+      <div class="field-grid">
+        ${field({label:'Credit limit (KES)', id:'f-credlim', type:'number', value:c.creditLimit, tier:'N'})}
+        ${field({label:'Credit terms', id:'f-credterms', type:'select', value:c.creditTerms, tier:'N',
+          options:['Net 7','Net 14','Net 30','Cash on delivery']})}
+        ${field({label:'Exposure limit (KES)', id:'f-explim', type:'number', value:c.exposureLimit, tier:'C',
+          help:'Total position including undelivered'})}
+        ${field({label:'Guarantee / security held', id:'f-guarantee', value:c.guarantee, tier:'C', span:true})}
+      </div>
+    `)}
+
+    <div class="section-label">Quality profile</div>
+    ${card('','This customer\'s accepted standards — feeds deductions on our side', `
+      <div class="field-grid">
+        ${field({label:'Moisture rule', id:'f-moist', value:c.moistureRule, tier:'C', placeholder:'e.g. 13.5% max'})}
+        ${field({label:'Foreign matter rule', id:'f-fm', value:c.fmRule, tier:'C', placeholder:'e.g. 2.0% max'})}
+        ${field({label:'Offloading borne by', id:'f-offload', type:'select', value:c.offloadingBorneBy, tier:'C',
+          options:['Customer','Us'], span:true})}
+      </div>
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="save-btn">${isNew ? 'Submit as Draft' : 'Save changes'}</button>
+      ${!isNew && c.status==='Draft' ? `<button class="btn" id="verify-btn">Submit for verification</button>` : ''}
+      ${!isNew && c.status==='Verified' ? `<button class="btn primary" id="approve-btn">Approve</button>` : ''}
+      <button class="btn ghost" id="cancel-btn">Cancel</button>
+    </div>
+  `;
+
+  document.getElementById('back-link').addEventListener('click', e => { e.preventDefault(); navigate('customers'); });
+  document.getElementById('cancel-btn').addEventListener('click', () => navigate('customers'));
+  document.getElementById('save-btn').addEventListener('click', () => {
+    const updated = readCustomerForm(c);
+    if(!updated.name){ showToast('Name is required'); return; }
+    if(isNew){ STORE.customers.push(updated); showToast('Customer created as Draft'); navigate('customers', {id:updated.id}); }
+    else { Object.assign(c, updated); showToast('Changes saved'); navigate('customers', {id:c.id}); }
+  });
+  const vBtn = document.getElementById('verify-btn');
+  if(vBtn) vBtn.addEventListener('click', () => {
+    Object.assign(c, readCustomerForm(c));
+    c.status = 'Verified'; showToast('Submitted for verification'); navigate('customers', {id:c.id});
+  });
+  const aBtn = document.getElementById('approve-btn');
+  if(aBtn) aBtn.addEventListener('click', () => {
+    c.status = 'Approved'; c.approvedBy = 'Finance (you)';
+    showToast('Customer approved — ready to invoice'); navigate('customers', {id:c.id});
+  });
+}
+
+function readCustomerForm(existing){
+  const g = id => document.getElementById(id);
+  return {
+    ...existing,
+    name:g('f-name').value, group:g('f-group').value, kraPin:g('f-pin').value, address:g('f-address').value,
+    creditLimit:Number(g('f-credlim').value)||0, creditTerms:g('f-credterms').value,
+    exposureLimit:Number(g('f-explim').value)||0, guarantee:g('f-guarantee').value,
+    moistureRule:g('f-moist').value, fmRule:g('f-fm').value, offloadingBorneBy:g('f-offload').value
+  };
+}
+
+
+// ============================================================
+// MODULE 6 — LOT & LIFECYCLE (list + detail)
+// ============================================================
+
+function renderLots(container, params){
+  if(params.id) return renderLotDetail(container, params.id);
+  renderLotList(container);
+}
+
+function renderLotList(container){
+  const stateFilter = container._filter || 'ALL';
+  const lots = STORE.lots.filter(l => stateFilter === 'ALL' || l.state === stateFilter)
+    .sort((a,b) => STORE.lots.indexOf(b) - STORE.lots.indexOf(a));
+
+  const rows = lots.map(l => {
+    const sup = findSupplier(l.supplierId);
+    const kg = l.state === 'TICKET' ? l.itemQty : computePayable(l).acceptedNetKg;
+    return `
+    <tr class="clickable" data-id="${l.id}">
+      <td class="mono">${l.ticketNo}</td>
+      <td class="mono">${l.id}</td>
+      <td>${sup ? sup.name : '—'}</td>
+      <td>${l.county ? `${l.county}${l.area ? ' &middot; '+l.area : ''}` : '—'}</td>
+      <td class="num">${fmtKg(kg)}</td>
+      <td>${statusBadge(l.state)}</td>
+    </tr>`;
+  }).join('');
+
+  const stateCounts = STAGE_ORDER.reduce((acc, s) => { acc[s] = STORE.lots.filter(l => l.state === s).length; return acc; }, {});
+
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Lots</div>
+    <h1 class="page-title">Lots<span class="count-badge">${STORE.lots.length}</span></h1>
+    <p class="page-sub">Every trade, at every stage. Click a lot to see its full history and current numbers.</p>
+
+    <div class="list-toolbar" style="flex-wrap:wrap;">
+      ${['ALL', ...STAGE_ORDER].map(s => `
+        <button class="btn sm ${stateFilter===s?'primary':''}" data-filter="${s}">
+          ${s === 'ALL' ? 'All' : s.charAt(0)+s.slice(1).toLowerCase()} ${s!=='ALL' ? `(${stateCounts[s]})` : ''}
+        </button>
+      `).join('')}
+      <span class="spacer"></span>
+      <button class="btn primary" id="new-ticket-btn">+ New ticket</button>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="data-table" style="padding:16px 20px 8px;">
+        <thead><tr><th style="padding-left:20px;">Ticket</th><th>Lot ID</th><th>Supplier</th><th>Origin</th><th>Quantity</th><th>State</th></tr></thead>
+        <tbody id="lot-tbody">${rows || `<tr><td colspan="6"><div class="empty-state">No lots at this stage.</div></td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+
+  container.querySelectorAll('[data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => { container._filter = btn.dataset.filter; renderLotList(container); });
+  });
+  container.querySelectorAll('#lot-tbody tr[data-id]').forEach(tr => {
+    tr.addEventListener('click', () => navigate('lots', { id: tr.dataset.id }));
+  });
+  document.getElementById('new-ticket-btn').addEventListener('click', () => navigate('tickets'));
+}
+
+function renderLotDetail(container, id){
+  const l = findLot(id);
+  if(!l){ container.innerHTML = `<div class="empty-state">Lot not found.</div>`; return; }
+  const sup = findSupplier(l.supplierId);
+  const cus = l.customerId ? findCustomer(l.customerId) : null;
+
+  const isTicketOnly = l.state === 'TICKET';
+  const payable = !isTicketOnly ? computePayable(l) : null;
+  const transport = !isTicketOnly ? computeTransport(l) : null;
+  const landed = !isTicketOnly ? computeLandedCost(l) : null;
+  const sale = !isTicketOnly ? computeSale(l) : null;
+
+  const lotEvents = STORE.events.filter(e => e.lotId === l.id).slice(-6).reverse();
+
+  const nextStageMap = { TICKET:'INTAKE', INTAKE:'LOT', LOT:'POSITION', POSITION:'INVOICED', INVOICED:'SETTLED' };
+  const nextStage = nextStageMap[l.state];
+  const nextRouteMap = { INTAKE:'intake', LOT:'deductions', POSITION:'transport', INVOICED:'sales', SETTLED:'payments' };
+
+  container.innerHTML = `
+    <div class="crumb"><a href="#" id="back-link" style="color:inherit;text-decoration:none;">Lots</a> &rsaquo; ${l.ticketNo}</div>
+    <div class="detail-header">
+      <div>
+        <h1 style="font-size:20px;font-weight:600;margin:0 0 4px;color:var(--navy-dark);">${l.ticketNo} <span style="color:var(--text-muted);font-weight:400;">&middot; ${l.id}</span></h1>
+        <span class="hmeta">${sup ? sup.name : '—'} &middot; ${l.county ? `${l.county}, ${l.area}` : 'origin not yet captured'}</span>
+      </div>
+      ${statusBadge(l.state)}
+    </div>
+
+    ${progressTrack(STAGE_ORDER.map(s=>s.charAt(0)+s.slice(1).toLowerCase()), l.state)}
+
+    <div class="section-label">Overview</div>
+    ${card('','', `
+      <div class="kv-grid">
+        <div class="kv"><span class="k">Supplier</span><span class="v">${sup ? sup.name : '—'}</span></div>
+        <div class="kv"><span class="k">Customer</span><span class="v">${cus ? cus.name : 'Not yet matched'}</span></div>
+        <div class="kv"><span class="k">Gross weight</span><span class="v">${l.grossKg ? fmtKg(l.grossKg) : '—'}</span></div>
+        <div class="kv"><span class="k">Accepted (payable) qty</span><span class="v">${payable ? fmtKg(payable.acceptedNetKg) : '—'}</span></div>
+        <div class="kv"><span class="k">Moisture</span><span class="v">${l.moisturePct ? l.moisturePct+'%' : '—'}</span></div>
+        <div class="kv"><span class="k">Aflatoxin</span><span class="v">${l.aflatoxinPpb!=null ? l.aflatoxinPpb+' ppb' : '—'}</span></div>
+      </div>
+    `)}
+
+    ${payable ? `
+    <div class="section-label">Cost summary</div>
+    ${card('','', `
+      ${calcRow('Net payable to supplier', fmtKES(payable.netPayable))}
+      ${calcRow('Transport & handling', fmtKES(transport.total))}
+      ${calcRow('Landed cost per kg', fmtKES(landed.perKg).replace('KES','').trim() + ' /kg', {total:true})}
+      ${sale ? calcRow('Margin per tonne', fmtKES(sale.marginPerTonne)) : ''}
+    `)}
+    ` : ''}
+
+    <div class="section-label">Trade event log <span class="tier-tag B" style="margin-left:4px;">Build</span></div>
+    ${card('', 'Append-only. No role can edit or delete these rows.', `
+      ${lotEvents.length ? lotEvents.map(e => `
+        <div class="calc-row">
+          <div><div class="label">${e.action}</div><div class="sub">${e.detail||''}</div></div>
+          <div class="val" style="font-family:inherit;font-weight:400;font-size:11.5px;color:var(--text-muted);">${e.who}<br>${e.at}</div>
+        </div>
+      `).join('') : `<div class="empty-state">No events logged yet for this lot.</div>`}
+    `)}
+
+    <div class="btn-row">
+      ${nextStage ? `<button class="btn primary" id="advance-btn">Continue to ${nextStage.charAt(0)+nextStage.slice(1).toLowerCase()} &rarr;</button>` : ''}
+      <button class="btn ghost" id="back-btn2">Back to lots</button>
+    </div>
+  `;
+
+  document.getElementById('back-link').addEventListener('click', e => { e.preventDefault(); navigate('lots'); });
+  document.getElementById('back-btn2').addEventListener('click', () => navigate('lots'));
+  const advBtn = document.getElementById('advance-btn');
+  if(advBtn) advBtn.addEventListener('click', () => {
+    const targetRoute = nextRouteMap[nextStage];
+    navigate(targetRoute, { id: l.id });
+  });
+}
+
+
+// ============================================================
+// TICKET — stage 1 of the lot lifecycle
+// ============================================================
+
+function renderNewTicket(container){
+  const approvedSuppliers = STORE.suppliers.filter(s => s.status === 'Approved');
+  const draftOrUnapproved = STORE.suppliers.filter(s => s.status !== 'Approved');
+
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; New ticket</div>
+    <h1 class="page-title">New ticket</h1>
+    <p class="page-sub">Commitment logged — no stock movement, no posting yet. Only Approved suppliers can be selected.</p>
+
+    ${draftOrUnapproved.length ? banner('info', `${draftOrUnapproved.length} supplier(s) are not yet Approved and won't appear below — check Suppliers to move them forward.`) : ''}
+
+    ${card('Ticket details', '', `
+      <div class="field-grid">
+        ${field({label:'Supplier', id:'f-supplier', type:'select', tier:'N', required:true,
+          options: approvedSuppliers.map(s => ({value:s.id, label:`${s.name} (${s.group})`}))})}
+        ${field({label:'Item', id:'f-item', type:'select', value:'Maize', tier:'N',
+          options:['Maize','Beans']})}
+        ${field({label:'Expected quantity (kg)', id:'f-qty', type:'number', tier:'N', required:true, placeholder:'e.g. 8000'})}
+        ${field({label:'Expected delivery date', id:'f-date', type:'date', value: todayISO(), tier:'N'})}
+      </div>
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="create-ticket-btn">Create ticket</button>
+      <button class="btn ghost" id="cancel-btn">Cancel</button>
+    </div>
+  `;
+
+  document.getElementById('cancel-btn').addEventListener('click', () => navigate('lots'));
+  document.getElementById('create-ticket-btn').addEventListener('click', () => {
+    const supplierId = document.getElementById('f-supplier').value;
+    const item = document.getElementById('f-item').value;
+    const qty = Number(document.getElementById('f-qty').value);
+    if(!supplierId){ showToast('Select a supplier'); return; }
+    if(!qty || qty <= 0){ showToast('Enter an expected quantity'); return; }
+
+    const ticketNo = 'TCK-' + (STORE.seq.ticket++);
+    const lot = {
+      id: uid('LOT'), ticketNo, item, state:'TICKET',
+      supplierId, customerId:null, itemQty: qty,
+      createdAt: new Date().toLocaleString('en-KE',{hour12:false})
+    };
+    STORE.lots.push(lot);
+    logEvent(lot.id, 'Ticket created', `${fmtKg(qty)} ${item} expected from ${findSupplier(supplierId).name}`);
+    showToast(`Ticket ${ticketNo} created`);
+    navigate('lots', { id: lot.id });
+  });
+}
+
+
+// ============================================================
+// MODULE 7 — INTAKE & QUALITY CAPTURE
+// ============================================================
+
+function renderIntake(container, params){
+  const ticketLots = STORE.lots.filter(l => l.state === 'TICKET');
+  const targetId = params.id || (ticketLots[0] && ticketLots[0].id);
+
+  if(!targetId){
+    container.innerHTML = `
+      <div class="crumb">Trade &rsaquo; Intake &amp; quality capture</div>
+      <h1 class="page-title">Intake &amp; quality capture</h1>
+      <p class="page-sub">The weighbridge screen. What's captured here determines every downstream number.</p>
+      <div class="empty-state">
+        <div class="big">No tickets waiting for intake</div>
+        Create a ticket first — that's what a truck gets weighed against.
+        <div style="margin-top:14px;"><button class="btn primary" id="goto-ticket">+ New ticket</button></div>
+      </div>`;
+    document.getElementById('goto-ticket').addEventListener('click', () => navigate('tickets'));
+    return;
+  }
+
+  const l = findLot(targetId);
+  if(!l || l.state !== 'TICKET'){
+    // fall back to picker if this lot has moved on
+    return renderIntakePicker(container, ticketLots);
+  }
+
+  const sup = findSupplier(l.supplierId);
+
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Intake &amp; quality capture</div>
+    <h1 class="page-title">Intake &amp; quality capture</h1>
+    <p class="page-sub">Weighing ${l.ticketNo} &middot; ${sup.name} &middot; expected ${fmtKg(l.itemQty)}</p>
+
+    ${ticketLots.length > 1 ? `
+      <div class="list-toolbar">
+        <span class="list-count">${ticketLots.length} tickets waiting:</span>
+        ${ticketLots.map(t => `<button class="btn sm ${t.id===l.id?'primary':''}" data-tk="${t.id}">${t.ticketNo}</button>`).join('')}
+      </div>` : ''}
+
+    ${card('Weighbridge capture', 'The field screen — must work on a phone', `
+      <div class="field-grid three">
+        ${field({label:'Gross weight (kg)', id:'f-gross', type:'number', tier:'C', required:true})}
+        ${field({label:'Tare weight (kg)', id:'f-tare', type:'number', tier:'C', required:true})}
+        ${field({label:'Bag count', id:'f-bags', type:'number', tier:'C', required:true})}
+        ${field({label:'Weighbridge ticket number', id:'f-wbnum', tier:'C', required:true, placeholder:'Unique, e.g. WB-88213'})}
+        ${field({label:'Transporter', id:'f-transporter', type:'select', tier:'C',
+          options: STORE.suppliers.filter(s=>s.group==='Transporter').map(s=>({value:s.id,label:s.name}))})}
+        ${field({label:'Vehicle registration', id:'f-vehicle', tier:'C', placeholder:'e.g. KDA 221C'})}
+      </div>
+      <div id="net-preview" style="margin-top:14px;"></div>
+    `)}
+
+    ${card('Quality inspection', 'Native Quality Inspection doctype', `
+      <div class="field-grid three">
+        ${field({label:'Moisture %', id:'f-moisture', type:'number', tier:'N', required:true, help:'Standard is 13.5%'})}
+        ${field({label:'Foreign matter %', id:'f-fm', type:'number', tier:'N', required:true})}
+        ${field({label:'Aflatoxin ppb', id:'f-afla', type:'number', tier:'N', required:true, help:'Limit is 10 ppb'})}
+      </div>
+      <div class="field-grid" style="margin-top:14px;">
+        ${field({label:'County', id:'f-county', type:'select', tier:'C',
+          options:['Nakuru','Uasin Gishu','Trans Nzoia','Kitale','Bungoma']})}
+        ${field({label:'Area', id:'f-area', tier:'C', placeholder:'e.g. Njoro'})}
+        ${field({label:'Reason code (if foreign matter judgement or wet buy)', id:'f-reason', type:'textarea', tier:'C', span:true,
+          placeholder:'Mandatory if moisture > 20% or foreign matter call is disputed'})}
+      </div>
+    `)}
+
+    <div id="afla-warning"></div>
+
+    <div class="btn-row">
+      <button class="btn primary" id="submit-intake-btn">Submit intake &amp; create lot</button>
+      <button class="btn ghost" id="cancel-btn">Cancel</button>
+    </div>
+  `;
+
+  container.querySelectorAll('[data-tk]').forEach(btn => {
+    btn.addEventListener('click', () => navigate('intake', { id: btn.dataset.tk }));
+  });
+  document.getElementById('cancel-btn').addEventListener('click', () => navigate('lots'));
+
+  const updatePreview = () => {
+    const gross = Number(document.getElementById('f-gross').value) || 0;
+    const tare = Number(document.getElementById('f-tare').value) || 0;
+    const net = Math.max(0, gross - tare);
+    document.getElementById('net-preview').innerHTML = field({
+      label:'Net weight (calculated)', id:'net-display', type:'calc', value: fmtKg(net), tier:'C',
+      help:'Gross minus tare, calculated automatically', span:true
+    });
+    const afla = Number(document.getElementById('f-afla').value) || 0;
+    document.getElementById('afla-warning').innerHTML = afla > 10
+      ? banner('block', `Aflatoxin at ${afla} ppb exceeds the 10 ppb limit. This lot cannot proceed past intake without an override and reason code.`)
+      : '';
+  };
+  ['f-gross','f-tare'].forEach(id => document.getElementById(id).addEventListener('input', updatePreview));
+  document.getElementById('f-afla').addEventListener('input', updatePreview);
+  updatePreview();
+
+  document.getElementById('submit-intake-btn').addEventListener('click', () => {
+    const g = id => document.getElementById(id);
+    const gross = Number(g('f-gross').value), tare = Number(g('f-tare').value), bags = Number(g('f-bags').value);
+    const wbnum = g('f-wbnum').value.trim();
+    const moisture = Number(g('f-moisture').value), fm = Number(g('f-fm').value), afla = Number(g('f-afla').value);
+
+    if(!gross || !tare || !bags || !wbnum){ showToast('Weighbridge fields are required'); return; }
+    if(gross <= tare){ showToast('Gross weight must exceed tare weight'); return; }
+    if(!moisture || fm === null || isNaN(fm) || afla === null || isNaN(afla)){ showToast('Quality inspection fields are required'); return; }
+    if(moisture > 20 && !g('f-reason').value.trim()){ showToast('Reason code required for wet buy above 20% moisture'); return; }
+
+    l.grossKg = gross; l.tareKg = tare; l.bags = bags; l.wbNumber = wbnum;
+    l.transporterId = g('f-transporter').value || null;
+    l.vehicleReg = g('f-vehicle').value;
+    l.moisturePct = moisture; l.fmPct = fm; l.aflatoxinPpb = afla; l.aflatoxinTested = true;
+    l.county = g('f-county').value; l.area = g('f-area').value;
+    l.state = 'INTAKE';
+
+    logEvent(l.id, 'Intake recorded', `${fmtKg(gross-tare)} net, moisture ${moisture}%, FM ${fm}%, aflatoxin ${afla}ppb`);
+    showToast(`Intake recorded for ${l.ticketNo} — lot created`);
+    navigate('deductions', { id: l.id });
+  });
+}
+
+function renderIntakePicker(container, ticketLots){
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Intake &amp; quality capture</div>
+    <h1 class="page-title">Intake &amp; quality capture</h1>
+    <div class="empty-state">
+      <div class="big">That ticket has already been weighed</div>
+      ${ticketLots.length ? 'Pick another ticket below.' : 'No tickets currently waiting.'}
+    </div>
+    ${ticketLots.map(t => `<button class="btn" data-tk="${t.id}" style="margin:4px;">${t.ticketNo}</button>`).join('')}
+  `;
+  container.querySelectorAll('[data-tk]').forEach(btn => {
+    btn.addEventListener('click', () => navigate('intake', { id: btn.dataset.tk }));
+  });
+}
+
+
+// ============================================================
+// MODULE 8 — DEDUCTIONS & PAYABLE ENGINE
+// ============================================================
+
+function renderDeductions(container, params){
+  const intakeLots = STORE.lots.filter(l => l.state === 'INTAKE');
+  const targetId = params.id || (intakeLots[0] && intakeLots[0].id);
+
+  if(!targetId){
+    container.innerHTML = `
+      <div class="crumb">Trade &rsaquo; Deductions &amp; payable engine</div>
+      <h1 class="page-title">Deductions &amp; payable engine</h1>
+      <p class="page-sub">Five deductions turn gross weight into a payable figure, shown step by step.</p>
+      <div class="empty-state">
+        <div class="big">No lots waiting for payable calculation</div>
+        A lot needs to complete intake first.
+      </div>`;
+    return;
+  }
+
+  const l = findLot(targetId);
+  if(!l || l.state !== 'INTAKE'){
+    return renderDeductionsPicker(container, intakeLots);
+  }
+
+  const sup = findSupplier(l.supplierId);
+  const p = computePayable(l);
+
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Deductions &amp; payable engine</div>
+    <h1 class="page-title">Deductions &amp; payable engine</h1>
+    <p class="page-sub">${l.ticketNo} &middot; ${sup.name} &middot; every step traceable, no calculator needed</p>
+
+    ${intakeLots.length > 1 ? `
+      <div class="list-toolbar">
+        <span class="list-count">${intakeLots.length} lots ready:</span>
+        ${intakeLots.map(t => `<button class="btn sm ${t.id===l.id?'primary':''}" data-tk="${t.id}">${t.ticketNo}</button>`).join('')}
+      </div>` : ''}
+
+    ${card('Deduction breakdown', 'From gross weight to net payable', `
+      ${calcRow('Gross weight', fmtKg(l.grossKg))}
+      ${calcRow('Tare weight', '&minus; ' + fmtKg(l.tareKg), {neg:true})}
+      ${calcRow('Net weight', fmtKg(p.netKg), {sub:'Gross minus tare'})}
+      ${calcRow(`Moisture deduction (${p.band})`, '&minus; ' + fmtKg(p.moistureDeductionKg), {neg:true, sub:`${l.moisturePct}% recorded vs 13.5% standard`})}
+      ${calcRow('Foreign matter deduction', '&minus; ' + fmtKg(p.fmDeductionKg), {neg:true, sub:`${l.fmPct}% recorded`})}
+      ${calcRow('Accepted net quantity', fmtKg(p.acceptedNetKg), {total:true, sub:'This is what lands in the stock ledger — not the gross weight'})}
+    `)}
+
+    ${card('Payable value', '', `
+      ${calcRow('Reference rate', fmtKES(p.refRatePerKg) + ' /kg')}
+      ${calcRow('Gross value', fmtKES(p.grossValue), {sub:`${fmtKg(p.acceptedNetKg)} &times; rate`})}
+      ${calcRow('Bagging deduction', '&minus; ' + fmtKES(p.baggingDeduction), {neg:true, sub:`${l.bags} bags &times; KES 25`})}
+      ${calcRow('Aflatoxin test fee', '&minus; ' + fmtKES(p.aflatoxinTestFee), {neg:true})}
+      ${calcRow('Net payable to supplier', fmtKES(p.netPayable), {total:true})}
+    `)}
+
+    ${!p.aflatoxinPass ? banner('block', 'Aflatoxin result exceeds the limit. This lot is blocked from proceeding without an override.') : ''}
+
+    ${card('Net supplier invoice', 'One invoice at net payable — the five-way split above stays in the cost ledger', `
+      <div class="field-grid">
+        ${field({label:'Invoice value', id:'inv-val', type:'calc', value: fmtKES(p.netPayable), tier:'B', span:true})}
+      </div>
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="post-invoice-btn" ${!p.aflatoxinPass ? 'disabled' : ''}>Post net invoice &amp; create lot</button>
+      <button class="btn ghost" id="back-btn">Back to lots</button>
+    </div>
+  `;
+
+  container.querySelectorAll('[data-tk]').forEach(btn => {
+    btn.addEventListener('click', () => navigate('deductions', { id: btn.dataset.tk }));
+  });
+  document.getElementById('back-btn').addEventListener('click', () => navigate('lots'));
+
+  const postBtn = document.getElementById('post-invoice-btn');
+  postBtn.addEventListener('click', () => {
+    l.state = 'LOT';
+    logEvent(l.id, 'Lot created, net invoice posted', `${fmtKES(p.netPayable)} payable to ${sup.name} for ${fmtKg(p.acceptedNetKg)}`);
+    showToast(`Lot ${l.id} created — ${fmtKES(p.netPayable)} invoiced to ${sup.name}`);
+    navigate('lots', { id: l.id });
+  });
+}
+
+function renderDeductionsPicker(container, lots){
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Deductions &amp; payable engine</div>
+    <h1 class="page-title">Deductions &amp; payable engine</h1>
+    <div class="empty-state">
+      <div class="big">That lot has already been costed</div>
+      ${lots.length ? 'Pick another lot below.' : 'No lots currently waiting.'}
+    </div>
+    ${lots.map(t => `<button class="btn" data-tk="${t.id}" style="margin:4px;">${t.ticketNo}</button>`).join('')}
+  `;
+  container.querySelectorAll('[data-tk]').forEach(btn => {
+    btn.addEventListener('click', () => navigate('deductions', { id: btn.dataset.tk }));
+  });
+}
+
+
+// ============================================================
+// MODULE 9 — TRANSPORT & LOSS (Position stage)
+// ============================================================
+
+function renderTransport(container, params){
+  const lotLots = STORE.lots.filter(l => l.state === 'LOT');
+  const targetId = params.id || (lotLots[0] && lotLots[0].id);
+
+  if(!targetId){
+    container.innerHTML = `
+      <div class="crumb">Trade &rsaquo; Transport &amp; loss</div>
+      <h1 class="page-title">Transport &amp; loss</h1>
+      <p class="page-sub">Three transport components capitalise into the lot; losses beyond tolerance are recovered.</p>
+      <div class="empty-state"><div class="big">No lots currently in Lot state</div>A lot needs a posted invoice first.</div>`;
+    return;
+  }
+
+  const l = findLot(targetId);
+  if(!l || l.state !== 'LOT') return renderTransportPicker(container, lotLots);
+
+  const sup = findSupplier(l.supplierId);
+  const payable = computePayable(l);
+
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Transport &amp; loss</div>
+    <h1 class="page-title">Transport &amp; loss</h1>
+    <p class="page-sub">${l.ticketNo} &middot; ${sup.name} &middot; ${fmtKg(payable.acceptedNetKg)} in the warehouse</p>
+
+    ${lotLots.length > 1 ? `
+      <div class="list-toolbar">
+        <span class="list-count">${lotLots.length} lots ready:</span>
+        ${lotLots.map(t => `<button class="btn sm ${t.id===l.id?'primary':''}" data-tk="${t.id}">${t.ticketNo}</button>`).join('')}
+      </div>` : ''}
+
+    ${card('Transport charges', 'Always three separate lines, never one blob', `
+      <div class="field-grid three">
+        ${field({label:'Haulage (KES)', id:'f-haulage', type:'number', value: l.haulage||'', tier:'N'})}
+        ${field({label:'Cess (KES)', id:'f-cess', type:'number', value: l.cess||'', tier:'C', help:`Posts by county — ${l.county||'not set'}`})}
+        ${field({label:'Offloading (KES)', id:'f-offload', type:'number', value: l.offloading||'', tier:'N'})}
+      </div>
+    `)}
+
+    ${card('Loss reconciliation', 'Within 80kg tolerance is absorbed; beyond it is recovered from the transporter', `
+      <div class="field-grid">
+        ${field({label:'Expected quantity', id:'exp-qty', type:'calc', value: fmtKg(payable.acceptedNetKg), tier:'N'})}
+        ${field({label:'Delivered quantity (kg)', id:'f-delivered', type:'number', value: Math.round(payable.acceptedNetKg), tier:'C',
+          help:'Adjust if less arrived than expected'})}
+      </div>
+      <div id="loss-result" style="margin-top:14px;"></div>
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="capitalise-btn">Capitalise costs &amp; move to Position</button>
+      <button class="btn ghost" id="back-btn">Back to lots</button>
+    </div>
+  `;
+
+  container.querySelectorAll('[data-tk]').forEach(btn => btn.addEventListener('click', () => navigate('transport', { id: btn.dataset.tk })));
+  document.getElementById('back-btn').addEventListener('click', () => navigate('lots'));
+
+  const updateLoss = () => {
+    const expected = payable.acceptedNetKg;
+    const delivered = Number(document.getElementById('f-delivered').value) || expected;
+    const lossKg = Math.max(0, expected - delivered);
+    const tolerance = 80;
+    const el = document.getElementById('loss-result');
+    if(lossKg === 0){
+      el.innerHTML = banner('ok', 'No loss recorded — full expected quantity delivered.');
+    } else if(lossKg <= tolerance){
+      el.innerHTML = banner('info', `${fmtKg(lossKg)} loss is within the ${tolerance}kg tolerance — absorbed into inventory cost, no recovery raised.`);
+    } else {
+      const recoverableKg = lossKg - tolerance;
+      const sellRate = 52;
+      const recoveredKES = recoverableKg * sellRate;
+      el.innerHTML = banner('warn', `${fmtKg(lossKg)} loss exceeds the ${tolerance}kg tolerance. ${fmtKg(recoverableKg)} recovered from the transporter at sell rate = ${fmtKES(recoveredKES)}, split across inventory reversal and margin recovery.`);
+    }
+  };
+  document.getElementById('f-delivered').addEventListener('input', updateLoss);
+  updateLoss();
+
+  document.getElementById('capitalise-btn').addEventListener('click', () => {
+    const g = id => Number(document.getElementById(id).value) || 0;
+    l.haulage = g('f-haulage'); l.cess = g('f-cess'); l.offloading = g('f-offload');
+    l.state = 'POSITION';
+    const t = computeTransport(l);
+    logEvent(l.id, 'Transport capitalised, moved to Position', `Haulage ${fmtKES(t.haulage)}, cess ${fmtKES(t.cess)}, offloading ${fmtKES(t.offloading)}`);
+    showToast(`${l.ticketNo} moved to Position`);
+    navigate('lots', { id: l.id });
+  });
+}
+
+function renderTransportPicker(container, lots){
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Transport &amp; loss</div>
+    <h1 class="page-title">Transport &amp; loss</h1>
+    <div class="empty-state"><div class="big">That lot has moved on</div>${lots.length?'Pick another lot below.':'No lots currently waiting.'}</div>
+    ${lots.map(t => `<button class="btn" data-tk="${t.id}" style="margin:4px;">${t.ticketNo}</button>`).join('')}
+  `;
+  container.querySelectorAll('[data-tk]').forEach(btn => btn.addEventListener('click', () => navigate('transport', { id: btn.dataset.tk })));
+}
+
+
+// ============================================================
+// MODULE 10 — SALE, INVOICING & eTIMS
+// ============================================================
+
+function renderSales(container, params){
+  const positionLots = STORE.lots.filter(l => l.state === 'POSITION');
+  const targetId = params.id || (positionLots[0] && positionLots[0].id);
+
+  if(!targetId){
+    container.innerHTML = `
+      <div class="crumb">Trade &rsaquo; Sale &amp; invoicing</div>
+      <h1 class="page-title">Sale &amp; invoicing</h1>
+      <p class="page-sub">Match a lot to an approved customer, deliver, and transmit through eTIMS.</p>
+      <div class="empty-state"><div class="big">No lots currently held in Position</div>A lot needs its transport costs capitalised first.</div>`;
+    return;
+  }
+
+  const l = findLot(targetId);
+  if(!l || l.state !== 'POSITION') return renderSalesPicker(container, positionLots);
+
+  const sup = findSupplier(l.supplierId);
+  const payable = computePayable(l);
+  const landed = computeLandedCost(l);
+  const approvedCustomers = STORE.customers.filter(c => c.status === 'Approved');
+
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Sale &amp; invoicing</div>
+    <h1 class="page-title">Sale &amp; invoicing</h1>
+    <p class="page-sub">${l.ticketNo} &middot; from ${sup.name} &middot; ${fmtKg(payable.acceptedNetKg)} available, landed at ${fmtKES(landed.perKg)}/kg</p>
+
+    ${positionLots.length > 1 ? `
+      <div class="list-toolbar">
+        <span class="list-count">${positionLots.length} lots ready:</span>
+        ${positionLots.map(t => `<button class="btn sm ${t.id===l.id?'primary':''}" data-tk="${t.id}">${t.ticketNo}</button>`).join('')}
+      </div>` : ''}
+
+    ${card('Delivery', 'Lot consumed, delivered to customer', `
+      <div class="field-grid">
+        ${field({label:'Customer', id:'f-customer', type:'select', tier:'N', required:true,
+          options: approvedCustomers.map(c => ({value:c.id, label:c.name}))})}
+        ${field({label:'Sell rate (KES/kg)', id:'f-sellrate', type:'number', value: l.sellRatePerKg||'', tier:'N', required:true})}
+      </div>
+      <div id="margin-preview" style="margin-top:14px;"></div>
+    `)}
+
+    ${card('Sales invoice + eTIMS', 'Revenue and COGS post together, automatically', `
+      <div class="field-grid">
+        ${field({label:'Invoice number', id:'inv-num', type:'calc', value: 'INV-' + STORE.seq.invoice, tier:'N'})}
+        ${field({label:'eTIMS control unit number', id:'etims-num', type:'calc', value: 'Generated on submit', tier:'N'})}
+      </div>
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="submit-sale-btn">Submit invoice &amp; transmit to eTIMS</button>
+      <button class="btn ghost" id="back-btn">Back to lots</button>
+    </div>
+  `;
+
+  container.querySelectorAll('[data-tk]').forEach(btn => btn.addEventListener('click', () => navigate('sales', { id: btn.dataset.tk })));
+  document.getElementById('back-btn').addEventListener('click', () => navigate('lots'));
+
+  const updateMargin = () => {
+    const rate = Number(document.getElementById('f-sellrate').value) || 0;
+    const el = document.getElementById('margin-preview');
+    if(!rate){ el.innerHTML=''; return; }
+    const revenue = payable.acceptedNetKg * rate;
+    const margin = revenue - landed.totalCost;
+    const marginPerTonne = (margin / payable.acceptedNetKg) * 1000;
+    el.innerHTML = `
+      ${calcRow('Revenue', fmtKES(revenue))}
+      ${calcRow('Landed cost', '&minus; ' + fmtKES(landed.totalCost), {neg:true})}
+      ${calcRow('Margin per tonne', fmtKES(marginPerTonne), {total:true, neg: margin<0})}
+    `;
+  };
+  document.getElementById('f-sellrate').addEventListener('input', updateMargin);
+  updateMargin();
+
+  document.getElementById('submit-sale-btn').addEventListener('click', () => {
+    const customerId = document.getElementById('f-customer').value;
+    const rate = Number(document.getElementById('f-sellrate').value);
+    if(!customerId){ showToast('Select a customer'); return; }
+    if(!rate){ showToast('Enter a sell rate'); return; }
+
+    l.customerId = customerId; l.sellRatePerKg = rate; l.state = 'INVOICED';
+    l.invoiceNo = 'INV-' + (STORE.seq.invoice++);
+    l.etimsControlNo = 'KRA-CU-' + Math.floor(100000 + Math.random()*899999);
+
+    const cus = findCustomer(customerId);
+    logEvent(l.id, 'Sales invoice posted, eTIMS transmitted', `${l.invoiceNo} to ${cus.name}, control unit ${l.etimsControlNo}`);
+    showToast(`Invoiced to ${cus.name} — eTIMS confirmed`);
+    navigate('lots', { id: l.id });
+  });
+}
+
+function renderSalesPicker(container, lots){
+  container.innerHTML = `
+    <div class="crumb">Trade &rsaquo; Sale &amp; invoicing</div>
+    <h1 class="page-title">Sale &amp; invoicing</h1>
+    <div class="empty-state"><div class="big">That lot has moved on</div>${lots.length?'Pick another lot below.':'No lots currently waiting.'}</div>
+    ${lots.map(t => `<button class="btn" data-tk="${t.id}" style="margin:4px;">${t.ticketNo}</button>`).join('')}
+  `;
+  container.querySelectorAll('[data-tk]').forEach(btn => btn.addEventListener('click', () => navigate('sales', { id: btn.dataset.tk })));
+}
+
+
+// ============================================================
+// MODULE 11/12 — PAYMENTS & BANK RECONCILIATION (Settled stage)
+// ============================================================
+
+function renderPayments(container, params){
+  const invoicedLots = STORE.lots.filter(l => l.state === 'INVOICED');
+  const targetId = params.id;
+
+  if(targetId){
+    const l = findLot(targetId);
+    if(l && l.state === 'INVOICED') return renderSettleLot(container, l);
+  }
+
+  renderPaymentsList(container, invoicedLots);
+}
+
+function renderPaymentsList(container, invoicedLots){
+  const rows = STORE.payments.slice().reverse().map(p => {
+    const party = p.partyType === 'Supplier' ? findSupplier(p.partyId) : findCustomer(p.partyId);
+    return `
+    <tr>
+      <td class="mono">${p.id}</td>
+      <td>${party ? party.name : '—'}</td>
+      <td>${p.partyType}</td>
+      <td class="num">${fmtKES(p.amount)}</td>
+      <td>${p.rail}</td>
+      <td>${statusBadge(p.status)}</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="crumb">Money &rsaquo; Payments &amp; reconciliation</div>
+    <h1 class="page-title">Payments<span class="count-badge">${STORE.payments.length}</span></h1>
+    <p class="page-sub">Getting money out down the right rail, and matching money in against open invoices.</p>
+
+    ${invoicedLots.length ? `
+      <div class="section-label">Awaiting customer payment</div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="data-table" style="padding:16px 20px 8px;">
+          <thead><tr><th style="padding-left:20px;">Ticket</th><th>Customer</th><th>Invoice</th><th>eTIMS</th><th></th></tr></thead>
+          <tbody>
+            ${invoicedLots.map(l => {
+              const cus = findCustomer(l.customerId);
+              return `<tr>
+                <td class="mono" style="padding-left:20px;">${l.ticketNo}</td>
+                <td>${cus.name}</td>
+                <td class="mono">${l.invoiceNo}</td>
+                <td class="mono" style="font-size:11px;color:var(--text-muted);">${l.etimsControlNo}</td>
+                <td><button class="btn sm primary" data-settle="${l.id}">Record payment</button></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : ''}
+
+    <div class="section-label">Payment history</div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="data-table" style="padding:16px 20px 8px;">
+        <thead><tr><th style="padding-left:20px;">ID</th><th>Party</th><th>Type</th><th>Amount</th><th>Rail</th><th>Status</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6"><div class="empty-state">No payments recorded yet.</div></td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+
+  container.querySelectorAll('[data-settle]').forEach(btn => {
+    btn.addEventListener('click', () => navigate('payments', { id: btn.dataset.settle }));
+  });
+}
+
+function renderSettleLot(container, l){
+  const cus = findCustomer(l.customerId);
+  const sale = computeSale(l);
+
+  container.innerHTML = `
+    <div class="crumb"><a href="#" id="back-link" style="color:inherit;text-decoration:none;">Payments</a> &rsaquo; ${l.ticketNo}</div>
+    <h1 class="page-title">Record payment</h1>
+    <p class="page-sub">${l.ticketNo} &middot; ${cus.name} &middot; invoice ${l.invoiceNo}</p>
+
+    ${card('Customer payment', '', `
+      <div class="field-grid">
+        ${field({label:'Amount due', id:'amt-display', type:'calc', value: fmtKES(sale.revenue), tier:'N'})}
+        ${field({label:'Payment rail', id:'f-rail', type:'select', value:'PesaLink', tier:'N',
+          options:['Mpesa','PesaLink','Bank Transfer']})}
+      </div>
+    `)}
+
+    ${card('Bank reconciliation', 'Matched to the open invoice', `
+      ${banner('info', `On confirmation, this receipt is matched to ${l.invoiceNo} and the lot moves to Settled.`)}
+    `)}
+
+    <div class="btn-row">
+      <button class="btn primary" id="confirm-payment-btn">Confirm receipt &amp; settle lot</button>
+      <button class="btn ghost" id="cancel-btn">Cancel</button>
+    </div>
+  `;
+
+  document.getElementById('back-link').addEventListener('click', e => { e.preventDefault(); navigate('payments'); });
+  document.getElementById('cancel-btn').addEventListener('click', () => navigate('payments'));
+
+  document.getElementById('confirm-payment-btn').addEventListener('click', () => {
+    const rail = document.getElementById('f-rail').value;
+    const payment = {
+      id: 'PAY-' + (STORE.seq.payment++), partyType:'Customer', partyId: l.customerId,
+      lotId: l.id, amount: sale.revenue, rail, status:'Completed', daysAgo:0
+    };
+    STORE.payments.push(payment);
+    l.state = 'SETTLED';
+    logEvent(l.id, 'Payment received, lot settled', `${fmtKES(sale.revenue)} via ${rail} from ${cus.name}. Margin per tonne: ${fmtKES(sale.marginPerTonne)}`);
+    showToast(`${l.ticketNo} settled — margin ${fmtKES(sale.marginPerTonne)}/tonne`);
+    navigate('lots', { id: l.id });
+  });
+}
+
+
+// ============================================================
+// MODULE 13 — COST LEDGER & MARGIN
+// ============================================================
+
+function renderLedger(container){
+  const costedLots = STORE.lots.filter(l => l.state !== 'TICKET');
+
+  const rows = costedLots.map(l => {
+    const sup = findSupplier(l.supplierId);
+    const payable = computePayable(l);
+    const transport = computeTransport(l);
+    const landed = computeLandedCost(l);
+    const sale = computeSale(l);
+    return `
+      <tr>
+        <td class="mono">${l.ticketNo}</td>
+        <td>${sup.name}</td>
+        <td class="num">${fmtKES(payable.netPayable)}</td>
+        <td class="num">${fmtKES(transport.total)}</td>
+        <td class="num">${fmtKES(landed.perKg)}/kg</td>
+        <td class="num">${sale ? fmtKES(sale.marginPerTonne) : '—'}</td>
+        <td>${statusBadge(l.state)}</td>
+      </tr>`;
+  }).join('');
+
+  const settledLots = costedLots.filter(l => l.state === 'SETTLED');
+  const totalMargin = settledLots.reduce((sum,l) => { const s = computeSale(l); return sum + (s ? s.margin : 0); }, 0);
+  const avgMarginPerTonne = settledLots.length
+    ? settledLots.reduce((sum,l) => sum + computeSale(l).marginPerTonne, 0) / settledLots.length
+    : 0;
+
+  container.innerHTML = `
+    <div class="crumb">Insight &rsaquo; Cost ledger &amp; margin</div>
+    <h1 class="page-title">Cost ledger &amp; margin</h1>
+    <p class="page-sub">Every cost, tagged to a lot, traceable to its source document. This is a reporting layer over the GL — it reconciles to it, never replaces it.</p>
+
+    <div class="field-grid three" style="margin-bottom:20px;">
+      <div class="card" style="margin-bottom:0;">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Settled trades</div>
+        <div style="font-size:22px;font-weight:600;">${settledLots.length}</div>
+      </div>
+      <div class="card" style="margin-bottom:0;">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Total realised margin</div>
+        <div style="font-size:22px;font-weight:600;">${fmtKES(totalMargin)}</div>
+      </div>
+      <div class="card" style="margin-bottom:0;">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Average margin / tonne</div>
+        <div style="font-size:22px;font-weight:600;">${fmtKES(avgMarginPerTonne)}</div>
+      </div>
+    </div>
+
+    ${card('Lot cost breakdown', 'Landed cost per kg is model-independent — comparable regardless of who technically invoiced what', `
+      <table class="data-table">
+        <thead><tr><th>Ticket</th><th>Supplier</th><th>Net payable</th><th>Transport</th><th>Landed/kg</th><th>Margin/tonne</th><th>State</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7"><div class="empty-state">No costed lots yet.</div></td></tr>`}</tbody>
+      </table>
+    `)}
+  `;
+}
+
+
+// ============================================================
+// MODULE 16 — REPORTING (go-live set)
+// ============================================================
+
+function renderReports(container){
+  const stateCounts = STAGE_ORDER.reduce((acc,s) => { acc[s] = STORE.lots.filter(l=>l.state===s).length; return acc; }, {});
+  const totalPayable = STORE.lots.filter(l=>l.state!=='TICKET').reduce((sum,l) => sum + computePayable(l).netPayable, 0);
+  const paidOut = STORE.payments.filter(p=>p.partyType==='Supplier').reduce((sum,p)=>sum+p.amount,0);
+  const payablesDue = Math.max(0, totalPayable - paidOut);
+
+  const invoicedLots = STORE.lots.filter(l => l.state==='INVOICED');
+  const receivablesDue = invoicedLots.reduce((sum,l) => { const s=computeSale(l); return sum + (s?s.revenue:0); }, 0);
+
+  const cessByCounty = {};
+  STORE.lots.filter(l=>l.county).forEach(l => { cessByCounty[l.county] = (cessByCounty[l.county]||0) + (l.cess||0); });
+
+  const stockByLot = STORE.lots.filter(l => ['LOT','POSITION'].includes(l.state));
+
+  container.innerHTML = `
+    <div class="crumb">Insight &rsaquo; Reports</div>
+    <h1 class="page-title">Reports</h1>
+    <p class="page-sub">The six go-live dashboards. Nothing else at launch — reports never write, only read.</p>
+
+    ${card('Open lots by state', '', `
+      <div class="field-grid three">
+        ${STAGE_ORDER.map(s => `
+          <div style="text-align:center;padding:10px;">
+            <div style="font-size:20px;font-weight:600;">${stateCounts[s]}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${s.charAt(0)+s.slice(1).toLowerCase()}</div>
+          </div>
+        `).join('')}
+      </div>
+    `)}
+
+    <div class="field-grid" style="margin-bottom:16px;">
+      ${card('Payables due', 'Net payable to suppliers, less amounts already paid', `
+        ${calcRow('Total net payable', fmtKES(totalPayable))}
+        ${calcRow('Already paid', '&minus; ' + fmtKES(paidOut), {neg:true})}
+        ${calcRow('Outstanding', fmtKES(payablesDue), {total:true})}
+      `)}
+      ${card('Receivables due', 'Invoiced but not yet settled', `
+        ${calcRow('Invoiced, awaiting payment', fmtKES(receivablesDue), {total:true, sub: `${invoicedLots.length} invoice(s)`})}
+      `)}
+    </div>
+
+    ${card('Stock on hand by lot', 'Lots currently held — costed but not yet sold', `
+      <table class="data-table">
+        <thead><tr><th>Ticket</th><th>Location</th><th>Quantity</th><th>State</th></tr></thead>
+        <tbody>
+          ${stockByLot.length ? stockByLot.map(l => `
+            <tr><td class="mono">${l.ticketNo}</td><td>${l.county}, ${l.area}</td>
+            <td class="num">${fmtKg(computePayable(l).acceptedNetKg)}</td><td>${statusBadge(l.state)}</td></tr>
+          `).join('') : `<tr><td colspan="4"><div class="empty-state">No stock currently held.</div></td></tr>`}
+        </tbody>
+      </table>
+    `)}
+
+    ${card('Cess by county', '', `
+      ${Object.keys(cessByCounty).length ? Object.entries(cessByCounty).map(([county, amt]) => calcRow(county, fmtKES(amt))).join('')
+        : `<div class="empty-state">No cess posted yet.</div>`}
+    `)}
+  `;
+}
+
+
+// ============================================================
+// MODULE 14 — TRADE EVENT LOG
+// ============================================================
+
+function renderEventLog(container){
+  const events = STORE.events.slice().reverse();
+
+  container.innerHTML = `
+    <div class="crumb">Insight &rsaquo; Trade event log</div>
+    <h1 class="page-title">Trade event log<span class="count-badge">${events.length}</span></h1>
+    <p class="page-sub">Append-only. No role, including System Manager, can edit or delete a row here.</p>
+
+    ${card('All events', '', `
+      <table class="data-table">
+        <thead><tr><th>Lot</th><th>Action</th><th>Detail</th><th>Who</th><th>When</th></tr></thead>
+        <tbody>
+          ${events.length ? events.map(e => {
+            const lot = findLot(e.lotId);
+            return `<tr>
+              <td class="mono">${lot ? lot.ticketNo : e.lotId}</td>
+              <td><strong>${e.action}</strong></td>
+              <td style="color:var(--text-secondary);">${e.detail||''}</td>
+              <td>${e.who}</td>
+              <td style="white-space:nowrap;color:var(--text-muted);font-size:11.5px;">${e.at}</td>
+            </tr>`;
+          }).join('') : `<tr><td colspan="5"><div class="empty-state">No events logged yet.</div></td></tr>`}
+        </tbody>
+      </table>
+    `)}
+  `;
+}
+
+
+// ============================================================
+// APP SHELL — routing, sidebar, timeline
+// ============================================================
+
+const MODULE_REGISTRY = [
+  { id:'suppliers', group:'Parties', name:'Suppliers', render: renderSuppliers },
+  { id:'customers', group:'Parties', name:'Customers', render: renderCustomers },
+  { id:'lots', group:'Trade', name:'Lots', render: renderLots },
+  { id:'tickets', group:'Trade', name:'New ticket', render: renderNewTicket },
+  { id:'intake', group:'Trade', name:'Intake & quality', render: renderIntake },
+  { id:'deductions', group:'Trade', name:'Deductions & payable', render: renderDeductions },
+  { id:'transport', group:'Trade', name:'Transport & loss', render: renderTransport },
+  { id:'sales', group:'Trade', name:'Sale & invoicing', render: renderSales },
+  { id:'payments', group:'Money', name:'Payments', render: renderPayments },
+  { id:'ledger', group:'Insight', name:'Cost ledger & margin', render: renderLedger },
+  { id:'reports', group:'Insight', name:'Reports', render: renderReports },
+  { id:'eventlog', group:'Insight', name:'Trade event log', render: renderEventLog }
+];
+
+const TIMELINE = [
+  { label:'Ticket', route:'tickets' },
+  { label:'Intake', route:'intake' },
+  { label:'Lot', route:'lots' },
+  { label:'Position', route:'transport' },
+  { label:'Invoiced', route:'sales' },
+  { label:'Settled', route:'payments' }
+];
+
+let route = { module: 'lots', params: {} };
+
+function navigate(moduleId, params={}){
+  route = { module: moduleId, params };
+  render();
+  document.querySelector('.content').scrollTop = 0;
+}
+
+function renderSidebar(){
+  const el = document.getElementById('sidebar');
+  const groups = [...new Set(MODULE_REGISTRY.map(m => m.group))];
+  el.innerHTML = groups.map(g => {
+    const items = MODULE_REGISTRY.filter(m => m.group === g).map(m => `
+      <div class="mod-item ${m.id === route.module ? 'active' : ''}" data-mod="${m.id}">
+        <span class="mod-dot"></span><span>${m.name}</span>
+      </div>
+    `).join('');
+    return `<div class="sidebar-group-label">${g}</div>${items}`;
+  }).join('');
+  el.querySelectorAll('.mod-item').forEach(node => {
+    node.addEventListener('click', () => navigate(node.dataset.mod));
+  });
+}
+
+function renderTimeline(){
+  const el = document.getElementById('timeline');
+  el.innerHTML = TIMELINE.map((s, i) => `
+    ${i>0 ? '<span class="tl-arrow">&rarr;</span>' : ''}
+    <div class="tl-stage ${s.route === route.module ? 'active' : ''}" data-route="${s.route}">
+      <span class="tl-num">${i+1}</span><span>${s.label}</span>
+    </div>
+  `).join('');
+  el.querySelectorAll('.tl-stage').forEach(node => {
+    node.addEventListener('click', () => navigate(node.dataset.route));
+  });
+}
+
+function render(){
+  renderSidebar();
+  renderTimeline();
+  const mod = MODULE_REGISTRY.find(m => m.id === route.module);
+  const contentEl = document.getElementById('content');
+  contentEl.innerHTML = `<div class="content-inner" id="content-inner"></div>`;
+  const inner = document.getElementById('content-inner');
+  if(mod) mod.render(inner, route.params);
+}
+
+subscribe(render);
+render();
+
+</script>
+</body>
+</html>
