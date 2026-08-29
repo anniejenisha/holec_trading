@@ -1,0 +1,103 @@
+<div class="holec-layout">
+    <!-- Sidebar -->
+    <aside class="holec-sidebar">
+        <div class="sidebar-brand">
+            <svg class="brand-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+            <span class="brand-title">Holec ERP</span>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="nav-group-header"><span>PARTIES</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/supplier" class="nav-item"><i class="fa fa-users"></i> <span>Suppliers</span></a>
+            <a href="/app/customer" class="nav-item"><i class="fa fa-building"></i> <span>Customers</span></a>
+
+            <div class="nav-group-header" style="margin-top: 14px;"><span>TRADE</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/lot_" class="nav-item"><i class="fa fa-layer-group"></i> <span>Lots</span></a>
+            <a href="/app/buy_ticket" class="nav-item active"><i class="fa fa-file-text-o"></i> <span>New ticket</span></a>
+            <a href="/app/intake_quality" class="nav-item"><i class="fa fa-truck"></i> <span>Intake &amp; quality</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-calculator"></i> <span>Deductions &amp; payable</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-road"></i> <span>Transport &amp; loss</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-shopping-cart"></i> <span>Sale &amp; invoicing</span></a>
+
+            <div class="nav-group-header" style="margin-top: 14px;"><span>FINANCE</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/payment-entry" class="nav-item"><i class="fa fa-credit-card"></i> <span>Payments</span></a>
+
+            <div class="nav-group-header" style="margin-top: 14px;"><span>INSIGHT</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/cost_ledger_entry" class="nav-item"><i class="fa fa-bar-chart"></i> <span>Cost ledger &amp; margin</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-line-chart"></i> <span>Reports</span></a>
+            <a href="/app/lot_event_log" class="nav-item"><i class="fa fa-history"></i> <span>Trade event log</span></a>
+        </nav>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="holec-main">
+        <header class="holec-topbar">
+            <div class="breadcrumb-trail">
+                <span>Holec Trading</span> <span class="sep">&rsaquo;</span>
+                <span>Trade</span> <span class="sep">&rsaquo;</span>
+                <span class="current">New ticket</span>
+            </div>
+            <div class="user-profile">
+                <div class="avatar-circle">YU</div>
+                <div class="user-meta">
+                    <span class="user-name">You</span>
+                    <span class="user-role">Purchase User</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="ticket-page-body">
+            <h2 class="ticket-main-title">New ticket</h2>
+
+            <!-- Warning Banner -->
+            <div class="ticket-info-alert">
+                <i class="fa fa-info-circle info-icon"></i>
+                <span><strong id="supplier-unapproved-count">0</strong> supplier(s) are not yet Approved and won't appear below &mdash; check <a href="/app/supplier">Suppliers</a> to move them forward.</span>
+            </div>
+
+            <!-- Form Card -->
+            <div class="ticket-form-card">
+                <h3 class="card-section-title">Ticket details</h3>
+
+                <form id="create-buy-ticket-form">
+                    <div class="ticket-grid-row">
+                        <div class="ticket-field-col">
+                            <label class="required-lbl">Supplier</label>
+                            <select id="sel-supplier" class="ticket-control" required>
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                        <div class="ticket-field-col">
+                            <label>Item</label>
+                            <select id="sel-item" class="ticket-control">
+                                <option value="Maize">Maize</option>
+                                <option value="Beans">Beans</option>
+                            </select>
+                        </div>
+                        <div class="ticket-field-col">
+                            <label class="required-lbl">Expected quantity (kg)</label>
+                            <input type="number" id="inp-quantity" class="ticket-control" placeholder="e.g. 8000" required />
+                        </div>
+                    </div>
+
+                    <div class="ticket-grid-row" style="margin-top: 18px; width: 32%;">
+                        <div class="ticket-field-col">
+                            <label>Expected delivery date</label>
+                            <div class="date-picker-wrap">
+                                <input type="text" id="inp-delivery-date" class="ticket-control" placeholder="DD-MM-YYYY" />
+                                <i class="fa fa-calendar cal-icon"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ticket-actions-bar">
+                        <button type="submit" class="btn-primary-ticket">Create ticket</button>
+                        <button type="button" class="btn-cancel-ticket" id="btn-cancel-ticket">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+</div>

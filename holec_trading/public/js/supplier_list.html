@@ -1,0 +1,113 @@
+frappe.pages['supplier-list-view'].on_page_load = function(wrapper) {
+    var page = frappe.ui.make_app_page({
+        parent: wrapper,
+        title: 'Suppliers',
+        single_column: true
+    });
+
+    load_supplier_table(page);
+};
+
+function load_supplier_table(page, search_term = '') {
+    let filters = [];
+    if (search_term) {
+        filters = [
+            ['Supplier', 'supplier_name', 'like', `%${search_term}%`]
+        ];
+    }
+
+    frappe.call({
+        method: 'frappe.client.get_list',
+        args: {
+            doctype: 'Supplier',
+            fields: ['name', 'supplier_name', 'supplier_group', 'county', 'tax_id', 'disabled', 'is_frozen'],
+            filters: search_term ? [
+                ['Supplier', 'supplier_name', 'like', `%${search_term}%`]
+            ] : [],
+            or_filters: search_term ? [
+                ['Supplier', 'tax_id', 'like', `%${search_term}%`]
+            ] : [],
+            limit_page_length: 50,
+            order_by: 'creation desc'
+        },
+        callback: function(r) {
+            let suppliers = r.message || [];
+            render_table_html(page, suppliers, search_term);
+        }
+    });
+}
+
+function render_table_html(page, suppliers, search_term) {
+    let rows = suppliers.map(sup => {
+        let status_badge = sup.disabled ? 
+            `<span class="badge" style="background:#e2e3e5; color:#383d41; border-radius:12px; padding:4px 10px;">Draft</span>` : 
+            `<span class="badge" style="background:#d4edda; color:#155724; border-radius:12px; padding:4px 10px;">Approved</span>`;
+        
+        return `
+            <tr style="cursor: pointer;" data-name="${sup.name}">
+                <td class="align-middle">${sup.name}</td>
+                <td class="align-middle font-weight-bold">${sup.supplier_name}</td>
+                <td class="align-middle">${sup.supplier_group || '-'}</td>
+                <td class="align-middle">${sup.county || '-'}</td>
+                <td class="align-middle">${sup.tax_id || '-'}</td>
+                <td class="align-middle">${status_badge}</td>
+            </tr>
+        `;
+    }).join('');
+
+    let html = `
+        <div class="container-fluid p-4" style="background-color: #f8f9fa; min-height: 85vh;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h3 class="font-weight-bold m-0">Suppliers <span class="badge badge-secondary" style="font-size:0.6em; vertical-align: middle;">${suppliers.length}</span></h3>
+                <button class="btn btn-dark btn-sm font-weight-bold px-3 py-2" id="btn-new-supplier">+ New supplier</button>
+            </div>
+            
+            <div class="card border-0 shadow-sm p-3 mb-4">
+                <input type="text" id="supplier-search" class="form-control" placeholder="Search by name or KRA PIN" value="${search_term}" style="max-width: 400px;">
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" style="background: white;">
+                        <thead>
+                            <tr class="text-muted" style="font-size: 0.85rem; border-bottom: 2px solid #dee2e6;">
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Group</th>
+                                <th>County</th>
+                                <th>KRA PIN</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.length ? rows : '<tr><td colspan="6" class="text-center text-muted py-4">No suppliers found</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    $(page.body).html(html);
+
+    // Event Delegation for row clicks to prevent bubbling issues
+    $(page.body).find('tbody tr').on('click', function() {
+        let supplier_name = $(this).attr('data-name');
+        frappe.set_route('supplier-details', supplier_name);
+    });
+
+    // New Supplier Button Handler
+    $(page.body).find('#btn-new-supplier').on('click', function() {
+        frappe.new_doc('Supplier');
+    });
+
+    // Debounced Search Input Handler
+    let timeout;
+    $(page.body).find('#supplier-search').on('keyup', function() {
+        clearTimeout(timeout);
+        let val = $(this).val();
+        timeout = setTimeout(() => {
+            load_supplier_table(page, val);
+        }, 300);
+    });
+}

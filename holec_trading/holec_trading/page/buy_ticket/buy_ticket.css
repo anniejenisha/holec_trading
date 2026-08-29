@@ -1,0 +1,117 @@
+.ticket-page-body {
+    padding: 24px 32px 80px;
+    max-width: 1050px;
+}
+.ticket-main-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0 0 16px 0;
+}
+.ticket-info-alert {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #334155;
+    margin-bottom: 20px;
+}
+.ticket-info-alert .info-icon {
+    color: #64748b;
+    font-size: 16px;
+}
+.ticket-info-alert a {
+    color: #0f172a;
+    text-decoration: underline;
+    font-weight: 500;
+}
+.ticket-form-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 24px;
+}
+.card-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 0 0 20px 0;
+}
+.ticket-grid-row {
+    display: flex;
+    gap: 20px;
+}
+.ticket-field-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.ticket-field-col label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #334155;
+    margin-bottom: 6px;
+}
+.ticket-field-col label.required-lbl::after {
+    content: " *";
+    color: #ef4444;
+}
+.ticket-control {
+    height: 38px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: #0f172a;
+    background: #ffffff;
+    outline: none;
+    transition: border-color 0.15s;
+}
+.ticket-control:focus {
+    border-color: #94a3b8;
+}
+.date-picker-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.date-picker-wrap input {
+    width: 100%;
+}
+.date-picker-wrap .cal-icon {
+    position: absolute;
+    right: 12px;
+    color: #64748b;
+    pointer-events: none;
+}
+.ticket-actions-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 32px;
+}
+.btn-primary-ticket {
+    background: #1e3a5f;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn-primary-ticket:hover {
+    background: #152b47;
+}
+.btn-cancel-ticket {
+    background: transparent;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    cursor: pointer;
+}

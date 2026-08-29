@@ -1,97 +1,67 @@
 frappe.pages['buy_ticket'].on_page_load = function(wrapper) {
-    const doctype = 'Buy Ticket';
+    let page = frappe.ui.make_app_page({ parent: wrapper, single_column: true });
+    $(wrapper).find('.page-head').hide();
+    $(frappe.render_template('buy_ticket', {})).appendTo(page.main);
 
-    let page = frappe.ui.make_app_page({
-        parent: wrapper,
-        title: __(doctype),
-        single_column: true
+    // Fetch dropdown values & initial date
+    frappe.call({
+        method: 'holec_trading.holec_trading.page.buy_ticket.buy_ticket.get_ticket_init_data',
+        callback: function(r) {
+            if (!r.message) return;
+            const { suppliers, unapproved_count, items, today_date } = r.message;
+
+            $('#supplier-unapproved-count').text(unapproved_count);
+
+            let supplierOptions = suppliers.map(s => `
+                <option value="${s.name}">${s.supplier_name || s.name} (${s.supplier_group || 'General'})</option>
+            `);
+            $('#sel-supplier').append(supplierOptions.join(''));
+
+            if (items && items.length) {
+                let itemOptions = items.map(i => `<option value="${i.name}">${i.item_name || i.name}</option>`);
+                $('#sel-item').html(itemOptions.join(''));
+            }
+
+            let todayFormatted = frappe.datetime.str_to_user(today_date || frappe.datetime.get_today());
+            $('#inp-delivery-date').val(todayFormatted);
+        }
     });
 
-    // Primary action button in standard page header
-    page.set_primary_action(__('Add ' + doctype), () => {
-        frappe.new_doc(doctype);
-    }, 'octicon octicon-plus');
+    // Handle form submit
+    $('#create-buy-ticket-form').on('submit', function(e) {
+        e.preventDefault();
 
-    // Secondary action to jump to standard list view
-    page.add_inner_button(__('Full List'), () => {
-        frappe.set_route('List', doctype);
-    });
+        let supplier = $('#sel-supplier').val();
+        let item = $('#sel-item').val();
+        let qty = $('#inp-quantity').val();
+        let dateVal = $('#inp-delivery-date').val();
 
-    // Full-width container layout
-    let $container = $(`
-        <div class="card p-3 shadow-sm border-0" id="doctype-view-container">
-            <div id="doctype-list-wrapper">
-                <div class="text-center py-5 text-muted">
-                    <i class="fa fa-spinner fa-spin"></i> ${__('Loading records...')}
-                </div>
-            </div>
-        </div>
-    `).appendTo(page.main);
-
-    // Fetch meta & load list
-    frappe.model.with_doctype(doctype, function() {
-        let meta = frappe.get_meta(doctype);
-        let columns = ['name'];
-
-        // Get standard list view fields (excluding tables)
-        meta.fields
-            .filter(f => f.in_list_view && f.fieldtype !== 'Table')
-            .slice(0, 5)
-            .forEach(f => {
-                columns.push(f.fieldname);
-            });
-        columns.push('modified');
+        if (!qty) {
+            frappe.show_alert({ message: __('Enter an expected quantity'), indicator: 'orange' });
+            return;
+        }
 
         frappe.call({
-            method: 'frappe.client.get_list',
+            method: 'holec_trading.holec_trading.page.buy_ticket.buy_ticket.submit_new_ticket',
             args: {
-                doctype: doctype,
-                fields: columns,
-                limit_page_length: 20,
-                order_by: 'modified desc'
+                supplier: supplier,
+                item: item,
+                expected_qty: qty,
+                delivery_date: frappe.datetime.user_to_str(dateVal)
             },
+            freeze: true,
             callback: function(r) {
-                let data = r.message || [];
-                render_table($container.find('#doctype-list-wrapper'), doctype, columns, data);
+                if (r.message) {
+                    frappe.show_alert({ message: __('Ticket created successfully'), indicator: 'green' });
+                    // Navigate back to the Lots page
+                    frappe.set_route('lot_');
+                }
             }
         });
     });
 
-    function render_table($parent, doctype, columns, data) {
-        if (!data.length) {
-            $parent.html(`
-                <div class="text-center text-muted py-5">
-                    <i class="fa fa-folder-open-o fa-2x mb-2 d-block"></i>
-                    <p class="mb-0">${__('No records found for')} <strong>${__(doctype)}</strong></p>
-                </div>
-            `);
-            return;
-        }
-
-        let table_html = `
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead class="thead-light">
-                        <tr>
-                            ${columns.map(c => `<th>${frappe.unscrub(c)}</th>`).join('')}
-                            <th class="text-center" style="width: 100px;">${__('Action')}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.map(row => `
-                            <tr>
-                                ${columns.map(c => `<td>${row[c] !== null && row[c] !== undefined ? row[c] : '-'}</td>`).join('')}
-                                <td class="text-center">
-                                    <a href="/app/${frappe.router.slug(doctype)}/${encodeURIComponent(row.name)}" class="btn btn-xs btn-outline-primary">
-                                        ${__('Open')}
-                                    </a>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-        $parent.html(table_html);
-    }
+    // Cancel Button
+    $('#btn-cancel-ticket').on('click', function() {
+        frappe.set_route('lot_');
+    });
 };

@@ -59,7 +59,7 @@ doctype_js = {
 	# explicitly. Our own doctypes (Buy Ticket, Lot, ...) don't need an
 	# entry here - Frappe auto-loads <doctype>/<doctype>.js from their own
 	# doctype folder.
-	"Supplier": "public/js/supplier.js",
+	"Supplier": ["public/js/supplier.js","public/js/supplier_list.js"]
 }
 
 # ---------------------------------------------------------------------------

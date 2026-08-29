@@ -1,0 +1,108 @@
+<div class="holec-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="holec-sidebar">
+        <div class="sidebar-brand">
+            <svg class="brand-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+            <span class="brand-title">Holec ERP</span>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="nav-group-header"><span>PARTIES</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/supplier" class="nav-item"><i class="fa fa-users"></i> <span>Suppliers</span></a>
+            <a href="/app/customer" class="nav-item"><i class="fa fa-building"></i> <span>Customers</span></a>
+
+            <div class="nav-group-header" style="margin-top: 14px;"><span>TRADE</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/lot_" class="nav-item active"><i class="fa fa-layer-group"></i> <span>Lots</span></a>
+            <a href="/app/buy_ticket" class="nav-item"><i class="fa fa-file-text-o"></i> <span>New ticket</span></a>
+            <a href="/app/intake_quality" class="nav-item"><i class="fa fa-truck"></i> <span>Intake &amp; quality</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-calculator"></i> <span>Deductions &amp; payable</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-road"></i> <span>Transport &amp; loss</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-shopping-cart"></i> <span>Sale &amp; invoicing</span></a>
+
+            <div class="nav-group-header" style="margin-top: 14px;"><span>FINANCE</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/payment-entry" class="nav-item"><i class="fa fa-credit-card"></i> <span>Payments</span></a>
+
+            <div class="nav-group-header" style="margin-top: 14px;"><span>INSIGHT</span> <i class="fa fa-angle-down"></i></div>
+            <a href="/app/cost_ledger_entry" class="nav-item"><i class="fa fa-bar-chart"></i> <span>Cost ledger &amp; margin</span></a>
+            <a href="#" class="nav-item"><i class="fa fa-line-chart"></i> <span>Reports</span></a>
+            <a href="/app/lot_event_log" class="nav-item"><i class="fa fa-history"></i> <span>Trade event log</span></a>
+        </nav>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="holec-main">
+        <!-- Top App Bar -->
+        <header class="holec-topbar">
+            <div class="breadcrumb-trail">
+                <span>Holec Trading</span> <span class="sep">&rsaquo;</span>
+                <span>Trade</span> <span class="sep">&rsaquo;</span>
+                <span class="current">Lots</span>
+            </div>
+            <div class="user-profile">
+                <div class="avatar-circle">YU</div>
+                <div class="user-meta">
+                    <span class="user-name">You</span>
+                    <span class="user-role">Purchase User</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stepper Workflow Header -->
+        <section class="stage-stepper">
+            <div class="step-item"><span class="step-num">1</span> Ticket</div>
+            <span class="step-arrow">&rsaquo;</span>
+            <div class="step-item"><span class="step-num">2</span> Intake</div>
+            <span class="step-arrow">&rsaquo;</span>
+            <div class="step-item active"><span class="step-num">3</span> Lot</div>
+            <span class="step-arrow">&rsaquo;</span>
+            <div class="step-item"><span class="step-num">4</span> Position</div>
+            <span class="step-arrow">&rsaquo;</span>
+            <div class="step-item"><span class="step-num">5</span> Invoiced</div>
+            <span class="step-arrow">&rsaquo;</span>
+            <div class="step-item"><span class="step-num">6</span> Settled</div>
+        </section>
+
+        <!-- Content Area -->
+        <div class="lots-container">
+            <div class="lots-header-bar">
+                <div class="title-with-badge">
+                    <h2>Lots</h2>
+                    <span class="badge-total" id="badge-total-count">0</span>
+                </div>
+                <button class="btn-new-ticket" id="btn-open-new-ticket">+ New ticket</button>
+            </div>
+
+            <!-- State Filter Buttons -->
+            <div class="filter-pills" id="filter-pills-bar">
+                <button class="filter-pill active" data-state="All">All</button>
+                <button class="filter-pill" data-state="Ticket">Ticket (<span id="count-ticket">0</span>)</button>
+                <button class="filter-pill" data-state="Intake">Intake (<span id="count-intake">0</span>)</button>
+                <button class="filter-pill" data-state="Lot">Lot (<span id="count-lot">0</span>)</button>
+                <button class="filter-pill" data-state="Position">Position (<span id="count-position">0</span>)</button>
+                <button class="filter-pill" data-state="Invoiced">Invoiced (<span id="count-invoiced">0</span>)</button>
+                <button class="filter-pill" data-state="Settled">Settled (<span id="count-settled">0</span>)</button>
+            </div>
+
+            <!-- Lots Grid Table -->
+            <div class="table-card">
+                <table class="holec-grid-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable">Ticket <span class="sort-icon">&uarr;&darr;</span></th>
+                            <th>Lot ID</th>
+                            <th>Supplier</th>
+                            <th>Origin</th>
+                            <th class="text-right">Quantity</th>
+                            <th>State</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lots-table-body">
+                        <!-- Filled by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>

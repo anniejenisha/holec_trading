@@ -1,0 +1,37 @@
+/* Target the Buy Ticket route in both List and Form views */
+body[data-route*="buy-ticket"] {
+    overflow-x: hidden !important;
+}
+
+/* 1. Completely hide standard Desk sidebars, navbar, header, and breadcrumbs */
+body[data-route*="buy-ticket"] .desk-sidebar,
+body[data-route*="buy-ticket"] .layout-side-section,
+body[data-route*="buy-ticket"] .standard-sidebar-section,
+body[data-route*="buy-ticket"] .body-sidebar,
+body[data-route*="buy-ticket"] .form-sidebar,
+body[data-route*="buy-ticket"] .page-head,
+body[data-route*="buy-ticket"] .navbar,
+body[data-route*="buy-ticket"] #navbar-breadcrumbs,
+body[data-route*="buy-ticket"] .page-actions,
+body[data-route*="buy-ticket"] .frappe-list,
+body[data-route*="buy-ticket"] .page-form {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 2. Reset containers to span 100% full screen width */
+body[data-route*="buy-ticket"] .main-section,
+body[data-route*="buy-ticket"] .page-container,
+body[data-route*="buy-ticket"] .layout-main-section-wrapper,
+body[data-route*="buy-ticket"] .layout-main-section,
+body[data-route*="buy-ticket"] .page-body,
+body[data-route*="buy-ticket"] .page-wrapper,
+body[data-route*="buy-ticket"] .container-page-body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+}
