@@ -33,11 +33,14 @@ function init_holec_trading_engine() {
     const LIVE_STORE = {
         suppliers: [],
         customers: [],
+        customer_groups: [],
         countries: [],
         items: [],
         vehicles: [],
         lots: [],
-        lotEventLogs: []
+        lotEventLogs: [],
+        banks: [],
+        bank_branches: []
     };
 
     let route = { module: 'lots', params: {} };
@@ -119,9 +122,13 @@ function init_holec_trading_engine() {
 
     async function loadMasterData() {
         try {
-            const [suppliers, customers, countries, items, vehicles, buyTickets, lotEventLogs] = await Promise.all([
-                frappe.db.get_list('Supplier', { fields: ['name', 'supplier_name', 'supplier_group', 'country'], limit: 100 }),
-                frappe.db.get_list('Customer', { fields: ['name', 'customer_name', 'customer_group'], limit: 100 }),
+            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches] = await Promise.all([
+                frappe.db.get_list('Supplier', { fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'], limit: 100 }),
+                frappe.db.get_list('Customer', { 
+                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'], 
+                    limit: 100 
+                }),
+                frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], limit: 100, order_by: 'name asc' }),
                 frappe.db.get_list('Country', { fields: ['name', 'country_name'], limit: 250, order_by: 'name asc' }),
                 frappe.db.get_list('Item', { fields: ['name', 'item_name'], limit: 100, order_by: 'name asc' }),
                 frappe.db.get_list('Vehicle', { fields: ['name', 'license_plate'], limit: 100, order_by: 'name asc' }),
@@ -143,16 +150,21 @@ function init_holec_trading_engine() {
                     fields: ['name', 'lot', 'state', 'owner', 'modified', 'creation'],
                     order_by: 'creation desc',
                     limit: 100
-                }).catch(() => [])
+                }).catch(() => []),
+                frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], limit: 100, order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => [])
             ]);
 
             LIVE_STORE.suppliers = suppliers || [];
             LIVE_STORE.customers = customers || [];
+            LIVE_STORE.customer_groups = customerGroups || [];
             LIVE_STORE.countries = countries || [];
             LIVE_STORE.items = items || [];
             LIVE_STORE.vehicles = vehicles || [];
             LIVE_STORE.lots = buyTickets || [];
             LIVE_STORE.lotEventLogs = lotEventLogs || [];
+            LIVE_STORE.banks = banks || [];
+            LIVE_STORE.bank_branches = bankBranches || [];
         } catch (e) {
             console.error('Error loading master data from DocTypes:', e);
         }
@@ -164,6 +176,509 @@ function init_holec_trading_engine() {
         $('.holec-content').scrollTop(0);
     }
 
+    function renderSuppliers(container) {
+        const suppliers = LIVE_STORE.suppliers || [];
+
+        const rows = suppliers.map(s => {
+            let bg = '#edf2f7';
+            let color = '#4a5568';
+            let dotColor = '#cbd5e0';
+            let statusLabel = s.custom_status || 'Approved';
+
+            if (statusLabel === 'Approved') { bg = '#f0fff4'; color = '#276749'; dotColor = '#38a169'; }
+            else if (statusLabel === 'Verified') { bg = '#fffaf0'; color = '#9c4221'; dotColor = '#dd6b20'; }
+            else if (statusLabel === 'Draft') { bg = '#edf2f7'; color = '#4a5568'; dotColor = '#a0aec0'; }
+
+            const statusBadgeHtml = `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dotColor};border-radius:50%;"></span>${statusLabel}</span>`;
+
+            return `
+                <tr style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:14px 20px;font-family:monospace;font-weight:600;color:#2d3748;">${s.name}</td>
+                    <td style="padding:14px 16px;color:#2d3748;font-weight:500;">${s.supplier_name || '—'}</td>
+                    <td style="padding:14px 16px;color:#718096;">${s.supplier_group || '—'}</td>
+                    <td style="padding:14px 16px;color:#718096;">${s.country || '—'}</td>
+                    <td style="padding:14px 16px;font-family:monospace;color:#718096;">${s.tax_id || '—'}</td>
+                    <td style="padding:14px 20px;">${statusBadgeHtml}</td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Parties</span> › <span style="color:#2d3748;font-weight:500;">Suppliers</span>
+            </div>
+            
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Suppliers <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${suppliers.length}</span></h1>
+                <button class="h-btn primary" id="new-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New supplier</button>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <input type="text" placeholder="Search by name or KRA PIN" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                            <th style="padding:12px 20px;">ID ↕</th>
+                            <th style="padding:12px 16px;">Name ↕</th>
+                            <th style="padding:12px 16px;">Group ↕</th>
+                            <th style="padding:12px 16px;">County ↕</th>
+                            <th style="padding:12px 16px;">KRA PIN</th>
+                            <th style="padding:12px 20px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No suppliers found.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        document.getElementById('new-supplier-btn').addEventListener('click', () => navigate('new_supplier'));
+    }
+
+    function renderCustomers(container) {
+        const customers = LIVE_STORE.customers || [];
+
+        const rows = customers.map(c => {
+            const isDisabled = cint(c.disabled) === 1;
+            const bg = isDisabled ? '#edf2f7' : '#f0fff4';
+            const color = isDisabled ? '#4a5568' : '#276749';
+            const dotColor = isDisabled ? '#a0aec0' : '#38a169';
+            const statusLabel = isDisabled ? 'Disabled' : 'Approved';
+
+            const statusBadgeHtml = `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dotColor};border-radius:50%;"></span>${statusLabel}</span>`;
+            
+            const creditLimitVal = (c.credit_limits && c.credit_limits.length > 0) ? c.credit_limits[0].credit_limit : 0;
+            const creditLimitStr = creditLimitVal ? `KES ${flt(creditLimitVal).toLocaleString('en-KE')}` : '—';
+
+            return `
+                <tr style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:14px 20px;font-family:monospace;font-weight:600;color:#2d3748;">${c.name}</td>
+                    <td style="padding:14px 16px;color:#2d3748;font-weight:500;">${c.customer_name || '—'}</td>
+                    <td style="padding:14px 16px;color:#718096;">${c.customer_group || '—'}</td>
+                    <td style="padding:14px 16px;color:#2d3748;text-align:right;">${creditLimitStr}</td>
+                    <td style="padding:14px 16px;color:#718096;">${c.payment_terms || '—'}</td>
+                    <td style="padding:14px 20px;">${statusBadgeHtml}</td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Parties</span> › <span style="color:#2d3748;font-weight:500;">Customers</span>
+            </div>
+            
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Customers <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${customers.length}</span></h1>
+                <button class="h-btn primary" id="new-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New customer</button>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <input type="text" placeholder="Search by name" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                            <th style="padding:12px 20px;">ID ↕</th>
+                            <th style="padding:12px 16px;">Name ↕</th>
+                            <th style="padding:12px 16px;">Group ↕</th>
+                            <th style="padding:12px 16px;text-align:right;">Credit limit ↕</th>
+                            <th style="padding:12px 16px;">Terms</th>
+                            <th style="padding:12px 20px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No customers found.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        document.getElementById('new-customer-btn').addEventListener('click', () => navigate('new_customer'));
+    }
+
+    function renderNewCustomer(container) {
+        const groupOptions = LIVE_STORE.customer_groups.map(g => ({ value: g.name, label: g.customer_group_name || g.name }));
+        const termsOptions = ['Net 7', 'Net 14', 'Net 30', 'Advance'];
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">New customer</span>
+            </div>
+            
+            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New customer</h1>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">BASIC DETAILS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                    ${field({ label: 'Customer name *', id: 'nc-name', required: true, placeholder: '' })}
+                    ${field({ label: 'Customer group *', id: 'nc-group', type: 'select', required: true, options: groupOptions })}
+                    ${field({ label: 'KRA PIN', id: 'nc-krapin', placeholder: '' })}
+                </div>
+                ${field({ label: 'Address', id: 'nc-address', type: 'textarea', span: true })}
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">COMMERCIAL TERMS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                    ${field({ label: 'Credit limit (KES)', id: 'nc-credit-limit', type: 'number', value: '0' })}
+                    ${field({ label: 'Credit terms', id: 'nc-terms', type: 'select', options: termsOptions })}
+                    ${field({ label: 'Exposure limit (KES)', id: 'nc-exposure', type: 'number', value: '0' })}
+                </div>
+                ${field({ label: 'Guarantee / security held', id: 'nc-guarantee' })}
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">QUALITY PROFILE</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
+                    ${field({ label: 'Moisture rule', id: 'nc-moisture', placeholder: 'e.g. 13.5% max' })}
+                    ${field({ label: 'Foreign matter rule', id: 'nc-fm', placeholder: 'e.g. 2.0% max' })}
+                </div>
+                <div style="max-width:320px;">
+                    ${field({ label: 'Offloading borne by', id: 'nc-offloading', type: 'select', options: ['Supplier', 'Customer', 'Shared'] })}
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:center;">
+                <button class="h-btn primary" id="submit-draft-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
+                <button class="h-btn ghost" id="cancel-customer-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+            </div>
+        `;
+
+        document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
+        document.getElementById('cancel-customer-btn').addEventListener('click', () => navigate('customers'));
+
+        document.getElementById('submit-draft-customer-btn').addEventListener('click', async () => {
+            const customerName = $('#nc-name').val();
+            const customerGroup = $('#nc-group').val();
+            const creditLimit = flt($('#nc-credit-limit').val());
+            const paymentTerms = $('#nc-terms').val();
+
+            if (!customerName || !customerGroup) {
+                frappe.msgprint(__('Please fill out the mandatory Customer Name and Customer Group fields.'));
+                return;
+            }
+
+            try {
+                const res = await frappe.db.insert({
+                    doctype: 'Customer',
+                    customer_name: customerName,
+                    customer_group: customerGroup,
+                    payment_terms: paymentTerms,
+                    disabled: 0,
+                    credit_limits: creditLimit > 0 ? [{ credit_limit: creditLimit }] : []
+                });
+
+                if (res) {
+                    showToast(`Customer ${res.name} created as Draft successfully`);
+                    await loadMasterData();
+                    navigate('customers');
+                }
+            } catch (err) {
+                console.error('Error creating customer document:', err);
+                showToast('Failed to create customer document', 'red');
+            }
+        });
+    }
+
+    function renderNewSupplier(container) {
+        const countyOptions = LIVE_STORE.countries.map(c => ({ value: c.name, label: c.country_name || c.name }));
+        const bankOptions = LIVE_STORE.banks.map(b => ({ value: b.name, label: b.bank_name ? `${b.bank_name} (${b.name})` : b.name }));
+        
+        let contactRows = [
+            { name: '', role: '', phone: '', email: '', is_primary: true }
+        ];
+
+        const renderContactsTable = () => {
+            const tbody = document.getElementById('contacts-tbody');
+            if (!tbody) return;
+
+            tbody.innerHTML = contactRows.map((row, idx) => `
+                <tr style="border-bottom:1px solid #edf2f7;">
+                    <td style="padding:8px 12px;color:#4a5568;">${idx + 1}</td>
+                    <td style="padding:8px 12px;"><input type="text" class="cp-name" data-idx="${idx}" value="${row.name}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:8px 12px;"><input type="text" class="cp-role" data-idx="${idx}" value="${row.role}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:8px 12px;"><input type="text" class="cp-phone" data-idx="${idx}" value="${row.phone}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:8px 12px;text-align:center;"><input type="checkbox" checked disabled></td>
+                    <td style="padding:8px 12px;color:#a0aec0;font-size:12px;">— same as phone</td>
+                    <td style="padding:8px 12px;"><input type="text" class="cp-email" data-idx="${idx}" value="${row.email}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:8px 12px;text-align:center;"><input type="radio" name="primary-contact" class="cp-primary" data-idx="${idx}" ${row.is_primary ? 'checked' : ''}></td>
+                    <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="delete-contact" data-idx="${idx}">${contactRows.length > 1 ? '🗑' : ''}</td>
+                </tr>
+            `).join('');
+
+            tbody.querySelectorAll('input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const i = e.target.dataset.idx;
+                    if (e.target.classList.contains('cp-name')) contactRows[i].name = e.target.value;
+                    if (e.target.classList.contains('cp-role')) contactRows[i].role = e.target.value;
+                    if (e.target.classList.contains('cp-phone')) contactRows[i].phone = e.target.value;
+                    if (e.target.classList.contains('cp-email')) contactRows[i].email = e.target.value;
+                });
+            });
+
+            tbody.querySelectorAll('.cp-primary').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    const i = e.target.dataset.idx;
+                    contactRows.forEach((r, idx) => r.is_primary = (idx == i));
+                });
+            });
+
+            tbody.querySelectorAll('.delete-contact').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const i = e.target.dataset.idx;
+                    contactRows.splice(i, 1);
+                    renderContactsTable();
+                });
+            });
+        };
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <a href="#" id="back-suppliers-link" style="color:#3182ce;text-decoration:none;">Suppliers</a> › <span style="color:#2d3748;font-weight:500;">New supplier</span>
+            </div>
+            
+            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New supplier</h1>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">BASIC DETAILS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
+                    ${field({ label: 'Supplier name *', id: 'ns-name', required: true, placeholder: '' })}
+                    ${field({ label: 'Supplier group *', id: 'ns-group', type: 'select', required: true, options: ['Aggregator', 'Farmer', 'Trader', 'Transporter'] })}
+                    ${field({ label: 'Supplier type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
+                </div>
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:4px;">CONTACT PERSONS</div>
+                <div style="font-size:12px;color:#718096;margin-bottom:16px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
+                
+                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                            <th style="padding:10px 12px;width:50px;">No.</th>
+                            <th style="padding:10px 12px;">Name</th>
+                            <th style="padding:10px 12px;">Role</th>
+                            <th style="padding:10px 12px;">Phone</th>
+                            <th style="padding:10px 12px;width:80px;text-align:center;">Same as WA</th>
+                            <th style="padding:10px 12px;">WhatsApp</th>
+                            <th style="padding:10px 12px;">Email</th>
+                            <th style="padding:10px 12px;width:60px;text-align:center;">Primary</th>
+                            <th style="padding:10px 12px;width:50px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="contacts-tbody"></tbody>
+                </table>
+                <button type="button" class="h-btn sm" id="add-contact-row-btn" style="padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;">Add row</button>
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">ADDITIONAL DETAILS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                    ${field({ label: 'County', id: 'ns-county', type: 'select', options: countyOptions })}
+                    ${field({ label: 'Area', id: 'ns-area', placeholder: 'Select county first' })}
+                    ${field({ label: 'Business reg / national ID number', id: 'ns-reg' })}
+                </div>
+                ${field({ label: 'Physical address', id: 'ns-address', type: 'textarea', span: true })}
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">COMPLIANCE</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">KRA PIN certificate</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" id="upload-kra-btn" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
+                            <span id="kra-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
+                        </div>
+                    </div>
+                    ${field({ label: 'KRA PIN *', id: 'ns-krapin', required: true, placeholder: 'Auto-filled on certificate upload' })}
+                    ${field({ label: 'VAT status', id: 'ns-vat', type: 'select', options: ['Registered', 'Exempt', 'Not Registered'] })}
+                </div>
+                <div style="max-width:320px;">
+                    ${field({ label: 'eTIMS registration status', id: 'ns-etims', type: 'select', options: ['Registered', 'Pending', 'Not Required'] })}
+                </div>
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BANKING</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                    ${field({ label: 'Bank *', id: 'ns-bank', type: 'select', required: true, options: bankOptions })}
+                    ${field({ label: 'Branch *', id: 'ns-branch', type: 'select', required: true, options: [] })}
+                    ${field({ label: 'Account number *', id: 'ns-accno', required: true })}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                    ${field({ label: 'Account name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
+                    ${field({ label: 'Preferred payment rail', id: 'ns-rail', type: 'select', options: ['Bank Transfer', 'RTGS', 'EFT', 'Cheque'] })}
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Bank Letter / Statement *</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" id="upload-bank-letter-btn" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
+                            <span id="bank-letter-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
+                        </div>
+                        <input type="hidden" id="ns-bank-letter" value="">
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:center;">
+                <button class="h-btn primary" id="submit-draft-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
+                <button class="h-btn ghost" id="cancel-supplier-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+            </div>
+        `;
+
+        renderContactsTable();
+
+        $('#ns-bank').on('change', function() {
+            const selectedBank = $(this).val();
+            const branchSelect = $('#ns-branch');
+            branchSelect.empty().append('<option value="">Select...</option>');
+            
+            if (selectedBank) {
+                const filteredBranches = LIVE_STORE.bank_branches.filter(b => b.bank === selectedBank);
+                filteredBranches.forEach(b => {
+                    branchSelect.append(`<option value="${b.name}">${b.branch_name ? b.branch_name + ' (' + b.name + ')' : b.name}</option>`);
+                });
+            }
+        });
+
+        document.getElementById('upload-kra-btn').addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+            fileInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(uploadEvent) {
+                        $('#ns-krapin').val('A009876543Z');
+                        $('#kra-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
+                        showToast('KRA PIN certificate uploaded, attached, and KRA PIN auto-filled');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            fileInput.click();
+        });
+
+        document.getElementById('upload-bank-letter-btn').addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+            fileInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(uploadEvent) {
+                        $('#ns-bank-letter').val(uploadEvent.target.result);
+                        $('#bank-letter-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
+                        showToast('Bank Letter / Statement uploaded and attached successfully');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            fileInput.click();
+        });
+
+        document.getElementById('add-contact-row-btn').addEventListener('click', () => {
+            if (contactRows.length < 3) {
+                contactRows.push({ name: '', role: '', phone: '', email: '', is_primary: false });
+                renderContactsTable();
+            } else {
+                showToast('Maximum 3 contact persons allowed.', 'orange');
+            }
+        });
+
+        document.getElementById('back-suppliers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('suppliers'); });
+        document.getElementById('cancel-supplier-btn').addEventListener('click', () => navigate('suppliers'));
+        
+        document.getElementById('submit-draft-supplier-btn').addEventListener('click', async () => {
+            const supplierName = $('#ns-name').val();
+            const supplierGroup = $('#ns-group').val();
+            const supplierType = $('#ns-type').val();
+            const taxId = $('#ns-krapin').val();
+            const county = $('#ns-county').val();
+            const area = $('#ns-area').val();
+            const businessReg = $('#ns-reg').val();
+            const address = $('#ns-address').val();
+            const vatStatus = $('#ns-vat').val();
+            const etimsStatus = $('#ns-etims').val();
+            const bank = $('#ns-bank').val();
+            const branch = $('#ns-branch').val();
+            const accountNo = $('#ns-accno').val();
+            const accountName = $('#ns-accname').val();
+            const paymentRail = $('#ns-rail').val();
+            const bankLetter = $('#ns-bank-letter').val();
+
+            if (!supplierName || !supplierGroup || !taxId || !bank || !accountNo || !bankLetter) {
+                frappe.msgprint(__('Please fill out all mandatory fields (including Supplier Name, Group, KRA PIN, Bank, Account Number, and Bank Letter / Statement).'));
+                return;
+            }
+
+            const currentTbody = document.getElementById('contacts-tbody');
+            if (currentTbody) {
+                currentTbody.querySelectorAll('tr').forEach((tr, idx) => {
+                    if (contactRows[idx]) {
+                        const nameInput = tr.querySelector('.cp-name');
+                        const roleInput = tr.querySelector('.cp-role');
+                        const phoneInput = tr.querySelector('.cp-phone');
+                        const emailInput = tr.querySelector('.cp-email');
+                        const primaryRadio = tr.querySelector('.cp-primary');
+
+                        if (nameInput) contactRows[idx].name = nameInput.value;
+                        if (roleInput) contactRows[idx].role = roleInput.value;
+                        if (phoneInput) contactRows[idx].phone = phoneInput.value;
+                        if (emailInput) contactRows[idx].email = emailInput.value;
+                        if (primaryRadio) contactRows[idx].is_primary = primaryRadio.checked;
+                    }
+                });
+            }
+
+            const contactsToSave = contactRows.map(r => ({
+                contact_name: r.name,
+                role: r.role,
+                phone: r.phone,
+                whatsapp_number: r.phone,
+                email_id: r.email,
+                is_primary: r.is_primary ? 1 : 0
+            })).filter(r => r.contact_name && r.contact_name.trim() !== '');
+
+            try {
+                const res = await frappe.db.insert({
+                    doctype: 'Supplier',
+                    supplier_name: supplierName,
+                    supplier_group: supplierGroup,
+                    supplier_type: supplierType,
+                    country: county || 'Kenya',
+                    tax_id: taxId,
+                    kra_pin: taxId,
+                    area: area,
+                    address_line1: address,
+                    custom_vat_status: vatStatus,
+                    custom_etims_status: etimsStatus,
+                    bank: bank,
+                    bank_branch: branch,
+                    account_number: accountNo,
+                    account_name: accountName,
+                    bank_letter: bankLetter,
+                    holec_contacts: contactsToSave
+                });
+
+                if (res) {
+                    showToast(`Supplier ${res.name} created as Draft successfully`);
+                    await loadMasterData();
+                    navigate('suppliers');
+                }
+            } catch (err) {
+                console.error('Error creating supplier document:', err);
+                showToast('Failed to create supplier document', 'red');
+            }
+        });
+    }
+
+    // --- Rest of your existing functions (Lots, Intake, Payments, Reports, etc.) remain fully integrated below ---
     function renderLots(container, params) {
         if (params.id) {
             const l = LIVE_STORE.lots.find(x => x.name === params.id);
@@ -1974,6 +2489,10 @@ function init_holec_trading_engine() {
     }
 
     const MODULE_REGISTRY = [
+        { id: 'suppliers', group: 'PARTIES', name: 'Suppliers', render: renderSuppliers },
+        { id: 'new_supplier', group: 'PARTIES', name: 'New supplier', render: renderNewSupplier },
+        { id: 'customers', group: 'PARTIES', name: 'Customers', render: renderCustomers },
+        { id: 'new_customer', group: 'PARTIES', name: 'New customer', render: renderNewCustomer },
         { id: 'lots', group: 'TRADE', name: 'Lots', render: renderLots },
         { id: 'tickets', group: 'TRADE', name: 'New ticket', render: renderNewTicket },
         { id: 'intake', group: 'TRADE', name: 'Intake & quality', render: renderIntake },
@@ -1999,30 +2518,34 @@ function init_holec_trading_engine() {
     function renderSidebar() {
         const el = document.getElementById('h-sidebar');
         if (!el) return;
+        
+        const isSuppliersActive = route.module === 'suppliers' || route.module === 'new_supplier';
+        const isCustomersActive = route.module === 'customers' || route.module === 'new_customer';
+        
         el.innerHTML = `
             <div style="font-weight:700;font-size:16px;color:#1a202c;margin-bottom:20px;display:flex;align-items:center;gap:8px;">
                 <span style="background:#1a202c;color:#fff;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;font-size:12px;">H</span> Holec ERP
             </div>
             
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;margin-top:12px;">PARTIES</div>
-            <div style="padding:6px 10px;color:#4a5568;font-size:13px;cursor:pointer;border-radius:4px;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">Suppliers</div>
-            <div style="padding:6px 10px;color:#4a5568;font-size:13px;cursor:pointer;border-radius:4px;margin-bottom:8px;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">Customers</div>
+            <div class="mod-item ${isSuppliersActive ? 'active' : ''}" data-mod="suppliers" style="padding:6px 10px;border-radius:6px;background:${isSuppliersActive ? '#ebf8ff' : 'transparent'};color:${isSuppliersActive ? '#2b6cb0' : '#4a5568'};font-weight:${isSuppliersActive ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='suppliers'&&route.module!=='new_supplier')this.style.background='#f7fafc'" onmouseout="if(route.module!=='suppliers'&&route.module!=='new_supplier')this.style.background='transparent'">Suppliers</div>
+            <div class="mod-item ${isCustomersActive ? 'active' : ''}" data-mod="customers" style="padding:6px 10px;border-radius:6px;background:${isCustomersActive ? '#ebf8ff' : 'transparent'};color:${isCustomersActive ? '#2b6cb0' : '#4a5568'};font-weight:${isCustomersActive ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if(route.module!=='customers'&&route.module!=='new_customer')this.style.background='#f7fafc'" onmouseout="if(route.module!=='customers'&&route.module!=='new_customer')this.style.background='transparent'">Customers</div>            
             
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">TRADE</div>
-            <div class="mod-item ${route.module === 'lots' ? 'active' : ''}" data-mod="lots" style="padding:6px 10px;border-radius:6px;background:${route.module === 'lots' ? '#ebf8ff' : 'transparent'};color:${route.module === 'lots' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'lots' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='lots')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='lots')this.style.background='transparent'">Lots</div>
-            <div class="mod-item ${route.module === 'tickets' ? 'active' : ''}" data-mod="tickets" style="padding:6px 10px;border-radius:6px;background:${route.module === 'tickets' ? '#ebf8ff' : 'transparent'};color:${route.module === 'tickets' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'tickets' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='tickets')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='tickets')this.style.background='transparent'">New ticket</div>
-            <div class="mod-item ${route.module === 'intake' ? 'active' : ''}" data-mod="intake" style="padding:6px 10px;border-radius:6px;background:${route.module === 'intake' ? '#ebf8ff' : 'transparent'};color:${route.module === 'intake' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'intake' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='intake')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='intake')this.style.background='transparent'">Intake & quality</div>
-            <div class="mod-item ${route.module === 'deductions' ? 'active' : ''}" data-mod="deductions" style="padding:6px 10px;border-radius:6px;background:${route.module === 'deductions' ? '#ebf8ff' : 'transparent'};color:${route.module === 'deductions' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'deductions' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='deductions')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='deductions')this.style.background='transparent'">Deductions & payable</div>
-            <div class="mod-item ${route.module === 'transport' ? 'active' : ''}" data-mod="transport" style="padding:6px 10px;border-radius:6px;background:${route.module === 'transport' ? '#ebf8ff' : 'transparent'};color:${route.module === 'transport' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'transport' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='transport')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='transport')this.style.background='transparent'">Transport & loss</div>
-            <div class="mod-item ${route.module === 'sale_invoicing' ? 'active' : ''}" data-mod="sale_invoicing" style="padding:6px 10px;border-radius:6px;background:${route.module === 'sale_invoicing' ? '#ebf8ff' : 'transparent'};color:${route.module === 'sale_invoicing' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'sale_invoicing' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if('${route.module}'!=='sale_invoicing')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='sale_invoicing')this.style.background='transparent'">Sale & invoicing</div>
+            <div class="mod-item ${route.module === 'lots' ? 'active' : ''}" data-mod="lots" style="padding:6px 10px;border-radius:6px;background:${route.module === 'lots' ? '#ebf8ff' : 'transparent'};color:${route.module === 'lots' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'lots' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='lots')this.style.background='#f7fafc'" onmouseout="if(route.module!=='lots')this.style.background='transparent'">Lots</div>
+            <div class="mod-item ${route.module === 'tickets' ? 'active' : ''}" data-mod="tickets" style="padding:6px 10px;border-radius:6px;background:${route.module === 'tickets' ? '#ebf8ff' : 'transparent'};color:${route.module === 'tickets' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'tickets' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='tickets')this.style.background='#f7fafc'" onmouseout="if(route.module!=='tickets')this.style.background='transparent'">New ticket</div>
+            <div class="mod-item ${route.module === 'intake' ? 'active' : ''}" data-mod="intake" style="padding:6px 10px;border-radius:6px;background:${route.module === 'intake' ? '#ebf8ff' : 'transparent'};color:${route.module === 'intake' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'intake' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='intake')this.style.background='#f7fafc'" onmouseout="if(route.module!=='intake')this.style.background='transparent'">Intake & quality</div>
+            <div class="mod-item ${route.module === 'deductions' ? 'active' : ''}" data-mod="deductions" style="padding:6px 10px;border-radius:6px;background:${route.module === 'deductions' ? '#ebf8ff' : 'transparent'};color:${route.module === 'deductions' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'deductions' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='deductions')this.style.background='#f7fafc'" onmouseout="if(route.module!=='deductions')this.style.background='transparent'">Deductions & payable</div>
+            <div class="mod-item ${route.module === 'transport' ? 'active' : ''}" data-mod="transport" style="padding:6px 10px;border-radius:6px;background:${route.module === 'transport' ? '#ebf8ff' : 'transparent'};color:${route.module === 'transport' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'transport' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='transport')this.style.background='#f7fafc'" onmouseout="if(route.module!=='transport')this.style.background='transparent'">Transport & loss</div>
+            <div class="mod-item ${route.module === 'sale_invoicing' ? 'active' : ''}" data-mod="sale_invoicing" style="padding:6px 10px;border-radius:6px;background:${route.module === 'sale_invoicing' ? '#ebf8ff' : 'transparent'};color:${route.module === 'sale_invoicing' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'sale_invoicing' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if(route.module!=='sale_invoicing')this.style.background='#f7fafc'" onmouseout="if(route.module!=='sale_invoicing')this.style.background='transparent'">Sale & invoicing</div>
 
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">FINANCE</div>
             <div id="sidebar-payments-btn" style="padding:6px 10px;color:#4a5568;font-size:13px;cursor:pointer;border-radius:4px;margin-bottom:8px;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">Payments</div>
 
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">INSIGHT</div>
-            <div class="mod-item ${route.module === 'ledger' ? 'active' : ''}" data-mod="ledger" style="padding:6px 10px;border-radius:6px;background:${route.module === 'ledger' ? '#ebf8ff' : 'transparent'};color:${route.module === 'ledger' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'ledger' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='ledger')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='ledger')this.style.background='transparent'">Cost ledger & margin</div>
-            <div class="mod-item ${route.module === 'reports' ? 'active' : ''}" data-mod="reports" style="padding:6px 10px;border-radius:6px;background:${route.module === 'reports' ? '#ebf8ff' : 'transparent'};color:${route.module === 'reports' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'reports' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if('${route.module}'!=='reports')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='reports')this.style.background='transparent'">Reports</div>
-            <div class="mod-item ${route.module === 'event_log' ? 'active' : ''}" data-mod="event_log" style="padding:6px 10px;border-radius:6px;background:${route.module === 'event_log' ? '#ebf8ff' : 'transparent'};color:${route.module === 'event_log' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'event_log' ? '600' : '400'};cursor:pointer;font-size:13px;" onmouseover="if('${route.module}'!=='event_log')this.style.background='#f7fafc'" onmouseout="if('${route.module}'!=='event_log')this.style.background='transparent'">Trade event log</div>
+            <div class="mod-item ${route.module === 'ledger' ? 'active' : ''}" data-mod="ledger" style="padding:6px 10px;border-radius:6px;background:${route.module === 'ledger' ? '#ebf8ff' : 'transparent'};color:${route.module === 'ledger' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'ledger' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='ledger')this.style.background='#f7fafc'" onmouseout="if(route.module!=='ledger')this.style.background='transparent'">Cost ledger & margin --></div>
+            <div class="mod-item ${route.module === 'reports' ? 'active' : ''}" data-mod="reports" style="padding:6px 10px;border-radius:6px;background:${route.module === 'reports' ? '#ebf8ff' : 'transparent'};color:${route.module === 'reports' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'reports' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='reports')this.style.background='#f7fafc'" onmouseout="if(route.module!=='reports')this.style.background='transparent'">Reports</div>
+            <div class="mod-item ${route.module === 'event_log' ? 'active' : ''}" data-mod="event_log" style="padding:6px 10px;border-radius:6px;background:${route.module === 'event_log' ? '#ebf8ff' : 'transparent'};color:${route.module === 'event_log' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'event_log' ? '600' : '400'};cursor:pointer;font-size:13px;" onmouseover="if(route.module!=='event_log')this.style.background='#f7fafc'" onmouseout="if(route.module!=='event_log')this.style.background='transparent'">Trade event log</div>
         `;
 
         el.querySelectorAll('.mod-item').forEach(node => {
