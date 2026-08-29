@@ -10,13 +10,13 @@ frappe.pages['holec_trading'].on_page_load = function(wrapper) {
     $(page.wrapper).find('.desk-sidebar').remove();
     $(page.main).css({ 'width': '100%', 'margin': '0', 'padding': '0' });
     $(page.main).html(`
-        <div class="holec-layout" style="display:flex;height:calc(100vh - 40px);background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-            <div class="holec-sidebar" id="h-sidebar" style="width:240px;background:#ffffff;border-right:1px solid #e2e8f0;padding:16px 12px;overflow-y:auto;flex-shrink:0;"></div>
-            <div class="holec-main-container" style="flex-grow:1;display:flex;flex-direction:column;overflow:hidden;">
-                <div class="holec-topbar" style="height:56px;background:#ffffff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;flex-shrink:0;">
-                    <div class="holec-timeline" id="h-timeline" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#4a5568;"></div>
+        <div class="holec-layout" style="display:flex; width:100%; height:100vh; background:#f4f5f7; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; position:absolute; top:0; left:0; right:0; bottom:0; overflow:hidden;">
+            <div class="holec-sidebar" id="h-sidebar" style="width:240px; background:#ffffff; border-right:1px solid #e2e8f0; padding:16px 12px; overflow-y:auto; flex-shrink:0;"></div>
+            <div class="holec-main-container" style="flex-grow:1; display:flex; flex-direction:column; overflow:hidden; min-width:0;">
+                <div class="holec-topbar" style="height:56px; background:#ffffff; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; padding:0 24px; flex-shrink:0;">
+                    <div class="holec-timeline" id="h-timeline" style="display:flex; align-items:center; gap:6px; font-size:13px; color:#4a5568;"></div>
                 </div>
-                <div class="holec-content" id="h-content" style="flex-grow:1;overflow-y:auto;padding:24px;"></div>
+                <div class="holec-content" id="h-content" style="flex-grow:1; overflow-y:auto; padding:24px; width:100%;"></div>
             </div>
         </div>
     `);
