@@ -544,25 +544,58 @@ function init_holec_trading_engine() {
             }
         });
 
-        document.getElementById('upload-kra-btn').addEventListener('click', () => {
-            const fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.accept = '.pdf,.jpg,.jpeg,.png';
-            fileInput.onchange = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(uploadEvent) {
-                        $('#ns-krapin').val('A009876543Z');
-                        $('#kra-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
-                        showToast('KRA PIN certificate uploaded, attached, and KRA PIN auto-filled');
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-            fileInput.click();
-        });
+      document.getElementById('upload-kra-btn').addEventListener('click', () => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+                fileInput.onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = async function(uploadEvent) {
+                            const base64Data = uploadEvent.target.result;
+                            showToast('Extracting KRA PIN automatically...', 'orange');
 
+                            // Call Frappe backend method
+                            frappe.call({
+    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_pin',
+    args: {
+        filedata: base64Data,
+        filename: file.name
+    },
+    callback: function(r) {
+        if (r.message) {
+            const extractedPin = r.message;
+
+            $('#ns-krapin').val(extractedPin);
+
+            $('#kra-file-name')
+                .text(file.name)
+                .css({
+                    color: '#276749',
+                    'font-style': 'normal',
+                    'font-weight': '500'
+                });
+
+            showToast(
+                `KRA PIN ${extractedPin} extracted and updated automatically`
+            );
+        } else {
+            showToast(
+                'Could not automatically parse KRA PIN. Please enter manually.',
+                'orange'
+            );
+
+            $('#kra-file-name').text(file.name);
+        }
+    }
+});
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                };
+                fileInput.click();
+            });
         document.getElementById('upload-bank-letter-btn').addEventListener('click', () => {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
@@ -1951,7 +1984,8 @@ function init_holec_trading_engine() {
     }
 
     function renderNewTicket(container) {
-        const itemOptions = LIVE_STORE.items.map(i => ({ value: i.name, label: i.item_name ? `${i.item_name} (${i.name})` : i.name }));
+        const uniqueCommodities = [...new Set(LIVE_STORE.lots.map(l => l.commodity).filter(Boolean))];
+        const defaultCommodity = uniqueCommodities.length > 0 ? uniqueCommodities[0] : 'Maize';
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
@@ -1968,7 +2002,73 @@ function init_holec_trading_engine() {
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
                     ${field({ label: 'Supplier *', id: 'f-supplier', type: 'select', required: true, options: LIVE_STORE.suppliers.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })) })}
-                    ${field({ label: 'Item', id: 'f-item', type: 'select', value: itemOptions.length > 0 ? itemOptions[0].value : '', options: itemOptions })}
+                    ${field({ label: 'Commodity', id: 'f-item', type: 'select', value: defaultCommodity, options: uniqueCommodities })}
+                    ${field({ label: 'Expected quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
+                </div>
+                <div style="margin-top:20px;max-width:320px;">
+                    ${field({ label: 'Expected delivery date', id: 'f-date', type: 'date', value: frappe.datetime.get_today() })}
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:center;">
+                <button class="h-btn primary" id="create-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Create ticket</button>
+                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+            </div>
+        `;
+
+        document.getElementById('cancel-btn').addEventListener('click', () => navigate('lots'));
+        document.getElementById('create-ticket-btn').addEventListener('click', async () => {
+            const supplier = $('#f-supplier').val();
+            const commodity = $('#f-item').val();
+            const qty = parseFloat($('#f-qty').val()) || 0;
+
+            if (!supplier) { frappe.msgprint(__('Please select a Supplier.')); return; }
+            if (qty <= 0) { frappe.msgprint(__('Please enter a valid Expected Quantity.')); return; }
+
+            const res = await frappe.db.insert({
+                doctype: 'Buy Ticket',
+                supplier: supplier,
+                commodity: commodity,
+                quantity_kg: qty,
+                status: 'Ticket',
+                negotiated_price: 48.0
+            });
+
+            if (res) {
+                showToast(`Ticket ${res.name} created successfully`);
+                await loadMasterData();
+                navigate('lots', { id: res.name });
+            }
+        });
+    }async function renderNewTicket(container) {
+        let commodityOptions = ['Maize', 'Beans'];
+        
+        try {
+            const meta = await frappe.model.with_doctype('Buy Ticket');
+            const fieldMeta = frappe.meta.get_docfield('Buy Ticket', 'commodity');
+            if (fieldMeta && fieldMeta.options) {
+                commodityOptions = fieldMeta.options.split('\n').filter(Boolean);
+            }
+        } catch (e) {
+            console.error('Error fetching Buy Ticket meta options:', e);
+        }
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">New ticket</span>
+            </div>
+            <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1a202c;">New ticket</h1>
+            
+            <div style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#2b6cb0;display:flex;align-items:center;gap:8px;">
+                <span>ℹ</span>
+                <span>2 supplier(s) are not yet Approved and won't appear below — check Suppliers to move them forward.</span>
+            </div>
+
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
+                    ${field({ label: 'Supplier *', id: 'f-supplier', type: 'select', required: true, options: LIVE_STORE.suppliers.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })) })}
+                    ${field({ label: 'Item', id: 'f-item', type: 'select', value: commodityOptions[0] || '', options: commodityOptions })}
                     ${field({ label: 'Expected quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
                 </div>
                 <div style="margin-top:20px;max-width:320px;">
