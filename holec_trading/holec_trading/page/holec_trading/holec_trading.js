@@ -544,58 +544,57 @@ function init_holec_trading_engine() {
             }
         });
 
-      document.getElementById('upload-kra-btn').addEventListener('click', () => {
-                const fileInput = document.createElement('input');
-                fileInput.type = 'file';
-                fileInput.accept = '.pdf,.jpg,.jpeg,.png';
-                fileInput.onchange = (e) => {
-                    const file = e.target.files[0];
-                    if (file) {
-                        const reader = new FileReader();
-                        reader.onload = async function(uploadEvent) {
-                            const base64Data = uploadEvent.target.result;
-                            showToast('Extracting KRA PIN automatically...', 'orange');
+     document.getElementById('upload-kra-btn').addEventListener('click', () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+    fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = async function(uploadEvent) {
+                const base64Data = uploadEvent.target.result;
+                showToast('Extracting KRA PIN automatically...', 'orange');
 
-                            // Call Frappe backend method
-                            frappe.call({
-    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_pin',
-    args: {
-        filedata: base64Data,
-        filename: file.name
-    },
-    callback: function(r) {
-        if (r.message) {
-            const extractedPin = r.message;
+                frappe.call({
+                    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_pin',
+                    args: {
+                        filedata: base64Data,
+                        filename: file.name
+                    },
+                    callback: function(r) {
+                        if (r.message) {
+                            const extractedPin = r.message;
 
-            $('#ns-krapin').val(extractedPin);
+                            $('#ns-krapin').val(extractedPin);
 
-            $('#kra-file-name')
-                .text(file.name)
-                .css({
-                    color: '#276749',
-                    'font-style': 'normal',
-                    'font-weight': '500'
-                });
+                            $('#kra-file-name')
+                                .text(file.name)
+                                .css({
+                                    color: '#276749',
+                                    'font-style': 'normal',
+                                    'font-weight': '500'
+                                });
 
-            showToast(
-                `KRA PIN ${extractedPin} extracted and updated automatically`
-            );
-        } else {
-            showToast(
-                'Could not automatically parse KRA PIN. Please enter manually.',
-                'orange'
-            );
+                            showToast(
+                                `KRA PIN ${extractedPin} extracted and updated automatically`
+                            );
+                        } else {
+                            showToast(
+                                'Could not automatically parse KRA PIN. Please enter manually.',
+                                'orange'
+                            );
 
-            $('#kra-file-name').text(file.name);
-        }
-    }
-});
-                        };
-                        reader.readAsDataURL(file);
+                            $('#kra-file-name').text(file.name);
+                        }
                     }
-                };
-                fileInput.click();
-            });
+                });
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    fileInput.click();
+});
         document.getElementById('upload-bank-letter-btn').addEventListener('click', () => {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
