@@ -1,10 +1,32 @@
 import base64
 import io
 import re
+import subprocess
+import sys
+import frappe
+
+
+def _ensure_dependencies():
+    """Automatically install required OCR packages if missing in cloud environment."""
+    required_packages = ["pytesseract", "pdf2image", "Pillow"]
+    for package in required_packages:
+        try:
+            __import__(package if package != "Pillow" else "PIL")
+        except ImportError:
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", package]
+                )
+            except Exception:
+                pass
+
+
+# Run check on module load
+_ensure_dependencies()
+
 from PIL import Image
 import pytesseract
 from pypdf import PdfReader
-import frappe
 
 
 def find_kra_pin(text):
@@ -15,7 +37,6 @@ def find_kra_pin(text):
     if not text:
         return None
 
-    # Strategy 1: Search for explicit KRA PIN format globally across the text
     clean_text = (
         text.upper()
         .replace(" ", "")
@@ -29,7 +50,6 @@ def find_kra_pin(text):
     if global_matches:
         return global_matches[0]
 
-    # Strategy 2: Fallback to normalized label-based matching
     normalized_text = re.sub(r"\s+", " ", text).upper()
     labeled_patterns = [
         r"TAXPAYER\s*PIN\s*[|:\-\s]*([A-Z]\d{9}[A-Z])",
@@ -47,7 +67,7 @@ def find_kra_pin(text):
 
 
 def extract_pin_from_image(image_bytes):
-    """Extract KRA PIN directly from image bytes (JPG, PNG, etc.) using OCR."""
+    """Extract KRA PIN directly from image bytes using OCR."""
     try:
         image = Image.open(io.BytesIO(image_bytes))
         page_text = pytesseract.image_to_string(image, config="--psm 6")
@@ -73,7 +93,6 @@ def extract_kra_pin_from_pdf(pdf_bytes):
         if pin:
             return pin, text
 
-        # OCR Fallback for scanned PDFs
         from pdf2image import convert_from_bytes
 
         images = convert_from_bytes(pdf_bytes, dpi=300)
@@ -95,30 +114,29 @@ def extract_kra_pin_from_pdf(pdf_bytes):
 def extract_kra_pin(filedata, filename=None):
     """Whitelisted entry point called from the frontend JavaScript."""
     try:
+        _ensure_dependencies()
+
         if "," in filedata:
             filedata = filedata.split(",", 1)[1]
 
         file_bytes = base64.b64decode(filedata)
         filename_lower = (filename or "").lower()
 
-        # Handle image uploads directly or fallback properly
         if filename_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")):
             pin, _ = extract_pin_from_image(file_bytes)
             if pin:
                 return pin
 
-        # Try PDF extraction first
         pin, text = extract_kra_pin_from_pdf(file_bytes)
         if pin:
             return pin
 
-        # Final safety fallback: try image OCR even if filename extension wasn't explicitly matched
         pin, _ = extract_pin_from_image(file_bytes)
         if pin:
             return pin
 
         frappe.logger().warning(
-            f"Could not find KRA PIN in file: {filename}. Snippet: {text[:300] if 'text' in locals() and text else 'EMPTY'}"
+            f"Could not find KRA PIN in file: {filename}."
         )
         return None
 
