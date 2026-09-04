@@ -1,4 +1,4 @@
-frappe.pages['holec_trading'].on_page_load = function(wrapper) {
+frappe.pages['holec_trading'].on_page_load = function (wrapper) {
     const page = frappe.ui.make_app_page({
         parent: wrapper,
         title: 'Holec Trading',
@@ -83,7 +83,9 @@ function init_holec_trading_engine() {
         return { acceptedNetKg, netPayable, landedCostPerKg, totalTransport };
     }
 
-    function showToast(msg, indicator = 'green') { frappe.show_alert({ message: msg, indicator: indicator }); }
+    function showToast(msg, indicator = 'green') { 
+        frappe.show_alert({ message: msg, indicator: indicator }); 
+    }
     
     function statusBadge(st) {
         const stateLower = (st || 'Ticket').toLowerCase();
@@ -105,6 +107,7 @@ function init_holec_trading_engine() {
         const reqMark = required ? '<span style="color:#e53e3e;margin-left:2px;">*</span>' : '';
         const cleanLabel = label.replace(/\s*\*$/, '');
         let input;
+        
         if (type === 'select') {
             const opts_html = (options || []).map(o => {
                 const val = typeof o === 'object' ? o.value : o;
@@ -113,25 +116,30 @@ function init_holec_trading_engine() {
             }).join('');
             input = `<select id="${id}" style="width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;font-size:14px;"><option value="">Select...</option>${opts_html}</select>`;
         } else if (type === 'textarea') {
-            return `<div style="${span ? 'grid-column: span 2;' : ''}display:flex;flex-direction:column;gap:6px;"><label for="${id}" style="font-size:13px;font-weight:500;color:#4a5568;">${cleanLabel} ${reqMark}</label><textarea id="${id}" placeholder="${placeholder}" style="width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;min-height:80px;">${value}</textarea></div>`;
+            return `<div style="${span ? 'grid-column: span 2;' : ''}display:flex;flex-direction:column;gap:8px;"><label for="${id}" style="font-size:13px;font-weight:500;color:#4a5568;">${cleanLabel} ${reqMark}</label><textarea id="${id}" placeholder="${placeholder}" style="width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;min-height:80px;">${value}</textarea></div>`;
         } else {
             input = `<input type="${type}" id="${id}" value="${value}" placeholder="${placeholder}" style="width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;">`;
         }
-        return `<div style="${span ? 'grid-column: span 2;' : ''}display:flex;flex-direction:column;gap:6px;"><label for="${id}" style="font-size:13px;font-weight:500;color:#4a5568;">${cleanLabel} ${reqMark}</label>${input}</div>`;
+        return `<div style="${span ? 'grid-column: span 2;' : ''}display:flex;flex-direction:column;gap:8px;"><label for="${id}" style="font-size:13px;font-weight:500;color:#4a5568;">${cleanLabel} ${reqMark}</label>${input}</div>`;
     }
 
     async function loadMasterData() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches] = await Promise.all([
-                frappe.db.get_list('Supplier', { fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'], limit: 100 }),
-                frappe.db.get_list('Customer', { 
+                frappe.db.get_list('Supplier', { filters: { supplier_group: 'Holec Trading' }, fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'] }),
+                frappe.db.get_list('Customer', { filters: { customer_group: 'Holec Trading' }, 
                     fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'], 
                     limit: 100 
                 }),
-                frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], limit: 100, order_by: 'name asc' }),
+                frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc' }),
                 frappe.db.get_list('Country', { fields: ['name', 'country_name'], limit: 250, order_by: 'name asc' }),
-                frappe.db.get_list('Item', { fields: ['name', 'item_name'], limit: 100, order_by: 'name asc' }),
-                frappe.db.get_list('Vehicle', { fields: ['name', 'license_plate'], limit: 100, order_by: 'name asc' }),
+                frappe.db.get_list('Item', { 
+                    filters: { item_group: 'Holec Trading' }, 
+                    fields: ['name', 'item_name', 'item_group'], 
+                    limit: 100, 
+                    order_by: 'item_name asc' 
+                }),
+                frappe.db.get_list('Vehicle', { fields: ['name', 'license_plate'], order_by: 'name asc' }),
                 frappe.db.get_list('Buy Ticket', {
                     fields: [
                         'name', 'status', 'supplier', 'customer', 'commodity', 'region',
@@ -151,7 +159,7 @@ function init_holec_trading_engine() {
                     order_by: 'creation desc',
                     limit: 100
                 }).catch(() => []),
-                frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], limit: 100, order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], order_by: 'name asc' }).catch(() => []),
                 frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => [])
             ]);
 
@@ -203,16 +211,16 @@ function init_holec_trading_engine() {
         }).join('');
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Parties</span> › <span style="color:#2d3748;font-weight:500;">Suppliers</span>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Suppliers <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${suppliers.length}</span></h1>
                 <button class="h-btn primary" id="new-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New supplier</button>
             </div>
 
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:20px;">
                 <input type="text" placeholder="Search by name or KRA PIN" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
             </div>
 
@@ -265,16 +273,16 @@ function init_holec_trading_engine() {
         }).join('');
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Parties</span> › <span style="color:#2d3748;font-weight:500;">Customers</span>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Customers <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${customers.length}</span></h1>
                 <button class="h-btn primary" id="new-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New customer</button>
             </div>
 
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:20px;">
                 <input type="text" placeholder="Search by name" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
             </div>
 
@@ -285,7 +293,7 @@ function init_holec_trading_engine() {
                             <th style="padding:12px 20px;">ID ↕</th>
                             <th style="padding:12px 16px;">Name ↕</th>
                             <th style="padding:12px 16px;">Group ↕</th>
-                            <th style="padding:12px 16px;text-align:right;">Credit limit ↕</th>
+                            <th style="padding:12px 16px;text-align:right;">Credit Limit ↕</th>
                             <th style="padding:12px 16px;">Terms</th>
                             <th style="padding:12px 20px;">Status</th>
                         </tr>
@@ -304,46 +312,46 @@ function init_holec_trading_engine() {
         const termsOptions = ['Net 7', 'Net 14', 'Net 30', 'Advance'];
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">New customer</span>
             </div>
             
             <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New customer</h1>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">BASIC DETAILS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
-                    ${field({ label: 'Customer name *', id: 'nc-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Customer group *', id: 'nc-group', type: 'select', required: true, options: groupOptions })}
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Customer Name *', id: 'nc-name', required: true, placeholder: '' })}
+                    ${field({ label: 'Customer Group *', id: 'nc-group', type: 'select', required: true, options: groupOptions })}
                     ${field({ label: 'KRA PIN', id: 'nc-krapin', placeholder: '' })}
                 </div>
                 ${field({ label: 'Address', id: 'nc-address', type: 'textarea', span: true })}
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">COMMERCIAL TERMS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
-                    ${field({ label: 'Credit limit (KES)', id: 'nc-credit-limit', type: 'number', value: '0' })}
-                    ${field({ label: 'Credit terms', id: 'nc-terms', type: 'select', options: termsOptions })}
-                    ${field({ label: 'Exposure limit (KES)', id: 'nc-exposure', type: 'number', value: '0' })}
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">COMMERCIAL TERMS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Credit Limit (KES)', id: 'nc-credit-limit', type: 'number', value: '0' })}
+                    ${field({ label: 'Credit Terms', id: 'nc-terms', type: 'select', options: termsOptions })}
+                    ${field({ label: 'Exposure Limit (KES)', id: 'nc-exposure', type: 'number', value: '0' })}
                 </div>
-                ${field({ label: 'Guarantee / security held', id: 'nc-guarantee' })}
+                ${field({ label: 'Guarantee / Security Held', id: 'nc-guarantee' })}
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">QUALITY PROFILE</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
-                    ${field({ label: 'Moisture rule', id: 'nc-moisture', placeholder: 'e.g. 13.5% max' })}
-                    ${field({ label: 'Foreign matter rule', id: 'nc-fm', placeholder: 'e.g. 2.0% max' })}
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">QUALITY PROFILE</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Moisture Rule', id: 'nc-moisture', placeholder: 'e.g. 13.5% max' })}
+                    ${field({ label: 'Foreign Matter Rule', id: 'nc-fm', placeholder: 'e.g. 2.0% max' })}
                 </div>
                 <div style="max-width:320px;">
-                    ${field({ label: 'Offloading borne by', id: 'nc-offloading', type: 'select', options: ['Supplier', 'Customer', 'Shared'] })}
+                    ${field({ label: 'Offloading Borne By', id: 'nc-offloading', type: 'select', options: ['Supplier', 'Customer', 'Shared'] })}
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-draft-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
-                <button class="h-btn ghost" id="cancel-customer-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="submit-draft-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
+                <button class="h-btn ghost" id="cancel-customer-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
             </div>
         `;
 
@@ -397,15 +405,15 @@ function init_holec_trading_engine() {
 
             tbody.innerHTML = contactRows.map((row, idx) => `
                 <tr style="border-bottom:1px solid #edf2f7;">
-                    <td style="padding:8px 12px;color:#4a5568;">${idx + 1}</td>
-                    <td style="padding:8px 12px;"><input type="text" class="cp-name" data-idx="${idx}" value="${row.name}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:8px 12px;"><input type="text" class="cp-role" data-idx="${idx}" value="${row.role}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:8px 12px;"><input type="text" class="cp-phone" data-idx="${idx}" value="${row.phone}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:8px 12px;text-align:center;"><input type="checkbox" checked disabled></td>
-                    <td style="padding:8px 12px;color:#a0aec0;font-size:12px;">— same as phone</td>
-                    <td style="padding:8px 12px;"><input type="text" class="cp-email" data-idx="${idx}" value="${row.email}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:8px 12px;text-align:center;"><input type="radio" name="primary-contact" class="cp-primary" data-idx="${idx}" ${row.is_primary ? 'checked' : ''}></td>
-                    <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="delete-contact" data-idx="${idx}">${contactRows.length > 1 ? '🗑' : ''}</td>
+                    <td style="padding:10px 12px;color:#4a5568;">${idx + 1}</td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-name" data-idx="${idx}" value="${row.name}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-role" data-idx="${idx}" value="${row.role}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-phone" data-idx="${idx}" value="${row.phone}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:10px 12px;text-align:center;"><input type="checkbox" checked disabled></td>
+                    <td style="padding:10px 12px;color:#a0aec0;font-size:12px;">— same as phone</td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-email" data-idx="${idx}" value="${row.email}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:10px 12px;text-align:center;"><input type="radio" name="primary-contact" class="cp-primary" data-idx="${idx}" ${row.is_primary ? 'checked' : ''}></td>
+                    <td style="padding:10px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="delete-contact" data-idx="${idx}">${contactRows.length > 1 ? '🗑' : ''}</td>
                 </tr>
             `).join('');
 
@@ -436,26 +444,26 @@ function init_holec_trading_engine() {
         };
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <a href="#" id="back-suppliers-link" style="color:#3182ce;text-decoration:none;">Suppliers</a> › <span style="color:#2d3748;font-weight:500;">New supplier</span>
             </div>
             
             <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New supplier</h1>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:12px;">BASIC DETAILS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
-                    ${field({ label: 'Supplier name *', id: 'ns-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Supplier group *', id: 'ns-group', type: 'select', required: true, options: ['Aggregator', 'Farmer', 'Trader', 'Transporter'] })}
-                    ${field({ label: 'Supplier type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                    ${field({ label: 'Supplier Name *', id: 'ns-name', required: true, placeholder: '' })}
+                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Aggregator', 'Farmer', 'Trader', 'Transporter'] })}
+                    ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:4px;">CONTACT PERSONS</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">CONTACT PERSONS</div>
                 <div style="font-size:12px;color:#718096;margin-bottom:16px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
                 
-                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;">
                     <thead>
                         <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
                             <th style="padding:10px 12px;width:50px;">No.</th>
@@ -474,47 +482,47 @@ function init_holec_trading_engine() {
                 <button type="button" class="h-btn sm" id="add-contact-row-btn" style="padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;">Add row</button>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">ADDITIONAL DETAILS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'County', id: 'ns-county', type: 'select', options: countyOptions })}
                     ${field({ label: 'Area', id: 'ns-area', placeholder: 'Select county first' })}
-                    ${field({ label: 'Business reg / national ID number', id: 'ns-reg' })}
+                    ${field({ label: 'Business Reg / National ID Number', id: 'ns-reg' })}
                 </div>
-                ${field({ label: 'Physical address', id: 'ns-address', type: 'textarea', span: true })}
+                ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true })}
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">COMPLIANCE</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">KRA PIN certificate</label>
-                        <div style="display:flex;align-items:center;gap:8px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">KRA PIN Certificate</label>
+                        <div style="display:flex;align-items:center;gap:12px;">
                             <button type="button" id="upload-kra-btn" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
                             <span id="kra-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
                         </div>
                     </div>
                     ${field({ label: 'KRA PIN *', id: 'ns-krapin', required: true, placeholder: 'Auto-filled on certificate upload' })}
-                    ${field({ label: 'VAT status', id: 'ns-vat', type: 'select', options: ['Registered', 'Exempt', 'Not Registered'] })}
+                    ${field({ label: 'VAT Status', id: 'ns-vat', type: 'select', options: ['Registered', 'Exempt', 'Not Registered'] })}
                 </div>
                 <div style="max-width:320px;">
-                    ${field({ label: 'eTIMS registration status', id: 'ns-etims', type: 'select', options: ['Registered', 'Pending', 'Not Required'] })}
+                    ${field({ label: 'eTIMS Registration Status', id: 'ns-etims', type: 'select', options: ['Registered', 'Pending', 'Not Required'] })}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BANKING</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Bank *', id: 'ns-bank', type: 'select', required: true, options: bankOptions })}
                     ${field({ label: 'Branch *', id: 'ns-branch', type: 'select', required: true, options: [] })}
-                    ${field({ label: 'Account number *', id: 'ns-accno', required: true })}
+                    ${field({ label: 'Account Number *', id: 'ns-accno', required: true })}
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
-                    ${field({ label: 'Account name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
-                    ${field({ label: 'Preferred payment rail', id: 'ns-rail', type: 'select', options: ['Bank Transfer', 'RTGS', 'EFT', 'Cheque'] })}
-                    <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Account Name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
+                    ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: ['Bank Transfer', 'RTGS', 'EFT', 'Cheque'] })}
+                    <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="font-size:13px;font-weight:500;color:#4a5568;">Bank Letter / Statement *</label>
-                        <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
                             <button type="button" id="upload-bank-letter-btn" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
                             <span id="bank-letter-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
                         </div>
@@ -524,8 +532,8 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-draft-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
-                <button class="h-btn ghost" id="cancel-supplier-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="submit-draft-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
+                <button class="h-btn ghost" id="cancel-supplier-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
             </div>
         `;
 
@@ -544,57 +552,43 @@ function init_holec_trading_engine() {
             }
         });
 
-     document.getElementById('upload-kra-btn').addEventListener('click', () => {
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.pdf,.jpg,.jpeg,.png';
-    fileInput.onchange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = async function(uploadEvent) {
-                const base64Data = uploadEvent.target.result;
-                showToast('Extracting KRA PIN automatically...', 'orange');
+        document.getElementById('upload-kra-btn').addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+            fileInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = async function(uploadEvent) {
+                        const base64Data = uploadEvent.target.result;
+                        showToast('Extracting KRA PIN automatically...', 'orange');
 
-                frappe.call({
-                    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_pin',
-                    args: {
-                        filedata: base64Data,
-                        filename: file.name
-                    },
-                    callback: function(r) {
-                        if (r.message) {
-                            const extractedPin = r.message;
-
-                            $('#ns-krapin').val(extractedPin);
-
-                            $('#kra-file-name')
-                                .text(file.name)
-                                .css({
-                                    color: '#276749',
-                                    'font-style': 'normal',
-                                    'font-weight': '500'
-                                });
-
-                            showToast(
-                                `KRA PIN ${extractedPin} extracted and updated automatically`
-                            );
-                        } else {
-                            showToast(
-                                'Could not automatically parse KRA PIN. Please enter manually.',
-                                'orange'
-                            );
-
-                            $('#kra-file-name').text(file.name);
-                        }
-                    }
-                });
+                        frappe.call({
+                            method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_pin',
+                            args: {
+                                filedata: base64Data,
+                                filename: file.name
+                            },
+                            callback: function(r) {
+                                if (r && r.message) {
+                                    const extractedPin = r.message;
+                                    $('#ns-krapin').val(extractedPin);
+                                    $('#kra-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
+                                    showToast(`KRA PIN ${extractedPin} extracted and updated automatically`);
+                                } else {
+                                    showToast('Could not automatically parse KRA PIN. Please enter manually.', 'orange');
+                                    $('#kra-file-name').text(file.name);
+                                }
+                            }
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                }
             };
-            reader.readAsDataURL(file);
-        }
-    };
-    fileInput.click();
-});
+            fileInput.click();
+        });
+
         document.getElementById('upload-bank-letter-btn').addEventListener('click', () => {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
@@ -710,7 +704,6 @@ function init_holec_trading_engine() {
         });
     }
 
-    // --- Rest of your existing functions (Lots, Intake, Payments, Reports, etc.) remain fully integrated below ---
     function renderLots(container, params) {
         if (params.id) {
             const l = LIVE_STORE.lots.find(x => x.name === params.id);
@@ -748,11 +741,11 @@ function init_holec_trading_engine() {
         }, {});
 
         container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Lots <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${LIVE_STORE.lots.length}</span></h1>
-                <button class="h-btn primary" id="new-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New ticket</button>
+                <button class="h-btn primary" id="new-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New Ticket</button>
             </div>
-            <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+            <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
                 <button class="h-btn sm ${stateFilter === 'ALL' ? 'primary' : ''}" data-filter="ALL" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${stateFilter === 'ALL' ? '#1a202c' : '#fff'};color:${stateFilter === 'ALL' ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">All</button>
                 ${STAGE_ORDER.map(s => `
                     <button class="h-btn sm ${stateFilter === s ? 'primary' : ''}" data-filter="${s}" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${stateFilter === s ? '#1a202c' : '#fff'};color:${stateFilter === s ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">
@@ -804,11 +797,11 @@ function init_holec_trading_engine() {
         const marginPerTonne = qty > 0 ? Math.round(totalMargin / (qty / 1000)) : 0;
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
                     <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
                     <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Uasin Gishu, Ziwa'}</span>
@@ -832,8 +825,8 @@ function init_holec_trading_engine() {
                 }).join('')}
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
                 <div>
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
                     <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
@@ -860,10 +853,10 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">COST SUMMARY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net payable to supplier</span>
+                    <span style="color:#4a5568;">Net Payable to Supplier</span>
                     <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
@@ -880,7 +873,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">TRADE EVENT LOG</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot lifecycle seeded to INVOICED</strong>
@@ -893,8 +886,8 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-settled-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Settled →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="advance-settled-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Settled →</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
             </div>
         `;
 
@@ -921,11 +914,11 @@ function init_holec_trading_engine() {
         const amountDue = Math.round(qty * sellRate);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
                     <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
                     <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Uasin Gishu, Ziwa'}</span>
@@ -949,8 +942,8 @@ function init_holec_trading_engine() {
                 }).join('')}
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
                 <div>
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
                     <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
@@ -977,10 +970,10 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">COST SUMMARY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net payable to supplier</span>
+                    <span style="color:#4a5568;">Net Payable to Supplier</span>
                     <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
@@ -997,7 +990,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">TRADE EVENT LOG</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Payment received, lot settled</strong>
@@ -1038,7 +1031,7 @@ function init_holec_trading_engine() {
 
         let modeOfPayments = ['Bank Draft', 'Cash', 'Cheque', 'Credit Card', 'Wire Transfer'];
         try {
-            const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], limit: 100, order_by: 'name asc' });
+            const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], order_by: 'name asc' });
             if (mopList && mopList.length > 0) {
                 modeOfPayments = mopList.map(m => m.name);
             }
@@ -1047,7 +1040,7 @@ function init_holec_trading_engine() {
         }
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
             </div>
             
@@ -1056,28 +1049,28 @@ function init_holec_trading_engine() {
                 <span style="font-size:13px;color:#718096;">${l.name} · ${l.customer || 'Unga Group Kenya'} · ${l.invoice_number || 'INV-5502'}</span>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer payment</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Amount due</label>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Payment</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Amount Due</label>
                         <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">KES ${amountDue.toLocaleString('en-KE')}</div>
                     </div>
                     ${field({ label: 'Mode of Payment', id: 'f-payment-rail', type: 'select', value: modeOfPayments.includes('Bank Draft') ? 'Bank Draft' : (modeOfPayments[0] || ''), options: modeOfPayments })}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Bank reconciliation</h3>
-                <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#4a5568;display:flex;align-items:center;gap:8px;">
+                <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#4a5568;display:flex;align-items:center;gap:12px;">
                     <span>ℹ</span>
                     <span>On confirmation, this receipt is matched to ${l.invoice_number || 'INV-5502'} and the lot moves to Settled.</span>
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="confirm-settle-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Confirm receipt & settle lot</button>
-                <button class="h-btn ghost" id="cancel-payment-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="confirm-settle-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Confirm receipt & settle lot</button>
+                <button class="h-btn ghost" id="cancel-payment-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
             </div>
         `;
 
@@ -1177,11 +1170,11 @@ function init_holec_trading_engine() {
         }).join('');
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Insight</span> › <span style="color:#2d3748;font-weight:500;">Cost ledger & margin</span>
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Insight</span> › <span style="color:#2d3748;font-weight:500;">Cost Ledger & Margin</span>
             </div>
             
-            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Cost ledger & margin</h1>
+            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Cost Ledger & Margin</h1>
 
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:24px;">
                 <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;">
@@ -1198,14 +1191,14 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">BUY — SUPPLIER COST</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">BUY — SUPPLIER COST</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
                             <th style="padding:12px 16px;">Ticket</th>
                             <th style="padding:12px 16px;">Supplier</th>
-                            <th style="padding:12px 16px;">Net payable</th>
+                            <th style="padding:12px 16px;">Net Payable</th>
                             <th style="padding:12px 16px;">Transport</th>
                             <th style="padding:12px 16px;">Landed/kg</th>
                             <th style="padding:12px 16px;">State</th>
@@ -1217,7 +1210,7 @@ function init_holec_trading_engine() {
                 </table>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">SELL — CUSTOMER REVENUE</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">SELL — CUSTOMER REVENUE</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
@@ -1309,7 +1302,7 @@ function init_holec_trading_engine() {
             const amt = cessMap[cty];
             const pct = totalCessSum > 0 ? Math.max(20, Math.round((amt / totalCessSum) * 180)) : 50;
             return `
-                <div style="display:flex;align-items:center;gap:8px;">
+                <div style="display:flex;align-items:center;gap:12px;">
                     <div style="width:${pct}px;height:24px;background:#1a202c;border-radius:4px;"></div>
                     <span style="font-size:11px;color:#718096;">${cty}</span>
                 </div>
@@ -1317,14 +1310,14 @@ function init_holec_trading_engine() {
         }).join('');
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Insight</span> › <span style="color:#2d3748;font-weight:500;">Reports</span>
             </div>
             
             <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Reports</h1>
 
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Open lots by state</h3>
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Open Lots By State</h3>
                 <div style="display:flex;gap:32px;align-items:flex-end;">
                     <div style="display:flex;gap:24px;">
                         ${STAGE_ORDER.map(s => `
@@ -1340,13 +1333,13 @@ function init_holec_trading_engine() {
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
                 <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;">
-                    <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payables due</h3>
+                    <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payables Due</h3>
                     <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                        <span style="color:#4a5568;">Total net payable</span>
+                        <span style="color:#4a5568;">Total Net Payable</span>
                         <strong style="color:#2d3748;">${fmtKES(totalNetPayable)}</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                        <span style="color:#4a5568;">Already paid</span>
+                        <span style="color:#4a5568;">Already Paid</span>
                         <strong style="color:#e53e3e;">- ${fmtKES(totalAlreadyPaid)}</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;padding:12px 0 0 0;font-size:15px;font-weight:700;">
@@ -1356,10 +1349,10 @@ function init_holec_trading_engine() {
                 </div>
 
                 <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;">
-                    <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Receivables due</h3>
+                    <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Receivables Due</h3>
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0;font-size:14px;">
                         <div>
-                            <strong style="display:block;color:#2d3748;margin-bottom:2px;">Invoiced, awaiting payment</strong>
+                            <strong style="display:block;color:#2d3748;margin-bottom:2px;">Invoiced, Awaiting Payment</strong>
                             <span style="font-size:12px;color:#718096;">${invoicedLots.length || 1} invoice(s)</span>
                         </div>
                         <strong style="font-size:16px;color:#1a202c;">${fmtKES(receivablesDue)}</strong>
@@ -1367,7 +1360,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">STOCK ON HAND BY LOT</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">STOCK ON HAND BY LOT</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
@@ -1384,7 +1377,7 @@ function init_holec_trading_engine() {
                 </table>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">CESS BY COUNTY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">CESS BY COUNTY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;display:flex;justify-content:space-between;align-items:center;">
                 <div style="flex-grow:1;">
                     ${cessRows}
@@ -1424,7 +1417,7 @@ function init_holec_trading_engine() {
         }).join('');
 
         container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;">Lot Event Log</h1>
                 </div>
@@ -1436,7 +1429,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;background:#ffffff;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;background:#ffffff;padding:10px 14px;border:1px solid #e2e8f0;border-radius:6px;">
                 <div style="display:flex;gap:8px;align-items:center;font-size:13px;color:#4a5568;">
                     <span style="background:#edf2f7;padding:4px 8px;border-radius:4px;border:1px solid #cbd5e0;">ID ≈</span>
                     <input type="text" placeholder="Lot" style="border:1px solid #cbd5e0;border-radius:4px;padding:4px 8px;font-size:13px;width:120px;">
@@ -1494,7 +1487,7 @@ function init_holec_trading_engine() {
                 <td style="padding:12px 16px;color:#2d3748;">KES ${flt(t.haulage_kes).toLocaleString('en-KE')}</td>
                 <td style="padding:12px 16px;color:#2d3748;">KES ${flt(t.cess_kes).toLocaleString('en-KE')}</td>
                 <td style="padding:12px 16px;text-align:right;">
-                    <button class="h-btn sm primary pay-transporter-btn" data-id="${t.name}" style="background:#1a202c;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">Pay transporter</button>
+                    <button class="h-btn sm primary pay-transporter-btn" data-id="${t.name}" style="background:#1a202c;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">Pay Transporter</button>
                 </td>
             </tr>
         `).join('');
@@ -1511,7 +1504,7 @@ function init_holec_trading_engine() {
         `).join('');
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
             </div>
             
@@ -1519,7 +1512,7 @@ function init_holec_trading_engine() {
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Payments <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${(paymentEntries || []).length}</span></h1>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">PAYABLE TO TRANSPORTERS</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYABLE TO TRANSPORTERS</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
@@ -1537,7 +1530,7 @@ function init_holec_trading_engine() {
                 </table>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">PAYMENT HISTORY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
@@ -1571,11 +1564,11 @@ function init_holec_trading_engine() {
         const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
                     <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
                     <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · origin not yet captured</span>
@@ -1598,8 +1591,8 @@ function init_holec_trading_engine() {
                 }).join('')}
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
                 <div>
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
                     <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
@@ -1626,14 +1619,14 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">TRADE EVENT LOG</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:30px;margin-bottom:24px;text-align:center;color:#718096;font-size:13px;">
                 No events logged for this lot.
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-intake-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Intake →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="advance-intake-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Intake →</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
             </div>
         `;
 
@@ -1652,11 +1645,11 @@ function init_holec_trading_engine() {
         const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
                     <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
                     <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Nakuru, Njoro'}</span>
@@ -1680,8 +1673,8 @@ function init_holec_trading_engine() {
                 }).join('')}
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
                 <div>
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
                     <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
@@ -1708,10 +1701,10 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">COST SUMMARY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net payable to supplier</span>
+                    <span style="color:#4a5568;">Net Payable to Supplier</span>
                     <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
@@ -1724,7 +1717,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">TRADE EVENT LOG</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot created, net invoice posted</strong>
@@ -1737,8 +1730,8 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-position-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Position →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="advance-position-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Position →</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
             </div>
         `;
 
@@ -1761,11 +1754,11 @@ function init_holec_trading_engine() {
         const offloading = flt(l.offloading_kes || 0);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
                     <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
                     <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Nakuru, Njoro'}</span>
@@ -1789,8 +1782,8 @@ function init_holec_trading_engine() {
                 }).join('')}
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
                 <div>
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
                     <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
@@ -1817,10 +1810,10 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">COST SUMMARY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net payable to supplier</span>
+                    <span style="color:#4a5568;">Net Payable to Supplier</span>
                     <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
@@ -1833,7 +1826,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">TRADE EVENT LOG</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Transport capitalised, moved to Position</strong>
@@ -1846,8 +1839,8 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-invoiced-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Sale & invoicing →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="advance-invoiced-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Sale & Invoicing →</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
             </div>
         `;
 
@@ -1866,11 +1859,11 @@ function init_holec_trading_engine() {
         const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
             
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
                     <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
                     <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Nakuru, Njoro'}</span>
@@ -1910,8 +1903,8 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
                 <div>
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
                     <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
@@ -1938,23 +1931,23 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">COST SUMMARY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net payable to supplier</span>
+                    <span style="color:#4a5568;">Net Payable to Supplier</span>
                     <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Transport & handling</span>
+                    <span style="color:#4a5568;">Transport & Handling</span>
                     <strong style="color:#2d3748;">KES 0</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0 0;font-size:15px;font-weight:700;">
-                    <span style="color:#1a202c;">Landed cost per kg</span>
+                    <span style="color:#1a202c;">Landed Cost Per kg</span>
                     <span style="color:#1a202c;">${p.landedCostPerKg} /kg</span>
                 </div>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:8px;">TRADE EVENT LOG</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
                 <div>
                     <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot lifecycle seeded to INTAKE</strong>
@@ -1967,8 +1960,8 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-lot-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Lot →</button>
-                <button class="h-btn ghost" id="back-btn3" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="advance-lot-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Lot →</button>
+                <button class="h-btn ghost" id="back-btn3" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
             </div>
         `;
 
@@ -1983,101 +1976,38 @@ function init_holec_trading_engine() {
     }
 
     function renderNewTicket(container) {
-        const uniqueCommodities = [...new Set(LIVE_STORE.lots.map(l => l.commodity).filter(Boolean))];
-        const defaultCommodity = uniqueCommodities.length > 0 ? uniqueCommodities[0] : 'Maize';
+        const itemOptions = LIVE_STORE.items.map(i => ({ 
+            value: i.name, 
+            label: i.item_name ? `${i.item_name} (${i.name})` : i.name 
+        }));
+        const defaultCommodity = itemOptions.length > 0 ? itemOptions[0].value : 'Maize';
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">New ticket</span>
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">New Ticket</span>
             </div>
-            <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1a202c;">New ticket</h1>
+            <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1a202c;">New Ticket</h1>
             
-            <div style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#2b6cb0;display:flex;align-items:center;gap:8px;">
+            <div style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#2b6cb0;display:flex;align-items:center;gap:12px;">
                 <span>ℹ</span>
                 <span>2 supplier(s) are not yet Approved and won't appear below — check Suppliers to move them forward.</span>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;margin-bottom:20px;">
                     ${field({ label: 'Supplier *', id: 'f-supplier', type: 'select', required: true, options: LIVE_STORE.suppliers.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })) })}
-                    ${field({ label: 'Commodity', id: 'f-item', type: 'select', value: defaultCommodity, options: uniqueCommodities })}
-                    ${field({ label: 'Expected quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
+                    ${field({ label: 'Commodity', id: 'f-item', type: 'select', value: defaultCommodity, options: itemOptions })}
+                    ${field({ label: 'Expected Quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
                 </div>
-                <div style="margin-top:20px;max-width:320px;">
-                    ${field({ label: 'Expected delivery date', id: 'f-date', type: 'date', value: frappe.datetime.get_today() })}
+                <div style="max-width:320px;">
+                    ${field({ label: 'Expected Delivery Date', id: 'f-date', type: 'date', value: frappe.datetime.get_today() })}
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="create-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Create ticket</button>
-                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
-            </div>
-        `;
-
-        document.getElementById('cancel-btn').addEventListener('click', () => navigate('lots'));
-        document.getElementById('create-ticket-btn').addEventListener('click', async () => {
-            const supplier = $('#f-supplier').val();
-            const commodity = $('#f-item').val();
-            const qty = parseFloat($('#f-qty').val()) || 0;
-
-            if (!supplier) { frappe.msgprint(__('Please select a Supplier.')); return; }
-            if (qty <= 0) { frappe.msgprint(__('Please enter a valid Expected Quantity.')); return; }
-
-            const res = await frappe.db.insert({
-                doctype: 'Buy Ticket',
-                supplier: supplier,
-                commodity: commodity,
-                quantity_kg: qty,
-                status: 'Ticket',
-                negotiated_price: 48.0
-            });
-
-            if (res) {
-                showToast(`Ticket ${res.name} created successfully`);
-                await loadMasterData();
-                navigate('lots', { id: res.name });
-            }
-        });
-    }async function renderNewTicket(container) {
-        let commodityOptions = ['Maize', 'Beans'];
-        
-        try {
-            const meta = await frappe.model.with_doctype('Buy Ticket');
-            const fieldMeta = frappe.meta.get_docfield('Buy Ticket', 'commodity');
-            if (fieldMeta && fieldMeta.options) {
-                commodityOptions = fieldMeta.options.split('\n').filter(Boolean);
-            }
-        } catch (e) {
-            console.error('Error fetching Buy Ticket meta options:', e);
-        }
-
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">New ticket</span>
-            </div>
-            <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1a202c;">New ticket</h1>
-            
-            <div style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#2b6cb0;display:flex;align-items:center;gap:8px;">
-                <span>ℹ</span>
-                <span>2 supplier(s) are not yet Approved and won't appear below — check Suppliers to move them forward.</span>
-            </div>
-
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
-                    ${field({ label: 'Supplier *', id: 'f-supplier', type: 'select', required: true, options: LIVE_STORE.suppliers.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })) })}
-                    ${field({ label: 'Item', id: 'f-item', type: 'select', value: commodityOptions[0] || '', options: commodityOptions })}
-                    ${field({ label: 'Expected quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
-                </div>
-                <div style="margin-top:20px;max-width:320px;">
-                    ${field({ label: 'Expected delivery date', id: 'f-date', type: 'date', value: frappe.datetime.get_today() })}
-                </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="create-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Create ticket</button>
-                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="create-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Create Ticket</button>
+                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
             </div>
         `;
 
@@ -2119,16 +2049,16 @@ function init_holec_trading_engine() {
         const transporterOptions = LIVE_STORE.vehicles.map(s => ({ value: s.name, label: s.name ? `${s.name} (${s.name})` : s.name }));
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Intake & quality</span>
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Intake & Quality</span>
             </div>
             
             <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Intake & quality capture</h1>
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Intake & Quality capture</h1>
                 <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || '—'}</span>
             </div>
 
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:13px;color:#4a5568;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px;color:#4a5568;">
                 <span>${waitingTickets.length} tickets waiting:</span>
                 <div style="display:flex;gap:6px;">
                     ${waitingTickets.map(t => `
@@ -2137,51 +2067,57 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Weighbridge capture</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
-                    ${field({ label: 'Gross weight (kg) *', id: 'f-gross', type: 'number', value: l.gross_weight_kg || '', required: true, placeholder: '' })}
-                    ${field({ label: 'Tare weight (kg) *', id: 'f-tare', type: 'number', value: l.tare_weight_kg || '', required: true, placeholder: '' })}
-                    ${field({ label: 'Bag count *', id: 'f-bags', type: 'number', value: l.bag_count || '', required: true, placeholder: '' })}
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Gross Weight (kg) *', id: 'f-gross', type: 'number', value: l.gross_weight_kg || '', required: true, placeholder: '' })}
+                    ${field({ label: 'Tare Weight (kg) *', id: 'f-tare', type: 'number', value: l.tare_weight_kg || '', required: true, placeholder: '' })}
+                    ${field({ label: 'Bag Count *', id: 'f-bags', type: 'number', value: l.bag_count || '', required: true, placeholder: '' })}
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
-                    ${field({ label: 'Weighbridge ticket number *', id: 'f-wbnum', value: l.weighbridge_ticket_number || '', required: true, placeholder: 'Unique, e.g. WB-88213' })}
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Weighbridge Ticket Number *', id: 'f-wbnum', value: l.weighbridge_ticket_number || '', required: true, placeholder: 'Unique, e.g. WB-88213' })}
                     ${field({ label: 'Transporter', id: 'f-transporter', type: 'select', value: l.transporter || '', options: transporterOptions })}
-                    ${field({ label: 'Vehicle registration', id: 'f-vehicle', type: 'select', value: l.vehicle_registration || '', options: vehicleOptions })}
+                    ${field({ label: 'Vehicle Registration', id: 'f-vehicle', type: 'data', value: l.vehicle_registration || '', options: vehicleOptions })}
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge slip — gross (in)</label>
-                        <button type="button" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge Slip — Gross (In)</label>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <button type="button" id="upload-gross-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload Gross Slip</button>
+                            <span id="gross-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
+                        </div>
                     </div>
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge slip — tare (out)</label>
-                        <button type="button" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge Slip — Tare (Out)</label>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <button type="button" id="upload-tare-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload Tare Slip</button>
+                            <span id="tare-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
+                        </div>
                     </div>
                 </div>
-                <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Net weight (calculated)</label>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Net Weight (Calculated)</label>
                     <div id="net-calc-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">0 kg</div>
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality inspection</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
-                    ${field({ label: 'Foreign matter % *', id: 'f-fm', type: 'number', value: l.foreign_matter_ || '', required: true })}
+                    ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'number', value: l.foreign_matter_ || '', required: true })}
                     ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'County', id: 'f-county', type: 'select', value: l.county || '', options: LIVE_STORE.countries.map(c => ({ value: c.name, label: c.country_name || c.name })) })}
                     ${field({ label: 'Area', id: 'f-area', value: l.region || '', placeholder: 'e.g. Njoro' })}
                 </div>
-                ${field({ label: 'Reason code (if foreign matter judgement or wet buy)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
+                ${field({ label: 'Reason Code (if foreign matter judgement or wet buy)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-intake-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit intake & create lot</button>
-                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="submit-intake-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit Intake & Create Lot</button>
+                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
             </div>
         `;
 
@@ -2229,6 +2165,95 @@ function init_holec_trading_engine() {
             showToast(`Intake calculated for ${l.name}`);
             navigate('deductions', { id: l.name });
         });
+
+        function updateWeighbridgeFields(data) {
+            if (data.gross_weight !== null && data.gross_weight !== undefined && data.gross_weight !== '') {
+                $('#f-gross').val(data.gross_weight);
+            }
+            if (data.tare_weight !== null && data.tare_weight !== undefined && data.tare_weight !== '') {
+                $('#f-tare').val(data.tare_weight);
+            }
+            if (data.ticket_no !== null && data.ticket_no !== undefined && data.ticket_no !== '') {
+                $('#f-wbnum').val(data.ticket_no);
+            }
+            if (data.bag_count !== null && data.bag_count !== undefined && data.bag_count !== '') {
+                $('#f-bags').val(data.bag_count);
+            }
+            if (data.vehicle_no !== null && data.vehicle_no !== undefined && data.vehicle_no !== '') {
+                const vehicleSelect = $('#f-vehicle');
+                const vehicleNo = String(data.vehicle_no).trim();
+                let existingOption = vehicleSelect.find('option').filter(function () {
+                    return String($(this).val()).trim().toUpperCase() === vehicleNo.toUpperCase();
+                });
+                if (existingOption.length === 0) {
+                    vehicleSelect.append($('<option>', { value: vehicleNo, text: vehicleNo }));
+                }
+                vehicleSelect.val(vehicleNo).trigger('change');
+            }
+            updateNetCalc();
+        }
+
+        function processWeighbridgeSlip(file, slipType, fileNameSelector, buttonLabel) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (uploadEvent) {
+                const base64Data = uploadEvent.target.result;
+                showToast(`${buttonLabel} uploaded. Extracting details via AI...`, 'orange');
+
+                frappe.call({
+                    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_weighbridge_data',
+                    args: {
+                        filedata: base64Data,
+                        slip_type: slipType,
+                        ticket_name: typeof l !== 'undefined' ? l.name : null,
+                        filename: file.name
+                    },
+                    freeze: true,
+                    freeze_message: `Reading ${buttonLabel}...`,
+                    callback: function (r) {
+                        if (r.exc || !r.message || !r.message.success) {
+                            showToast(r.message?.message || `Could not extract ${buttonLabel} details.`, 'orange');
+                            return;
+                        }
+                        updateWeighbridgeFields(r.message);
+                        $(fileNameSelector).text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
+                        showToast(`${buttonLabel} OCR completed successfully.`, 'green');
+                    },
+                    error: function (xhr) {
+                        showToast(`Error while processing ${buttonLabel}.`, 'red');
+                    }
+                });
+            };
+            reader.readAsDataURL(file);
+        }
+
+        const grossSlipBtn = document.getElementById('upload-gross-slip');
+        if (grossSlipBtn) {
+            grossSlipBtn.addEventListener('click', () => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
+                fileInput.onchange = function (e) {
+                    const file = e.target.files[0];
+                    if (file) processWeighbridgeSlip(file, 'gross', '#gross-file-name', 'Gross Weight Slip');
+                };
+                fileInput.click();
+            });
+        }
+
+        const tareSlipBtn = document.getElementById('upload-tare-slip');
+        if (tareSlipBtn) {
+            tareSlipBtn.addEventListener('click', () => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
+                fileInput.onchange = function (e) {
+                    const file = e.target.files[0];
+                    if (file) processWeighbridgeSlip(file, 'tare', '#tare-file-name', 'Tare Weight Slip');
+                };
+                fileInput.click();
+            });
+        }
     }
 
     function renderDeductionsPayable(container, params) {
@@ -2243,93 +2268,93 @@ function init_holec_trading_engine() {
         const bags = cint(l.bag_count || 0);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Deductions & payable</span>
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Deductions & Payable</span>
             </div>
             
-            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Deductions & payable engine</h1>
+            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Deductions & Payable Engine</h1>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction breakdown</h3>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Gross weight</span>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <span style="color:#4a5568;">Gross Weight</span>
                     <strong style="color:#2d3748;">${fmtKg(grossKg)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Tare weight</span>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <span style="color:#4a5568;">Tare Weight</span>
                     <strong style="color:#e53e3e;">- ${fmtKg(tareKg)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
                     <div>
-                        <span style="color:#4a5568;display:block;">Net weight</span>
-                        <span style="font-size:12px;color:#a0aec0;">Gross minus tare</span>
+                        <span style="color:#4a5568;display:block;">Net Weight</span>
+                        <span style="font-size:12px;color:#a0aec0;">Gross Minus Tare</span>
                     </div>
                     <strong style="color:#2d3748;">${fmtKg(netKg)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
                     <div>
-                        <span style="color:#4a5568;display:block;">Moisture deduction</span>
-                        <span style="font-size:12px;color:#a0aec0;">${moisture}% recorded vs 13.5% standard</span>
+                        <span style="color:#4a5568;display:block;">Moisture Deduction</span>
+                        <span style="font-size:12px;color:#a0aec0;">${moisture}% Recorded vs 13.5% Standard</span>
                     </div>
                     <strong style="color:#e53e3e;">- ${fmtKg(netKg * 0.03)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
                     <div>
-                        <span style="color:#4a5568;display:block;">Foreign matter deduction</span>
-                        <span style="font-size:12px;color:#a0aec0;">${fm}% recorded</span>
+                        <span style="color:#4a5568;display:block;">Foreign Matter Deduction</span>
+                        <span style="font-size:12px;color:#a0aec0;">${fm}% Recorded</span>
                     </div>
                     <strong style="color:#e53e3e;">- ${fmtKg(netKg * 0.012)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 0 0;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:14px;">
                     <div>
-                        <strong style="color:#1a202c;display:block;">Accepted net quantity</strong>
+                        <strong style="color:#1a202c;display:block;">Accepted Net Quantity</strong>
                         <span style="font-size:12px;color:#718096;">This is what lands in the stock ledger — not the gross weight</span>
                     </div>
                     <strong style="color:#1a202c;font-size:16px;">${fmtKg(p.acceptedNetKg)}</strong>
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payable value</h3>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Reference rate</span>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payable Value</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <span style="color:#4a5568;">Reference Rate</span>
                     <strong style="color:#2d3748;">KES 48 /kg</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
                     <div>
-                        <span style="color:#4a5568;display:block;">Gross value</span>
+                        <span style="color:#4a5568;display:block;">Gross Value</span>
                         <span style="font-size:12px;color:#a0aec0;">${fmtKg(p.acceptedNetKg)} × rate</span>
                     </div>
                     <strong style="color:#2d3748;">${fmtKES(p.acceptedNetKg * 48)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
                     <div>
-                        <span style="color:#4a5568;display:block;">Bagging deduction</span>
+                        <span style="color:#4a5568;display:block;">Bagging Deduction</span>
                         <span style="font-size:12px;color:#a0aec0;">${bags} bags × KES 25</span>
                     </div>
                     <strong style="color:#e53e3e;">- ${fmtKES(bags * 25)}</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Aflatoxin test fee</span>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <span style="color:#4a5568;">Aflatoxin Test Fee</span>
                     <strong style="color:#e53e3e;">- KES 300</strong>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 0 0;font-size:15px;">
-                    <strong style="color:#1a202c;">Net payable to supplier</strong>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:15px;">
+                    <strong style="color:#1a202c;">Net Payable to Supplier</strong>
                     <strong style="color:#1a202c;font-size:16px;">${fmtKES(p.netPayable)}</strong>
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Net supplier invoice</h3>
-                <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Invoice value</label>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Net Supplier Invoice</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Invoice Value</label>
                     <div style="padding:10px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">${fmtKES(p.netPayable)}</div>
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="post-invoice-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Post net invoice & create lot</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="post-invoice-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Post Net Invoice & Create Lot</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
             </div>
         `;
 
@@ -2350,16 +2375,16 @@ function init_holec_trading_engine() {
         const expectedQty = flt(l.quantity_kg || l.gross_weight_kg || 7578);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport & loss</span>
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport & Loss</span>
             </div>
             
             <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport & loss</h1>
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport & Loss</h1>
                 <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || 'Wanjiru Grain Traders'}</span>
             </div>
 
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:13px;color:#4a5568;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px;color:#4a5568;">
                 <span>${readyLots.length} lots ready:</span>
                 <div style="display:flex;gap:6px;">
                     ${readyLots.map(t => `
@@ -2368,33 +2393,33 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport charges</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport Charges</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
                     ${field({ label: 'Haulage (KES)', id: 'f-haulage', type: 'number', value: l.haulage_kes || '', placeholder: '' })}
                     ${field({ label: 'Cess (KES)', id: 'f-cess', type: 'number', value: l.cess_kes || '', placeholder: '' })}
                     ${field({ label: 'Offloading (KES)', id: 'f-offloading', type: 'number', value: l.offloading_kes || '', placeholder: '' })}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Loss reconciliation</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Expected quantity</label>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Loss Reconciliation</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Expected Quantity</label>
                         <div style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">${expectedQty.toLocaleString('en-KE')} kg</div>
                     </div>
-                    ${field({ label: 'Delivered quantity (kg)', id: 'f-delivered-qty', type: 'number', value: l.delivered_quantity_kg || expectedQty })}
+                    ${field({ label: 'Delivered Quantity (kg)', id: 'f-delivered-qty', type: 'number', value: l.delivered_quantity_kg || expectedQty })}
                 </div>
-                <div id="loss-alert-box" style="background:#f0fff4;border:1px solid #c6f6d5;border-radius:6px;padding:12px 16px;font-size:13px;color:#276749;display:flex;align-items:center;gap:8px;">
+                <div id="loss-alert-box" style="background:#f0fff4;border:1px solid #c6f6d5;border-radius:6px;padding:12px 16px;font-size:13px;color:#276749;display:flex;align-items:center;gap:12px;">
                     <span>✓</span>
-                    <span id="loss-alert-text">No loss recorded — full expected quantity delivered.</span>
+                    <span id="loss-alert-text">No Loss Recorded — Full Expected Quantity Delivered.</span>
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="capitalise-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Capitalise costs & move to Position</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="capitalise-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Capitalise Costs & Move to Position</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
             </div>
         `;
 
@@ -2406,7 +2431,7 @@ function init_holec_trading_engine() {
 
             if (diff <= 0 || delivered === expectedQty) {
                 alertBox.css({ background: '#f0fff4', border: '1px solid #c6f6d5', color: '#276749' });
-                alertText.html('<span>✓</span> No loss recorded — full expected quantity delivered.');
+                alertText.html('No Loss Recorded — Full Expected Quantity Delivered.');
                 alertBox.find('span:first').text('✓');
             } else {
                 const tolerance = 80;
@@ -2465,16 +2490,16 @@ function init_holec_trading_engine() {
         const defaultSellRate = flt(l.negotiated_price || 48);
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:8px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Sale & invoicing</span>
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Sale & Invoicing</span>
             </div>
             
             <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Sale & invoicing</h1>
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Sale & Invoicing</h1>
                 <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || 'Wanjiru Grain Traders'} → ${qty.toLocaleString('en-KE')} kg @ KES <span id="header-sell-rate">${defaultSellRate}</span>/kg landed</span>
             </div>
 
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;font-size:13px;color:#4a5568;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px;color:#4a5568;">
                 <span>${positionLots.length} lots ready:</span>
                 <div style="display:flex;gap:6px;">
                     ${positionLots.map(t => `
@@ -2483,42 +2508,42 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Delivery</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Customer *', id: 'f-customer', type: 'select', required: true, options: customerOptions, value: l.customer || '' })}
-                    ${field({ label: 'Sell rate (KES/kg) *', id: 'f-sell-rate', type: 'number', required: true, value: l.sell_rate || defaultSellRate })}
+                    ${field({ label: 'Sell Rate (KES/kg) *', id: 'f-sell-rate', type: 'number', required: true, value: l.sell_rate || defaultSellRate })}
                 </div>
-                <div style="border-top:1px solid #edf2f7;padding-top:16px;display:flex;flex-direction:column;gap:10px;">
+                <div style="border-top:1px solid #edf2f7;padding-top:16px;display:flex;flex-direction:column;gap:12px;">
                     <div style="display:flex;justify-content:space-between;font-size:14px;">
                         <span style="color:#4a5568;">Revenue</span>
                         <strong style="color:#2d3748;" id="calc-revenue">KES 0</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:14px;">
-                        <span style="color:#4a5568;">Landed cost</span>
+                        <span style="color:#4a5568;">Landed Cost</span>
                         <strong style="color:#e53e3e;" id="calc-landed">- ${fmtKES(p.netPayable + p.totalTransport)}</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:14px;">
-                        <span style="color:#4a5568;">Margin per tonne</span>
+                        <span style="color:#4a5568;">Margin Per Tonne</span>
                         <strong style="color:#2d3748;" id="calc-margin">KES 0</strong>
                     </div>
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:20px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Sales invoice + eTIMS</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-                    ${field({ label: 'Invoice number', id: 'f-invoice-no', value: l.invoice_number || 'INV-5503', placeholder: '' })}
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">eTIMS control unit number</label>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Sales Invoice + eTIMS</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                    ${field({ label: 'Invoice Number', id: 'f-invoice-no', value: l.invoice_number || 'INV-5503', placeholder: '' })}
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">eTIMS Control Unit Number</label>
                         <div style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#a0aec0;">Generated on submit</div>
                     </div>
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-etims-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit invoice & transmit to eTIMS</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="submit-etims-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit Invoice & Transmit to eTIMS</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
             </div>
         `;
 
@@ -2593,14 +2618,14 @@ function init_holec_trading_engine() {
         { id: 'customers', group: 'PARTIES', name: 'Customers', render: renderCustomers },
         { id: 'new_customer', group: 'PARTIES', name: 'New customer', render: renderNewCustomer },
         { id: 'lots', group: 'TRADE', name: 'Lots', render: renderLots },
-        { id: 'tickets', group: 'TRADE', name: 'New ticket', render: renderNewTicket },
-        { id: 'intake', group: 'TRADE', name: 'Intake & quality', render: renderIntake },
-        { id: 'deductions', group: 'TRADE', name: 'Deductions & payable', render: renderDeductionsPayable },
-        { id: 'transport', group: 'TRADE', name: 'Transport & loss', render: renderTransportLoss },
-        { id: 'sale_invoicing', group: 'TRADE', name: 'Sale & invoicing', render: renderSaleInvoicing },
+        { id: 'tickets', group: 'TRADE', name: 'New Ticket', render: renderNewTicket },
+        { id: 'intake', group: 'TRADE', name: 'Intake & Quality', render: renderIntake },
+        { id: 'deductions', group: 'TRADE', name: 'Deductions & Payable', render: renderDeductionsPayable },
+        { id: 'transport', group: 'TRADE', name: 'Transport & Loss', render: renderTransportLoss },
+        { id: 'sale_invoicing', group: 'TRADE', name: 'Sale & Invoicing', render: renderSaleInvoicing },
         { id: 'payments_list', group: 'FINANCE', name: 'Payments', render: renderPaymentsList },
         { id: 'payments', group: 'FINANCE', name: 'Record Payment', render: renderPayments },
-        { id: 'ledger', group: 'INSIGHT', name: 'Cost ledger & margin', render: renderCostLedger },
+        { id: 'ledger', group: 'INSIGHT', name: 'Cost Ledger & Margin', render: renderCostLedger },
         { id: 'reports', group: 'INSIGHT', name: 'Reports', render: renderReports },
         { id: 'event_log', group: 'INSIGHT', name: 'Trade event log', render: renderTradeEventLog }
     ];
@@ -2632,17 +2657,17 @@ function init_holec_trading_engine() {
             
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">TRADE</div>
             <div class="mod-item ${route.module === 'lots' ? 'active' : ''}" data-mod="lots" style="padding:6px 10px;border-radius:6px;background:${route.module === 'lots' ? '#ebf8ff' : 'transparent'};color:${route.module === 'lots' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'lots' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='lots')this.style.background='#f7fafc'" onmouseout="if(route.module!=='lots')this.style.background='transparent'">Lots</div>
-            <div class="mod-item ${route.module === 'tickets' ? 'active' : ''}" data-mod="tickets" style="padding:6px 10px;border-radius:6px;background:${route.module === 'tickets' ? '#ebf8ff' : 'transparent'};color:${route.module === 'tickets' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'tickets' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='tickets')this.style.background='#f7fafc'" onmouseout="if(route.module!=='tickets')this.style.background='transparent'">New ticket</div>
-            <div class="mod-item ${route.module === 'intake' ? 'active' : ''}" data-mod="intake" style="padding:6px 10px;border-radius:6px;background:${route.module === 'intake' ? '#ebf8ff' : 'transparent'};color:${route.module === 'intake' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'intake' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='intake')this.style.background='#f7fafc'" onmouseout="if(route.module!=='intake')this.style.background='transparent'">Intake & quality</div>
-            <div class="mod-item ${route.module === 'deductions' ? 'active' : ''}" data-mod="deductions" style="padding:6px 10px;border-radius:6px;background:${route.module === 'deductions' ? '#ebf8ff' : 'transparent'};color:${route.module === 'deductions' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'deductions' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='deductions')this.style.background='#f7fafc'" onmouseout="if(route.module!=='deductions')this.style.background='transparent'">Deductions & payable</div>
-            <div class="mod-item ${route.module === 'transport' ? 'active' : ''}" data-mod="transport" style="padding:6px 10px;border-radius:6px;background:${route.module === 'transport' ? '#ebf8ff' : 'transparent'};color:${route.module === 'transport' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'transport' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='transport')this.style.background='#f7fafc'" onmouseout="if(route.module!=='transport')this.style.background='transparent'">Transport & loss</div>
-            <div class="mod-item ${route.module === 'sale_invoicing' ? 'active' : ''}" data-mod="sale_invoicing" style="padding:6px 10px;border-radius:6px;background:${route.module === 'sale_invoicing' ? '#ebf8ff' : 'transparent'};color:${route.module === 'sale_invoicing' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'sale_invoicing' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if(route.module!=='sale_invoicing')this.style.background='#f7fafc'" onmouseout="if(route.module!=='sale_invoicing')this.style.background='transparent'">Sale & invoicing</div>
+            <div class="mod-item ${route.module === 'tickets' ? 'active' : ''}" data-mod="tickets" style="padding:6px 10px;border-radius:6px;background:${route.module === 'tickets' ? '#ebf8ff' : 'transparent'};color:${route.module === 'tickets' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'tickets' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='tickets')this.style.background='#f7fafc'" onmouseout="if(route.module!=='tickets')this.style.background='transparent'">New Ticket</div>
+            <div class="mod-item ${route.module === 'intake' ? 'active' : ''}" data-mod="intake" style="padding:6px 10px;border-radius:6px;background:${route.module === 'intake' ? '#ebf8ff' : 'transparent'};color:${route.module === 'intake' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'intake' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='intake')this.style.background='#f7fafc'" onmouseout="if(route.module!=='intake')this.style.background='transparent'">Intake & Quality</div>
+            <div class="mod-item ${route.module === 'deductions' ? 'active' : ''}" data-mod="deductions" style="padding:6px 10px;border-radius:6px;background:${route.module === 'deductions' ? '#ebf8ff' : 'transparent'};color:${route.module === 'deductions' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'deductions' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='deductions')this.style.background='#f7fafc'" onmouseout="if(route.module!=='deductions')this.style.background='transparent'">Deductions & Payable</div>
+            <div class="mod-item ${route.module === 'transport' ? 'active' : ''}" data-mod="transport" style="padding:6px 10px;border-radius:6px;background:${route.module === 'transport' ? '#ebf8ff' : 'transparent'};color:${route.module === 'transport' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'transport' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='transport')this.style.background='#f7fafc'" onmouseout="if(route.module!=='transport')this.style.background='transparent'">Transport & Loss</div>
+            <div class="mod-item ${route.module === 'sale_invoicing' ? 'active' : ''}" data-mod="sale_invoicing" style="padding:6px 10px;border-radius:6px;background:${route.module === 'sale_invoicing' ? '#ebf8ff' : 'transparent'};color:${route.module === 'sale_invoicing' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'sale_invoicing' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if(route.module!=='sale_invoicing')this.style.background='#f7fafc'" onmouseout="if(route.module!=='sale_invoicing')this.style.background='transparent'">Sale & Invoicing</div>
 
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">FINANCE</div>
             <div id="sidebar-payments-btn" style="padding:6px 10px;color:#4a5568;font-size:13px;cursor:pointer;border-radius:4px;margin-bottom:8px;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">Payments</div>
 
             <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">INSIGHT</div>
-            <div class="mod-item ${route.module === 'ledger' ? 'active' : ''}" data-mod="ledger" style="padding:6px 10px;border-radius:6px;background:${route.module === 'ledger' ? '#ebf8ff' : 'transparent'};color:${route.module === 'ledger' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'ledger' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='ledger')this.style.background='#f7fafc'" onmouseout="if(route.module!=='ledger')this.style.background='transparent'">Cost ledger & margin --></div>
+            <div class="mod-item ${route.module === 'ledger' ? 'active' : ''}" data-mod="ledger" style="padding:6px 10px;border-radius:6px;background:${route.module === 'ledger' ? '#ebf8ff' : 'transparent'};color:${route.module === 'ledger' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'ledger' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='ledger')this.style.background='#f7fafc'" onmouseout="if(route.module!=='ledger')this.style.background='transparent'">Cost Ledger & Margin</div>
             <div class="mod-item ${route.module === 'reports' ? 'active' : ''}" data-mod="reports" style="padding:6px 10px;border-radius:6px;background:${route.module === 'reports' ? '#ebf8ff' : 'transparent'};color:${route.module === 'reports' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'reports' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='reports')this.style.background='#f7fafc'" onmouseout="if(route.module!=='reports')this.style.background='transparent'">Reports</div>
             <div class="mod-item ${route.module === 'event_log' ? 'active' : ''}" data-mod="event_log" style="padding:6px 10px;border-radius:6px;background:${route.module === 'event_log' ? '#ebf8ff' : 'transparent'};color:${route.module === 'event_log' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'event_log' ? '600' : '400'};cursor:pointer;font-size:13px;" onmouseover="if(route.module!=='event_log')this.style.background='#f7fafc'" onmouseout="if(route.module!=='event_log')this.style.background='transparent'">Trade event log</div>
         `;

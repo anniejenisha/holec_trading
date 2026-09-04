@@ -10,7 +10,8 @@ dynamic = ["version"]
 dependencies = [
     "pytesseract",
     "pdf2image",
-    "Pillow"
+    "Pillow",
+    "openai"
 ]
 
 [deploy.dependencies.apt]

@@ -1,11 +1,23 @@
 import base64
 import io
+import json
+import re
+
+import frappe
+from openai import OpenAI
+from pypdf import PdfReader
+import base64
+import io
 import re
 from PIL import Image
 import pytesseract
 from pypdf import PdfReader
 import frappe
 
+
+# ============================================================
+# HELPER: EXTRACT KRA PIN
+# ============================================================
 
 def find_kra_pin(text):
     """Helper function to extract KRA PIN from text using multi-strategy
@@ -127,1690 +139,600 @@ def extract_kra_pin(filedata, filename=None):
         return None
 
 
-import base64
-import io
-import os
-import re
-
-import frappe
-import pytesseract
-
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-from pypdf import PdfReader
-
-
 # ============================================================
-# COMMON HELPERS
+# HELPER: CLEAN WEIGHT
 # ============================================================
-
-def normalize_ocr_text(text):
-    """
-    Normalize OCR text without destroying useful information.
-    """
-    if not text:
-        return ""
-
-    text = text.replace("\xa0", " ")
-    text = text.replace("\r", "\n")
-
-    # Normalize common OCR characters
-    replacements = {
-        "—": "-",
-        "–": "-",
-        "−": "-",
-        "“": '"',
-        "”": '"',
-        "‘": "'",
-        "’": "'",
-    }
-
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    # Keep line structure because labels and values are often
-    # on the same/next line.
-    lines = []
-
-    for line in text.split("\n"):
-        line = re.sub(r"[ \t]+", " ", line).strip()
-
-        if line:
-            lines.append(line)
-
-    return "\n".join(lines)
-
 
 def clean_weight(value):
     """
-    Convert OCR weight such as:
-        11,580
-        11580
-        11 580
-        11580 kg
-    into integer/float.
-    """
-    if value is None:
-        return None
-
-    value = str(value).strip().upper()
-
-    # Remove KG and other text
-    value = re.sub(r"\bKG\b", "", value, flags=re.I)
-
-    # Remove spaces inside numbers
-    value = re.sub(r"(?<=\d)\s+(?=\d)", "", value)
-
-    # Keep only digits, comma and decimal point
-    value = re.sub(r"[^0-9.,]", "", value)
-
-    if not value:
-        return None
-
-    # 11,580 -> 11580
-    value = value.replace(",", "")
-
-    try:
-        number = float(value)
-
-        if number.is_integer():
-            return int(number)
-
-        return number
-
-    except Exception:
-        return None
-
-
-def clean_integer(value):
-    """
-    Convert OCR numeric text to integer.
-    """
-    if value is None:
-        return None
-
-    value = str(value)
-
-    value = re.sub(r"[^0-9]", "", value)
-
-    if not value:
-        return None
-
-    try:
-        return int(value)
-    except Exception:
-        return None
-
-
-def normalize_ticket(value):
-    """
-    Clean ticket number.
-
-    Example:
-        MGL00352
-        257798
-        WB-88213
-    """
-    if not value:
-        return ""
-
-    value = value.upper().strip()
-
-    value = re.sub(r"[^A-Z0-9_-]", "", value)
-
-    return value
-
-
-def normalize_vehicle(value):
-    """
-    Clean vehicle registration.
-
-    Kenyan examples:
-        KAS123A
-        KDA 123A
-        Kxx 123A
-    """
-    if not value:
-        return ""
-
-    value = value.upper().strip()
-
-    value = re.sub(r"[^A-Z0-9]", "", value)
-
-    return value
-
-
-# ============================================================
-# IMAGE PREPROCESSING
-# ============================================================
-
-def preprocess_image(image):
-    """
-    Create multiple OCR-friendly versions of the image.
-    This helps with mobile photos, faded receipts and rotated slips.
-    """
-
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-
-    # Upscale
-    scale = 2
-
-    image = image.resize(
-        (
-            image.width * scale,
-            image.height * scale
-        )
-    )
-
-    gray = ImageOps.grayscale(image)
-
-    # Improve contrast
-    contrast = ImageEnhance.Contrast(gray).enhance(2.2)
-
-    # Sharpen
-    sharpen = contrast.filter(ImageFilter.SHARPEN)
-
-    # Threshold
-    threshold = sharpen.point(
-        lambda p: 255 if p > 160 else 0
-    )
-
-    return [
-        image,
-        gray,
-        contrast,
-        sharpen,
-        threshold,
-    ]
-
-
-def get_ocr_candidates(image):
-    """
-    OCR the image using multiple rotations and preprocessing modes.
-
-    Returns a list of:
-        {
-            text: "...",
-            score: 123
-        }
-    """
-
-    candidates = []
-
-    # We intentionally try all rotations because mobile images
-    # may be uploaded sideways.
-    for angle in [0, 90, 180, 270]:
-
-        try:
-            rotated = image.rotate(
-                angle,
-                expand=True,
-                fillcolor="white"
-            )
-
-            processed_images = preprocess_image(rotated)
-
-            for processed in processed_images:
-
-                for psm in [6, 11, 12]:
-
-                    try:
-                        data = pytesseract.image_to_data(
-                            processed,
-                            config=f"--psm {psm}",
-                            output_type=pytesseract.Output.DICT
-                        )
-
-                        text_parts = []
-                        confidence_values = []
-
-                        for i, word in enumerate(data["text"]):
-
-                            word = (word or "").strip()
-
-                            if word:
-                                text_parts.append(word)
-
-                                try:
-                                    confidence = float(
-                                        data["conf"][i]
-                                    )
-
-                                    if confidence >= 0:
-                                        confidence_values.append(
-                                            confidence
-                                        )
-
-                                except Exception:
-                                    pass
-
-                        text = " ".join(text_parts)
-
-                        if not text:
-                            continue
-
-                        avg_confidence = (
-                            sum(confidence_values)
-                            / len(confidence_values)
-                            if confidence_values
-                            else 0
-                        )
-
-                        # Give extra weight to documents containing
-                        # important weighbridge labels.
-                        upper_text = text.upper()
-
-                        keyword_score = 0
-
-                        keywords = [
-                            "GROSS",
-                            "TARE",
-                            "NET",
-                            "WEIGHT",
-                            "TICKET",
-                            "VEHICLE",
-                            "BAGS",
-                            "BRIDGE",
-                        ]
-
-                        for keyword in keywords:
-                            if keyword in upper_text:
-                                keyword_score += 15
-
-                        score = avg_confidence + keyword_score
-
-                        candidates.append(
-                            {
-                                "text": text,
-                                "score": score,
-                                "angle": angle,
-                            }
-                        )
-
-                    except Exception:
-                        continue
-
-        except Exception:
-            continue
-
-    candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    return candidates
-
-
-# ============================================================
-# FIELD EXTRACTION
-# ============================================================
-
-def extract_weight_from_label(text, labels):
-    """
-    Search for a weight next to a label.
+    Convert weight into numeric value.
 
     Examples:
-        GROSS WEIGHT : 11,580 KG
-        GROSS_WT : 11580 KG
-        GROSS WT 11580
-        G.WT : 11580
-        TARE WEIGHT : 4860 KG
-        NET WEIGHT : 6720 KG
+        10.690 kg -> 10690
+        10,690 kg -> 10690
+        10690 kg  -> 10690
+        4.250 kg  -> 4250
     """
 
-    if not text:
+    if value is None:
         return None
 
-    normalized = normalize_ocr_text(text)
+    # --------------------------------------------------------
+    # Numeric value
+    # --------------------------------------------------------
 
-    # OCR can split words into different lines.
-    compact = re.sub(
-        r"\s+",
+    if isinstance(
+        value,
+        (int, float)
+    ):
+        try:
+            number = float(value)
+
+            if number.is_integer():
+                return int(number)
+
+            return number
+        except Exception:
+            return None
+
+    # --------------------------------------------------------
+    # Convert to string
+    # --------------------------------------------------------
+
+    value = str(
+        value
+    ).strip()
+
+    if not value:
+        return None
+
+    # --------------------------------------------------------
+    # Remove units
+    # --------------------------------------------------------
+
+    value = re.sub(
+        r"\b(KG|KGS|KILOGRAM|KILOGRAMS)\b",
+        "",
+        value,
+        flags=re.IGNORECASE
+    )
+
+    # --------------------------------------------------------
+    # Remove spaces
+    # --------------------------------------------------------
+
+    value = value.replace(
         " ",
-        normalized.upper()
+        ""
     )
 
-    for label in labels:
+    # --------------------------------------------------------
+    # Thousands separator
+    # --------------------------------------------------------
 
-        label_pattern = label.upper()
-
-        # Label followed by optional punctuation and weight
-        pattern = (
-            rf"{label_pattern}"
-            r"(?:\s*[:#=\-]\s*|\s+)"
-            r"([0-9][0-9,\s]*(?:\.[0-9]+)?)"
-            r"\s*(?:KG|KGS)?"
+    if re.fullmatch(
+        r"\d{1,3}(?:[.,]\d{3})+",
+        value
+    ):
+        value = (
+            value
+            .replace(".", "")
+            .replace(",", "")
         )
-
-        match = re.search(
-            pattern,
-            compact,
-            flags=re.I
-        )
-
-        if match:
-            weight = clean_weight(match.group(1))
-
-            if weight is not None:
-                return weight
-
-    # Second pass: inspect individual lines.
-    lines = normalized.upper().splitlines()
-
-    for index, line in enumerate(lines):
-
-        for label in labels:
-
-            if label.upper() in line:
-
-                # Current line
-                match = re.search(
-                    r"([0-9][0-9,\s]*(?:\.[0-9]+)?)\s*(?:KG|KGS)?",
-                    line,
-                    flags=re.I
-                )
-
-                if match:
-
-                    weight = clean_weight(
-                        match.group(1)
-                    )
-
-                    if weight is not None:
-                        return weight
-
-                # Next line
-                if index + 1 < len(lines):
-
-                    next_line = lines[index + 1]
-
-                    match = re.search(
-                        r"([0-9][0-9,\s]*(?:\.[0-9]+)?)\s*(?:KG|KGS)?",
-                        next_line,
-                        flags=re.I
-                    )
-
-                    if match:
-
-                        weight = clean_weight(
-                            match.group(1)
-                        )
-
-                        if weight is not None:
-                            return weight
-
-    return None
-
-
-def extract_ticket_number(text):
-    """
-    Extract weighbridge ticket number.
-
-    Handles:
-        Ticket No : MGL00352
-        Ticket Number : MGL00352
-        TICKET NO 257798
-        TKT : WB-88213
-    """
-
-    if not text:
-        return ""
-
-    normalized = normalize_ocr_text(text)
-    upper = normalized.upper()
-
-    patterns = [
-
-        # Ticket Number / Ticket No
-        r"(?:TICKET\s*(?:NUMBER|NO|NUM)?|TKT)"
-        r"\s*[:#=\-]?\s*"
-        r"([A-Z0-9][A-Z0-9_-]{3,30})",
-
-        # Some slips print only "NO:"
-        r"\bNO\.?\s*[:#=\-]\s*"
-        r"([A-Z0-9][A-Z0-9_-]{3,30})",
-    ]
-
-    for pattern in patterns:
-
-        matches = re.findall(
-            pattern,
-            upper,
-            flags=re.I
-        )
-
-        for value in matches:
-
-            value = normalize_ticket(value)
-
-            if not value:
-                continue
-
-            # Avoid obvious words accidentally captured as ticket.
-            bad_values = {
-                "WEIGHT",
-                "GROSS",
-                "TARE",
-                "NET",
-                "DATE",
-                "NAME",
-                "NUMBER",
-                "VEHICLE",
-            }
-
-            if value in bad_values:
-                continue
-
-            return value
-
-    return ""
-
-
-def extract_vehicle_registration(text):
-    """
-    Extract vehicle registration from OCR.
-
-    Example:
-        VEHICLE NO : KAS123A
-        VEHICLE REG : KAS 123A
-        VEHICLE REGISTRATION : KDA123A
-    """
-
-    if not text:
-        return ""
-
-    normalized = normalize_ocr_text(text)
-    upper = normalized.upper()
-
-    patterns = [
-
-        r"(?:VEHICLE\s*(?:NO|NUMBER|REG|REGISTRATION)?"
-        r"|VEH|TRUCK)"
-        r"\s*[:#=\-]?\s*"
-        r"([A-Z]{1,4}\s*[0-9]{1,5}\s*[A-Z]{0,3})",
-
-        r"\b([A-Z]{2,4}\s*[0-9]{2,5}\s*[A-Z])\b",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            upper,
-            flags=re.I
-        )
-
-        if match:
-
-            vehicle = normalize_vehicle(
-                match.group(1)
-            )
-
-            if len(vehicle) >= 4:
-                return vehicle
-
-    return ""
-
-
-def extract_bag_count(text):
-    """
-    Extract bag count.
-
-    Handles:
-        BAGS : 31
-        BAG COUNT : 31
-        NO OF BAGS : 31
-        BAGS 31
-    """
-
-    if not text:
-        return None
-
-    normalized = normalize_ocr_text(text)
-    upper = normalized.upper()
-
-    patterns = [
-
-        r"(?:BAG\s*COUNT|NO\.?\s*OF\s*BAGS|NUMBER\s*OF\s*BAGS)"
-        r"\s*[:#=\-]?\s*(\d{1,5})",
-
-        r"\bBAGS?\s*[:#=\-]?\s*(\d{1,5})",
-
-        r"\bQTY\s*[:#=\-]?\s*(\d{1,5})",
-
-        r"\bPACKETS?\s*[:#=\-]?\s*(\d{1,5})",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            upper,
-            flags=re.I
-        )
-
-        if match:
-
-            value = clean_integer(
-                match.group(1)
-            )
-
-            if value is not None and 0 < value <= 10000:
-                return value
-
-    return None
-
-
-# ============================================================
-# OCR RESULT COMBINATION
-# ============================================================
-
-def extract_weighbridge_fields(text):
-    """
-    Extract all weighbridge fields from OCR text.
-    """
-
-    text = normalize_ocr_text(text)
-
-    gross = extract_weight_from_label(
-        text,
-        [
-            r"GROSS\s*(?:WT|WEIGHT)",
-            r"GROSS_WT",
-            r"GROSS",
-            r"G\.?\s*WT",
-            r"GW",
-        ]
-    )
-
-    tare = extract_weight_from_label(
-        text,
-        [
-            r"TARE\s*(?:WT|WEIGHT)",
-            r"TARE_WT",
-            r"TARE",
-            r"T\.?\s*WT",
-            r"TW",
-        ]
-    )
-
-    net = extract_weight_from_label(
-        text,
-        [
-            r"NET\s*(?:WT|WEIGHT)",
-            r"NET_WT",
-            r"NET",
-            r"N\.?\s*WT",
-            r"NW",
-        ]
-    )
-
-    ticket = extract_ticket_number(text)
-
-    vehicle = extract_vehicle_registration(text)
-
-    bags = extract_bag_count(text)
-
-    # Calculate net if gross and tare are available.
-    calculated_net = None
-
-    if gross is not None and tare is not None:
-        calculated_net = max(
-            0,
-            gross - tare
-        )
-
-    # If OCR did not find printed net weight,
-    # use calculated net.
-    if net is None and calculated_net is not None:
-        net = calculated_net
-
-    return {
-        "gross_weight_kg": gross or 0,
-        "tare_weight_kg": tare or 0,
-        "net_weight_kg": net or 0,
-        "bag_count": bags or 0,
-        "weighbridge_ticket_number": ticket or "",
-        "vehicle_registration": vehicle or "",
-    }
-
-
-# ============================================================
-# IMAGE OCR
-# ============================================================
-
-def extract_weighbridge_from_image(image_bytes):
-    """
-    OCR a weighbridge image.
-
-    Multiple rotations and preprocessing methods are tried.
-    """
-
-    try:
-
-        image = Image.open(
-            io.BytesIO(image_bytes)
-        )
-
-        candidates = get_ocr_candidates(image)
-
-        if not candidates:
-            return {
-                "data": {
-                    "gross_weight_kg": 0,
-                    "tare_weight_kg": 0,
-                    "net_weight_kg": 0,
-                    "bag_count": 0,
-                    "weighbridge_ticket_number": "",
-                    "vehicle_registration": "",
-                },
-                "text": "",
-            }
-
-        # Combine top OCR results.
-        #
-        # This is important because one OCR version may read
-        # "GROSS" correctly while another reads the number correctly.
-        top_candidates = candidates[:8]
-
-        combined_text = "\n".join(
-            candidate["text"]
-            for candidate in top_candidates
-        )
-
-        data = extract_weighbridge_fields(
-            combined_text
-        )
-
-        return {
-            "data": data,
-            "text": combined_text,
-        }
-
-    except Exception:
-
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Weighbridge Image OCR Error"
-        )
-
-        return {
-            "data": {
-                "gross_weight_kg": 0,
-                "tare_weight_kg": 0,
-                "net_weight_kg": 0,
-                "bag_count": 0,
-                "weighbridge_ticket_number": "",
-                "vehicle_registration": "",
-            },
-            "text": "",
-        }
-
-
-# ============================================================
-# PDF OCR
-# ============================================================
-
-def extract_weighbridge_from_pdf(pdf_bytes):
-    """
-    First try the PDF text layer.
-    If that fails, render PDF pages and perform OCR.
-    """
-
-    try:
-
-        pdf_file = io.BytesIO(pdf_bytes)
-
-        reader = PdfReader(pdf_file)
-
-        all_text = ""
-
-        for page in reader.pages:
-
-            page_text = page.extract_text() or ""
-
-            all_text += "\n" + page_text
-
-        all_text = normalize_ocr_text(
-            all_text
-        )
-
-        data = extract_weighbridge_fields(
-            all_text
-        )
-
-        # If useful fields were found, return them.
-        if (
-            data["gross_weight_kg"]
-            or data["tare_weight_kg"]
-            or data["net_weight_kg"]
-            or data["weighbridge_ticket_number"]
-        ):
-
-            return {
-                "data": data,
-                "text": all_text,
-            }
-
-        # ----------------------------------------------------
-        # PDF OCR fallback
-        # ----------------------------------------------------
-
-        from pdf2image import convert_from_bytes
-
-        pages = convert_from_bytes(
-            pdf_bytes,
-            dpi=300
-        )
-
-        all_ocr_text = ""
-
-        for page_image in pages:
-
-            result = extract_weighbridge_from_image(
-                io.BytesIO(
-                    _image_to_bytes(page_image)
-                ).getvalue()
-            )
-
-            page_data = result["data"]
-
-            all_ocr_text += "\n" + result["text"]
-
-            # Return immediately if meaningful data exists.
-            if (
-                page_data["gross_weight_kg"]
-                or page_data["tare_weight_kg"]
-                or page_data["weighbridge_ticket_number"]
-            ):
-                return result
-
-        final_data = extract_weighbridge_fields(
-            all_ocr_text
-        )
-
-        return {
-            "data": final_data,
-            "text": all_ocr_text,
-        }
-
-    except Exception:
-
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Weighbridge PDF OCR Error"
-        )
-
-        return {
-            "data": {
-                "gross_weight_kg": 0,
-                "tare_weight_kg": 0,
-                "net_weight_kg": 0,
-                "bag_count": 0,
-                "weighbridge_ticket_number": "",
-                "vehicle_registration": "",
-            },
-            "text": "",
-        }
-
-
-def _image_to_bytes(image):
-    """
-    Convert PIL Image to JPEG bytes.
-    """
-
-    buffer = io.BytesIO()
-
-    image.save(
-        buffer,
-        format="JPEG",
-        quality=95
-    )
-
-    return buffer.getvalue()
-
-
-#import base64
-import io
-import os
-import re
-
-import frappe
-import pytesseract
-
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-from pypdf import PdfReader
-
-
-# ============================================================
-# COMMON HELPERS
-# ============================================================
-
-def normalize_ocr_text(text):
-    """
-    Normalize OCR text without destroying useful information.
-    """
-    if not text:
-        return ""
-
-    text = text.replace("\xa0", " ")
-    text = text.replace("\r", "\n")
-
-    # Normalize common OCR characters
-    replacements = {
-        "—": "-",
-        "–": "-",
-        "−": "-",
-        "“": '"',
-        "”": '"',
-        "‘": "'",
-        "’": "'",
-    }
-
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    # Keep line structure because labels and values are often
-    # on the same/next line.
-    lines = []
-
-    for line in text.split("\n"):
-        line = re.sub(r"[ \t]+", " ", line).strip()
-
-        if line:
-            lines.append(line)
-
-    return "\n".join(lines)
-
-
-def clean_weight(value):
-    """
-    Convert OCR weight such as:
-        11,580
-        11580
-        11 580
-        11580 kg
-    into integer/float.
-    """
-    if value is None:
-        return None
-
-    value = str(value).strip().upper()
-
-    # Remove KG and other text
-    value = re.sub(r"\bKG\b", "", value, flags=re.I)
-
-    # Remove spaces inside numbers
-    value = re.sub(r"(?<=\d)\s+(?=\d)", "", value)
-
-    # Keep only digits, comma and decimal point
-    value = re.sub(r"[^0-9.,]", "", value)
-
-    if not value:
-        return None
-
-    # 11,580 -> 11580
-    value = value.replace(",", "")
-
-    try:
-        number = float(value)
-
-        if number.is_integer():
-            return int(number)
-
-        return number
-
-    except Exception:
-        return None
-
-
-def clean_integer(value):
-    """
-    Convert OCR numeric text to integer.
-    """
-    if value is None:
-        return None
-
-    value = str(value)
-
-    value = re.sub(r"[^0-9]", "", value)
-
-    if not value:
-        return None
-
-    try:
-        return int(value)
-    except Exception:
-        return None
-
-
-def normalize_ticket(value):
-    """
-    Clean ticket number.
-
-    Example:
-        MGL00352
-        257798
-        WB-88213
-    """
-    if not value:
-        return ""
-
-    value = value.upper().strip()
-
-    value = re.sub(r"[^A-Z0-9_-]", "", value)
-
-    return value
-
-
-def normalize_vehicle(value):
-    """
-    Clean vehicle registration.
-
-    Kenyan examples:
-        KAS123A
-        KDA 123A
-        Kxx 123A
-    """
-    if not value:
-        return ""
-
-    value = value.upper().strip()
-
-    value = re.sub(r"[^A-Z0-9]", "", value)
-
-    return value
-
-
-# ============================================================
-# IMAGE PREPROCESSING
-# ============================================================
-
-def preprocess_image(image):
-    """
-    Create multiple OCR-friendly versions of the image.
-    This helps with mobile photos, faded receipts and rotated slips.
-    """
-
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-
-    # Upscale
-    scale = 2
-
-    image = image.resize(
-        (
-            image.width * scale,
-            image.height * scale
-        )
-    )
-
-    gray = ImageOps.grayscale(image)
-
-    # Improve contrast
-    contrast = ImageEnhance.Contrast(gray).enhance(2.2)
-
-    # Sharpen
-    sharpen = contrast.filter(ImageFilter.SHARPEN)
-
-    # Threshold
-    threshold = sharpen.point(
-        lambda p: 255 if p > 160 else 0
-    )
-
-    return [
-        image,
-        gray,
-        contrast,
-        sharpen,
-        threshold,
-    ]
-
-
-def get_ocr_candidates(image):
-    """
-    OCR the image using multiple rotations and preprocessing modes.
-
-    Returns a list of:
-        {
-            text: "...",
-            score: 123
-        }
-    """
-
-    candidates = []
-
-    # We intentionally try all rotations because mobile images
-    # may be uploaded sideways.
-    for angle in [0, 90, 180, 270]:
 
         try:
-            rotated = image.rotate(
-                angle,
-                expand=True,
-                fillcolor="white"
-            )
-
-            processed_images = preprocess_image(rotated)
-
-            for processed in processed_images:
-
-                for psm in [6, 11, 12]:
-
-                    try:
-                        data = pytesseract.image_to_data(
-                            processed,
-                            config=f"--psm {psm}",
-                            output_type=pytesseract.Output.DICT
-                        )
-
-                        text_parts = []
-                        confidence_values = []
-
-                        for i, word in enumerate(data["text"]):
-
-                            word = (word or "").strip()
-
-                            if word:
-                                text_parts.append(word)
-
-                                try:
-                                    confidence = float(
-                                        data["conf"][i]
-                                    )
-
-                                    if confidence >= 0:
-                                        confidence_values.append(
-                                            confidence
-                                        )
-
-                                except Exception:
-                                    pass
-
-                        text = " ".join(text_parts)
-
-                        if not text:
-                            continue
-
-                        avg_confidence = (
-                            sum(confidence_values)
-                            / len(confidence_values)
-                            if confidence_values
-                            else 0
-                        )
-
-                        # Give extra weight to documents containing
-                        # important weighbridge labels.
-                        upper_text = text.upper()
-
-                        keyword_score = 0
-
-                        keywords = [
-                            "GROSS",
-                            "TARE",
-                            "NET",
-                            "WEIGHT",
-                            "TICKET",
-                            "VEHICLE",
-                            "BAGS",
-                            "BRIDGE",
-                        ]
-
-                        for keyword in keywords:
-                            if keyword in upper_text:
-                                keyword_score += 15
-
-                        score = avg_confidence + keyword_score
-
-                        candidates.append(
-                            {
-                                "text": text,
-                                "score": score,
-                                "angle": angle,
-                            }
-                        )
-
-                    except Exception:
-                        continue
-
+            return int(value)
         except Exception:
-            continue
+            return None
 
-    candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True
+    # --------------------------------------------------------
+    # Integer
+    # --------------------------------------------------------
+
+    if re.fullmatch(
+        r"\d+",
+        value
+    ):
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    # --------------------------------------------------------
+    # Extract numeric value
+    # --------------------------------------------------------
+
+    match = re.search(
+        r"\d+(?:[.,]\d+)?",
+        value
     )
 
-    return candidates
-
-
-# ============================================================
-# FIELD EXTRACTION
-# ============================================================
-
-def extract_weight_from_label(text, labels):
-    """
-    Search for a weight next to a label.
-
-    Examples:
-        GROSS WEIGHT : 11,580 KG
-        GROSS_WT : 11580 KG
-        GROSS WT 11580
-        G.WT : 11580
-        TARE WEIGHT : 4860 KG
-        NET WEIGHT : 6720 KG
-    """
-
-    if not text:
+    if not match:
         return None
 
-    normalized = normalize_ocr_text(text)
+    number = match.group(0)
 
-    # OCR can split words into different lines.
-    compact = re.sub(
-        r"\s+",
-        " ",
-        normalized.upper()
-    )
+    # --------------------------------------------------------
+    # 4.250 -> 4250
+    # --------------------------------------------------------
 
-    for label in labels:
-
-        label_pattern = label.upper()
-
-        # Label followed by optional punctuation and weight
-        pattern = (
-            rf"{label_pattern}"
-            r"(?:\s*[:#=\-]\s*|\s+)"
-            r"([0-9][0-9,\s]*(?:\.[0-9]+)?)"
-            r"\s*(?:KG|KGS)?"
+    if re.fullmatch(
+        r"\d{1,3}[.,]\d{3}",
+        number
+    ):
+        number = (
+            number
+            .replace(".", "")
+            .replace(",", "")
         )
 
-        match = re.search(
-            pattern,
-            compact,
-            flags=re.I
-        )
-
-        if match:
-            weight = clean_weight(match.group(1))
-
-            if weight is not None:
-                return weight
-
-    # Second pass: inspect individual lines.
-    lines = normalized.upper().splitlines()
-
-    for index, line in enumerate(lines):
-
-        for label in labels:
-
-            if label.upper() in line:
-
-                # Current line
-                match = re.search(
-                    r"([0-9][0-9,\s]*(?:\.[0-9]+)?)\s*(?:KG|KGS)?",
-                    line,
-                    flags=re.I
-                )
-
-                if match:
-
-                    weight = clean_weight(
-                        match.group(1)
-                    )
-
-                    if weight is not None:
-                        return weight
-
-                # Next line
-                if index + 1 < len(lines):
-
-                    next_line = lines[index + 1]
-
-                    match = re.search(
-                        r"([0-9][0-9,\s]*(?:\.[0-9]+)?)\s*(?:KG|KGS)?",
-                        next_line,
-                        flags=re.I
-                    )
-
-                    if match:
-
-                        weight = clean_weight(
-                            match.group(1)
-                        )
-
-                        if weight is not None:
-                            return weight
-
-    return None
-
-
-def extract_ticket_number(text):
-    """
-    Extract weighbridge ticket number.
-
-    Handles:
-        Ticket No : MGL00352
-        Ticket Number : MGL00352
-        TICKET NO 257798
-        TKT : WB-88213
-    """
-
-    if not text:
-        return ""
-
-    normalized = normalize_ocr_text(text)
-    upper = normalized.upper()
-
-    patterns = [
-
-        # Ticket Number / Ticket No
-        r"(?:TICKET\s*(?:NUMBER|NO|NUM)?|TKT)"
-        r"\s*[:#=\-]?\s*"
-        r"([A-Z0-9][A-Z0-9_-]{3,30})",
-
-        # Some slips print only "NO:"
-        r"\bNO\.?\s*[:#=\-]\s*"
-        r"([A-Z0-9][A-Z0-9_-]{3,30})",
-    ]
-
-    for pattern in patterns:
-
-        matches = re.findall(
-            pattern,
-            upper,
-            flags=re.I
-        )
-
-        for value in matches:
-
-            value = normalize_ticket(value)
-
-            if not value:
-                continue
-
-            # Avoid obvious words accidentally captured as ticket.
-            bad_values = {
-                "WEIGHT",
-                "GROSS",
-                "TARE",
-                "NET",
-                "DATE",
-                "NAME",
-                "NUMBER",
-                "VEHICLE",
-            }
-
-            if value in bad_values:
-                continue
-
-            return value
-
-    return ""
-
-
-def extract_vehicle_registration(text):
-    """
-    Extract vehicle registration from OCR.
-
-    Example:
-        VEHICLE NO : KAS123A
-        VEHICLE REG : KAS 123A
-        VEHICLE REGISTRATION : KDA123A
-    """
-
-    if not text:
-        return ""
-
-    normalized = normalize_ocr_text(text)
-    upper = normalized.upper()
-
-    patterns = [
-
-        r"(?:VEHICLE\s*(?:NO|NUMBER|REG|REGISTRATION)?"
-        r"|VEH|TRUCK)"
-        r"\s*[:#=\-]?\s*"
-        r"([A-Z]{1,4}\s*[0-9]{1,5}\s*[A-Z]{0,3})",
-
-        r"\b([A-Z]{2,4}\s*[0-9]{2,5}\s*[A-Z])\b",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            upper,
-            flags=re.I
-        )
-
-        if match:
-
-            vehicle = normalize_vehicle(
-                match.group(1)
-            )
-
-            if len(vehicle) >= 4:
-                return vehicle
-
-    return ""
-
-
-def extract_bag_count(text):
-    """
-    Extract bag count.
-
-    Handles:
-        BAGS : 31
-        BAG COUNT : 31
-        NO OF BAGS : 31
-        BAGS 31
-    """
-
-    if not text:
-        return None
-
-    normalized = normalize_ocr_text(text)
-    upper = normalized.upper()
-
-    patterns = [
-
-        r"(?:BAG\s*COUNT|NO\.?\s*OF\s*BAGS|NUMBER\s*OF\s*BAGS)"
-        r"\s*[:#=\-]?\s*(\d{1,5})",
-
-        r"\bBAGS?\s*[:#=\-]?\s*(\d{1,5})",
-
-        r"\bQTY\s*[:#=\-]?\s*(\d{1,5})",
-
-        r"\bPACKETS?\s*[:#=\-]?\s*(\d{1,5})",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            upper,
-            flags=re.I
-        )
-
-        if match:
-
-            value = clean_integer(
-                match.group(1)
-            )
-
-            if value is not None and 0 < value <= 10000:
-                return value
-
-    return None
-
-
-# ============================================================
-# OCR RESULT COMBINATION
-# ============================================================
-
-def extract_weighbridge_fields(text):
-    """
-    Extract all weighbridge fields from OCR text.
-    """
-
-    text = normalize_ocr_text(text)
-
-    gross = extract_weight_from_label(
-        text,
-        [
-            r"GROSS\s*(?:WT|WEIGHT)",
-            r"GROSS_WT",
-            r"GROSS",
-            r"G\.?\s*WT",
-            r"GW",
-        ]
-    )
-
-    tare = extract_weight_from_label(
-        text,
-        [
-            r"TARE\s*(?:WT|WEIGHT)",
-            r"TARE_WT",
-            r"TARE",
-            r"T\.?\s*WT",
-            r"TW",
-        ]
-    )
-
-    net = extract_weight_from_label(
-        text,
-        [
-            r"NET\s*(?:WT|WEIGHT)",
-            r"NET_WT",
-            r"NET",
-            r"N\.?\s*WT",
-            r"NW",
-        ]
-    )
-
-    ticket = extract_ticket_number(text)
-
-    vehicle = extract_vehicle_registration(text)
-
-    bags = extract_bag_count(text)
-
-    # Calculate net if gross and tare are available.
-    calculated_net = None
-
-    if gross is not None and tare is not None:
-        calculated_net = max(
-            0,
-            gross - tare
-        )
-
-    # If OCR did not find printed net weight,
-    # use calculated net.
-    if net is None and calculated_net is not None:
-        net = calculated_net
-
-    return {
-        "gross_weight_kg": gross or 0,
-        "tare_weight_kg": tare or 0,
-        "net_weight_kg": net or 0,
-        "bag_count": bags or 0,
-        "weighbridge_ticket_number": ticket or "",
-        "vehicle_registration": vehicle or "",
-    }
-
-
-# ============================================================
-# IMAGE OCR
-# ============================================================
-
-def extract_weighbridge_from_image(image_bytes):
-    """
-    OCR a weighbridge image.
-
-    Multiple rotations and preprocessing methods are tried.
-    """
+        try:
+            return int(number)
+        except Exception:
+            return None
+
+    # --------------------------------------------------------
+    # Normal decimal
+    # --------------------------------------------------------
 
     try:
-
-        image = Image.open(
-            io.BytesIO(image_bytes)
+        result = float(
+            number.replace(",", "")
         )
 
-        candidates = get_ocr_candidates(image)
+        if result.is_integer():
+            return int(result)
 
-        if not candidates:
-            return {
-                "data": {
-                    "gross_weight_kg": 0,
-                    "tare_weight_kg": 0,
-                    "net_weight_kg": 0,
-                    "bag_count": 0,
-                    "weighbridge_ticket_number": "",
-                    "vehicle_registration": "",
-                },
-                "text": "",
-            }
-
-        # Combine top OCR results.
-        #
-        # This is important because one OCR version may read
-        # "GROSS" correctly while another reads the number correctly.
-        top_candidates = candidates[:8]
-
-        combined_text = "\n".join(
-            candidate["text"]
-            for candidate in top_candidates
-        )
-
-        data = extract_weighbridge_fields(
-            combined_text
-        )
-
-        return {
-            "data": data,
-            "text": combined_text,
-        }
-
+        return result
     except Exception:
+        return None
 
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Weighbridge Image OCR Error"
+
+# ============================================================
+# HELPER: CLEAN AI JSON
+# ============================================================
+
+def clean_ai_json(content):
+    """
+    Clean JSON response from AI.
+    """
+
+    if not content:
+        return ""
+
+    content = content.strip()
+
+    # Remove ```json
+    content = re.sub(
+        r"^```json\s*",
+        "",
+        content,
+        flags=re.IGNORECASE
+    )
+
+    # Remove ```
+    content = re.sub(
+        r"^```\s*",
+        "",
+        content
+    )
+
+    content = re.sub(
+        r"\s*```$",
+        "",
+        content
+    )
+
+    content = content.strip()
+
+    # --------------------------------------------------------
+    # Find JSON object if AI added extra text
+    # --------------------------------------------------------
+
+    if not content.startswith("{"):
+        match = re.search(
+            r"\{.*\}",
+            content,
+            re.DOTALL
         )
 
-        return {
-            "data": {
-                "gross_weight_kg": 0,
-                "tare_weight_kg": 0,
-                "net_weight_kg": 0,
-                "bag_count": 0,
-                "weighbridge_ticket_number": "",
-                "vehicle_registration": "",
-            },
-            "text": "",
-        }
+        if match:
+            content = match.group(0)
+
+    return content.strip()
 
 
 # ============================================================
-# PDF OCR
+# HELPER: EXTRACT PDF TEXT
 # ============================================================
 
-def extract_weighbridge_from_pdf(pdf_bytes):
+def extract_pdf_text(file_bytes):
     """
-    First try the PDF text layer.
-    If that fails, render PDF pages and perform OCR.
+    Extract selectable text from PDF.
     """
 
     try:
+        reader = PdfReader(
+            io.BytesIO(file_bytes)
+        )
 
-        pdf_file = io.BytesIO(pdf_bytes)
-
-        reader = PdfReader(pdf_file)
-
-        all_text = ""
+        pages = []
 
         for page in reader.pages:
+            try:
+                page_text = (
+                    page.extract_text()
+                    or ""
+                )
 
-            page_text = page.extract_text() or ""
+                if page_text:
+                    pages.append(
+                        page_text
+                    )
+            except Exception:
+                continue
 
-            all_text += "\n" + page_text
-
-        all_text = normalize_ocr_text(
-            all_text
+        return "\n".join(
+            pages
         )
-
-        data = extract_weighbridge_fields(
-            all_text
-        )
-
-        # If useful fields were found, return them.
-        if (
-            data["gross_weight_kg"]
-            or data["tare_weight_kg"]
-            or data["net_weight_kg"]
-            or data["weighbridge_ticket_number"]
-        ):
-
-            return {
-                "data": data,
-                "text": all_text,
-            }
-
-        # ----------------------------------------------------
-        # PDF OCR fallback
-        # ----------------------------------------------------
-
-        from pdf2image import convert_from_bytes
-
-        pages = convert_from_bytes(
-            pdf_bytes,
-            dpi=300
-        )
-
-        all_ocr_text = ""
-
-        for page_image in pages:
-
-            result = extract_weighbridge_from_image(
-                io.BytesIO(
-                    _image_to_bytes(page_image)
-                ).getvalue()
-            )
-
-            page_data = result["data"]
-
-            all_ocr_text += "\n" + result["text"]
-
-            # Return immediately if meaningful data exists.
-            if (
-                page_data["gross_weight_kg"]
-                or page_data["tare_weight_kg"]
-                or page_data["weighbridge_ticket_number"]
-            ):
-                return result
-
-        final_data = extract_weighbridge_fields(
-            all_ocr_text
-        )
-
-        return {
-            "data": final_data,
-            "text": all_ocr_text,
-        }
 
     except Exception:
-
         frappe.log_error(
             frappe.get_traceback(),
-            "Weighbridge PDF OCR Error"
+            "PDF Text Extraction Error"
         )
 
-        return {
-            "data": {
-                "gross_weight_kg": 0,
-                "tare_weight_kg": 0,
-                "net_weight_kg": 0,
-                "bag_count": 0,
-                "weighbridge_ticket_number": "",
-                "vehicle_registration": "",
-            },
-            "text": "",
+        return ""
+
+
+# ============================================================
+# WEIGHBRIDGE AI EXTRACTION
+# ============================================================
+
+def extract_weights_via_openai(
+    file_bytes,
+    filename="",
+    slip_type="gross"
+):
+    """
+    Extract weights and ticket info from weighbridge slip.
+    """
+
+    try:
+        ai_settings = frappe.get_single(
+            "AI Settings"
+        )
+
+        if not ai_settings.get(
+            "enable_ai_processing"
+        ):
+            return {
+                "error": True,
+                "message": (
+                    "AI Processing is disabled "
+                    "in AI Settings."
+                )
+            }
+
+        api_key = ai_settings.get_password(
+            "api_key"
+        )
+
+        if not api_key:
+            return {
+                "error": True,
+                "message": (
+                    "API Key is missing "
+                    "from AI Settings."
+                )
+            }
+
+        base_url = (
+            ai_settings.get(
+                "api_base_url"
+            )
+            or "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
+        )
+
+        base_url = base_url.strip()
+
+        model_name = (
+            ai_settings.get(
+                "default_model"
+            )
+            or "qwen/qwen3.6-27b"
+        )
+
+        model_name = model_name.strip()
+
+        deprecated_models = [
+            "llama-3.2-11b-vision-preview",
+            "llama-3.2-90b-vision-preview"
+        ]
+
+        if model_name in deprecated_models:
+            model_name = (
+                "qwen/qwen3.6-27b"
+            )
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
+
+        slip_type = (
+            slip_type
+            or "gross"
+        ).lower().strip()
+
+        if slip_type not in [
+            "gross",
+            "tare"
+        ]:
+            slip_type = "gross"
+
+        system_prompt = """
+You are an expert OCR system for weighbridge tickets.
+Read the document carefully and extract ONLY values that are actually printed.
+DO NOT guess. DO NOT calculate. DO NOT invent values.
+
+Return ONLY valid JSON using exactly:
+{
+    "gross_weight": null,
+    "tare_weight": null,
+    "net_weight": null,
+    "ticket_no": null,
+    "vehicle_no": null,
+    "bag_count": null
+}
+"""
+
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt
+            }
+        ]
+
+        filename_lower = (
+            filename or ""
+        ).lower()
+
+        if filename_lower.endswith(
+            ".pdf"
+        ):
+            extracted_text = (
+                extract_pdf_text(
+                    file_bytes
+                )
+            )
+
+            if not extracted_text.strip():
+                return {
+                    "error": True,
+                    "message": (
+                        "The PDF contains no selectable "
+                        "text. Please upload as JPG/PNG."
+                    )
+                }
+
+            user_content = f"""
+This is a {slip_type.upper()} weighbridge slip.
+DOCUMENT:
+--------------------------------------------------
+{extracted_text[:30000]}
+--------------------------------------------------
+Return JSON only.
+"""
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_content
+                }
+            )
+
+        else:
+            base64_image = (
+                base64.b64encode(
+                    file_bytes
+                ).decode("utf-8")
+            )
+
+            extension = (
+                filename_lower.split(".")[-1]
+                if "." in filename_lower
+                else "jpeg"
+            )
+
+            if extension == "jpg":
+                extension = "jpeg"
+
+            if extension not in [
+                "jpeg",
+                "png",
+                "webp"
+            ]:
+                extension = "jpeg"
+
+            mime_type = (
+                f"image/{extension}"
+            )
+
+            image_data_url = (
+                f"data:{mime_type};base64,"
+                f"{base64_image}"
+            )
+
+            user_content = [
+                {
+                    "type": "text",
+                    "text": f"This is a {slip_type.upper()} weighbridge slip. Return JSON only."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_data_url
+                    }
+                }
+            ]
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_content
+                }
+            )
+
+        create_kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": int(
+                ai_settings.get(
+                    "max_tokens"
+                )
+                or 2000
+            )
         }
 
+        try:
+            response = (
+                client
+                .chat
+                .completions
+                .create(
+                    **create_kwargs,
+                    response_format={
+                        "type": "json_object"
+                    }
+                )
+            )
+        except Exception as first_error:
+            first_error_text = str(
+                first_error
+            )
 
-def _image_to_bytes(image):
-    """
-    Convert PIL Image to JPEG bytes.
-    """
+            if (
+                "decommissioned"
+                in first_error_text.lower()
+                or
+                "model_decommissioned"
+                in first_error_text.lower()
+            ):
+                return {
+                    "error": True,
+                    "message": (
+                        "Groq model is decommissioned. "
+                        "Please use qwen/qwen3.6-27b."
+                    )
+                }
 
-    buffer = io.BytesIO()
+            try:
+                response = (
+                    client
+                    .chat
+                    .completions
+                    .create(
+                        **create_kwargs
+                    )
+                )
+            except Exception as second_error:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    "Groq/OpenAI API Error"
+                )
 
-    image.save(
-        buffer,
-        format="JPEG",
-        quality=95
-    )
+                return {
+                    "error": True,
+                    "message": (
+                        "AI API request failed:\n"
+                        + str(second_error)
+                    )
+                }
 
-    return buffer.getvalue()
+        if not response or not response.choices:
+            return {
+                "error": True,
+                "message": "AI returned an empty response."
+            }
+
+        content = (
+            response
+            .choices[0]
+            .message
+            .content
+        )
+
+        if not content:
+            return {
+                "error": True,
+                "message": "AI returned empty content."
+            }
+
+        content = clean_ai_json(
+            content
+        )
+
+        try:
+            data = json.loads(
+                content
+            )
+        except Exception as e:
+            return {
+                "error": True,
+                "message": "AI returned invalid JSON: " + str(e),
+                "raw_response": content
+            }
+
+        required_fields = [
+            "gross_weight",
+            "tare_weight",
+            "net_weight",
+            "ticket_no",
+            "vehicle_no",
+            "bag_count"
+        ]
+
+        for field in required_fields:
+            if field not in data:
+                data[field] = None
+
+        data["gross_weight"] = clean_weight(data.get("gross_weight"))
+        data["tare_weight"] = clean_weight(data.get("tare_weight"))
+        data["net_weight"] = clean_weight(data.get("net_weight"))
+
+        if data.get("ticket_no") is not None:
+            data["ticket_no"] = str(data["ticket_no"]).strip()
+            if not data["ticket_no"]:
+                data["ticket_no"] = None
+
+        if data.get("vehicle_no") is not None:
+            data["vehicle_no"] = str(data["vehicle_no"]).strip().upper()
+            if not data["vehicle_no"]:
+                data["vehicle_no"] = None
+
+        if data.get("bag_count") is not None:
+            bag_match = re.search(
+                r"\d+",
+                str(data["bag_count"])
+            )
+            if bag_match:
+                data["bag_count"] = int(bag_match.group(0))
+            else:
+                data["bag_count"] = None
+
+        return data
+
+    except Exception as e:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "OpenAI/Groq Weighbridge Extraction Error"
+        )
+        return {
+            "error": True,
+            "message": str(e)
+        }
 
 
 # ============================================================
@@ -1818,134 +740,107 @@ def _image_to_bytes(image):
 # ============================================================
 
 @frappe.whitelist()
-def extract_weighbridge_slip(filedata, filename=None):
+def extract_weighbridge_data(
+    filedata=None,
+    file_url=None,
+    slip_type="gross",
+    ticket_name=None,
+    filename=None
+):
     """
-    Frappe API endpoint.
-
-    Receives:
-        base64 filedata
-        filename
-
-    Returns:
-        {
-            gross_weight_kg,
-            tare_weight_kg,
-            net_weight_kg,
-            bag_count,
-            weighbridge_ticket_number,
-            vehicle_registration
-        }
+    Main API called from Frappe custom page.
     """
 
     try:
+        file_bytes = None
 
-        if not filedata:
+        if filedata:
+            if "," in filedata:
+                filedata = filedata.split(",", 1)[1]
+
+            try:
+                file_bytes = base64.b64decode(filedata)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": "Invalid file data: " + str(e)
+                }
+
+        elif file_url:
+            try:
+                file_doc = frappe.get_doc(
+                    "File",
+                    {"file_url": file_url}
+                )
+                file_path = file_doc.get_full_path()
+
+                with open(file_path, "rb") as file:
+                    file_bytes = file.read()
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": "Unable to read file: " + str(e)
+                }
+
+        if not file_bytes:
             return {
-                "error": "No file data received."
+                "success": False,
+                "message": "No file received."
             }
 
-        if "," in filedata:
-            filedata = filedata.split(
-                ",",
-                1
-            )[1]
+        file_size_mb = len(file_bytes) / (1024 * 1024)
 
-        try:
-            binary_data = base64.b64decode(
-                filedata,
-                validate=False
-            )
-        except Exception:
+        if file_size_mb > 20:
             return {
-                "error": "Invalid base64 file data."
+                "success": False,
+                "message": f"File size is {file_size_mb:.2f} MB. Please upload smaller than 20 MB."
             }
 
-        if not binary_data:
+        slip_type = (
+            slip_type
+            or "gross"
+        ).lower().strip()
+
+        if slip_type not in ["gross", "tare"]:
+            slip_type = "gross"
+
+        result = extract_weights_via_openai(
+            file_bytes=file_bytes,
+            filename=filename or "",
+            slip_type=slip_type
+        )
+
+        if not result:
             return {
-                "error": "Empty uploaded file."
+                "success": False,
+                "message": "AI returned no result."
             }
 
-        filename_lower = (
-            filename or ""
-        ).lower()
+        if isinstance(result, dict) and result.get("error"):
+            return {
+                "success": False,
+                "message": result.get("message", "AI extraction failed.")
+            }
 
-        if filename_lower.endswith(".pdf"):
-
-            result = extract_weighbridge_from_pdf(
-                binary_data
-            )
-
-        else:
-
-            result = extract_weighbridge_from_image(
-                binary_data
-            )
-
-        data = result.get(
-            "data",
-            {}
-        )
-
-        gross = clean_weight(
-            data.get("gross_weight_kg")
-        ) or 0
-
-        tare = clean_weight(
-            data.get("tare_weight_kg")
-        ) or 0
-
-        net = clean_weight(
-            data.get("net_weight_kg")
-        ) or 0
-
-        bags = clean_integer(
-            data.get("bag_count")
-        ) or 0
-
-        ticket = normalize_ticket(
-            data.get(
-                "weighbridge_ticket_number"
-            )
-        )
-
-        vehicle = normalize_vehicle(
-            data.get(
-                "vehicle_registration"
-            )
-        )
-
-        if gross > 0 and tare > 0:
-
-            calculated_net = max(
-                0,
-                gross - tare
-            )
-
-            net = calculated_net
-
-        response = {
-            "gross_weight_kg": gross,
-            "tare_weight_kg": tare,
-            "net_weight_kg": net,
-            "bag_count": bags,
-            "weighbridge_ticket_number": ticket,
-            "vehicle_registration": vehicle,
+        final_result = {
+            "success": True,
+            "slip_type": slip_type,
+            "gross_weight": result.get("gross_weight"),
+            "tare_weight": result.get("tare_weight"),
+            "net_weight": result.get("net_weight"),
+            "ticket_no": result.get("ticket_no"),
+            "vehicle_no": result.get("vehicle_no"),
+            "bag_count": result.get("bag_count")
         }
 
-        frappe.logger().info(
-            "WEIGHBRIDGE OCR RESULT: "
-            + str(response)
-        )
-
-        return response
+        return final_result
 
     except Exception as e:
-
         frappe.log_error(
             frappe.get_traceback(),
-            "Weighbridge OCR Extraction Error"
+            "Weighbridge AI Processing Error"
         )
-
         return {
-            "error": str(e)
+            "success": False,
+            "message": "Weighbridge AI processing failed: " + str(e)
         }
