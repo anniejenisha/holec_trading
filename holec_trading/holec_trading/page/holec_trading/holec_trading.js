@@ -185,7 +185,13 @@ function init_holec_trading_engine() {
     }
 
     function renderSuppliers(container) {
-        const suppliers = LIVE_STORE.suppliers || [];
+        const searchTerm = container._searchQuery || '';
+        const suppliers = (LIVE_STORE.suppliers || []).filter(s => {
+            const nameMatch = (s.supplier_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+            const idMatch = (s.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+            const pinMatch = (s.tax_id || '').toLowerCase().includes(searchTerm.toLowerCase());
+            return nameMatch || idMatch || pinMatch;
+        });
 
         const rows = suppliers.map(s => {
             let bg = '#edf2f7';
@@ -207,6 +213,9 @@ function init_holec_trading_engine() {
                     <td style="padding:14px 16px;color:#718096;">${s.country || '—'}</td>
                     <td style="padding:14px 16px;font-family:monospace;color:#718096;">${s.tax_id || '—'}</td>
                     <td style="padding:14px 20px;">${statusBadgeHtml}</td>
+                    <td style="padding:14px 20px;text-align:right;">
+                        <a href="/app/supplier/${s.name}" target="_blank" class="h-btn sm" style="padding:4px 10px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;text-decoration:none;color:#2d3748;font-size:12px;font-weight:500;" onclick="event.stopPropagation();">Open ↗</a>
+                    </td>
                 </tr>`;
         }).join('');
 
@@ -221,7 +230,7 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="margin-bottom:20px;">
-                <input type="text" placeholder="Search by name or KRA PIN" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
+                <input type="text" id="supplier-search-input" value="${searchTerm}" placeholder="Search by Name" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
             </div>
 
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
@@ -234,20 +243,35 @@ function init_holec_trading_engine() {
                             <th style="padding:12px 16px;">County ↕</th>
                             <th style="padding:12px 16px;">KRA PIN</th>
                             <th style="padding:12px 20px;">Status</th>
+                            <th style="padding:12px 20px;text-align:right;">Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No suppliers found.</td></tr>`}
+                        ${rows || `<tr><td colspan="7" style="padding:30px;text-align:center;color:#718096;">No suppliers found.</td></tr>`}
                     </tbody>
                 </table>
             </div>
         `;
 
         document.getElementById('new-supplier-btn').addEventListener('click', () => navigate('new_supplier'));
+
+        const searchInput = document.getElementById('supplier-search-input');
+        searchInput.addEventListener('input', (e) => {
+            container._searchQuery = e.target.value;
+            renderSuppliers(container);
+            const updatedInput = document.getElementById('supplier-search-input');
+            updatedInput.focus();
+            updatedInput.setSelectionRange(updatedInput.value.length, updatedInput.value.length);
+        });
     }
 
     function renderCustomers(container) {
-        const customers = LIVE_STORE.customers || [];
+        const searchTerm = container._searchQuery || '';
+        const customers = (LIVE_STORE.customers || []).filter(c => {
+            const nameMatch = (c.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+            const idMatch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+            return nameMatch || idMatch;
+        });
 
         const rows = customers.map(c => {
             const isDisabled = cint(c.disabled) === 1;
@@ -269,6 +293,9 @@ function init_holec_trading_engine() {
                     <td style="padding:14px 16px;color:#2d3748;text-align:right;">${creditLimitStr}</td>
                     <td style="padding:14px 16px;color:#718096;">${c.payment_terms || '—'}</td>
                     <td style="padding:14px 20px;">${statusBadgeHtml}</td>
+                    <td style="padding:14px 20px;text-align:right;">
+                        <a href="/app/customer/${c.name}" target="_blank" class="h-btn sm" style="padding:4px 10px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;text-decoration:none;color:#2d3748;font-size:12px;font-weight:500;" onclick="event.stopPropagation();">Open ↗</a>
+                    </td>
                 </tr>`;
         }).join('');
 
@@ -283,7 +310,7 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="margin-bottom:20px;">
-                <input type="text" placeholder="Search by name" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
+                <input type="text" id="customer-search-input" value="${searchTerm}" placeholder="Search by Name" style="width:320px;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;">
             </div>
 
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
@@ -296,15 +323,27 @@ function init_holec_trading_engine() {
                             <th style="padding:12px 16px;text-align:right;">Credit Limit ↕</th>
                             <th style="padding:12px 16px;">Terms</th>
                             <th style="padding:12px 20px;">Status</th>
+                            <th style="padding:12px 20px;text-align:right;">Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No customers found.</td></tr>`}
+                        ${rows || `<tr><td colspan="7" style="padding:30px;text-align:center;color:#718096;">No customers found.</td></tr>`}
                     </tbody>
                 </table>
             </div>
         `;
+
         document.getElementById('new-customer-btn').addEventListener('click', () => navigate('new_customer'));
+        
+        const searchInput = document.getElementById('customer-search-input');
+        searchInput.addEventListener('input', (e) => {
+            container._searchQuery = e.target.value;
+            renderCustomers(container);
+            // Keep focus on input and set cursor to end
+            const updatedInput = document.getElementById('customer-search-input');
+            updatedInput.focus();
+            updatedInput.setSelectionRange(updatedInput.value.length, updatedInput.value.length);
+        });
     }
 
     function renderNewCustomer(container) {
@@ -1390,6 +1429,7 @@ function init_holec_trading_engine() {
     }
 
     function renderTradeEventLog(container) {
+        const searchTerm = container._searchQuery || '';
         const logs = LIVE_STORE.lotEventLogs.length > 0 ? LIVE_STORE.lotEventLogs : [
             { name: '737qoedces', lot: 'LOT-2604-0020', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 11:32:50' },
             { name: 'oigmb8v4ia', lot: 'LOT-2604-0019', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 11:08:03' },
@@ -1398,7 +1438,14 @@ function init_holec_trading_engine() {
             { name: '2qrln2gjtk', lot: 'LOT-2604-0016', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 10:30:57' }
         ];
 
-        const rows = logs.map(e => {
+        const filteredLogs = logs.filter(e => {
+            const lotName = (e.lot || '').toLowerCase();
+            const logId = (e.name || '').toLowerCase();
+            const query = searchTerm.toLowerCase();
+            return lotName.includes(query) || logId.includes(query);
+        });
+
+        const rows = filteredLogs.map(e => {
             const lotName = e.lot || ('LOT-' + (e.name ? e.name.slice(0, 8).toUpperCase() : 'XXXX'));
             const stateVal = e.state || 'Ticket';
             const ownerVal = e.owner || 'Administrator';
@@ -1407,11 +1454,14 @@ function init_holec_trading_engine() {
 
             return `
                 <tr style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
-                    <td style="padding:14px 16px;"><input type="checkbox" style="margin-right:8px;"><span style="color:#3182ce;font-weight:500;">${idVal}</span></td>
+                    <td style="padding:14px 16px;"><input type="checkbox" style="margin-right:8px;" onclick="event.stopPropagation();"><span style="color:#3182ce;font-weight:500;">${idVal}</span></td>
                     <td style="padding:14px 16px;font-family:monospace;color:#2d3748;">${lotName}</td>
                     <td style="padding:14px 16px;color:#2d3748;">${stateVal}</td>
                     <td style="padding:14px 16px;color:#4a5568;">${ownerVal}</td>
                     <td style="padding:14px 16px;color:#718096;">${dateVal}</td>
+                    <td style="padding:14px 16px;text-align:right;">
+                        <a href="/app/lot-event-log/${idVal}" target="_blank" class="h-btn sm" style="padding:4px 10px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;text-decoration:none;color:#2d3748;font-size:12px;font-weight:500;" onclick="event.stopPropagation();">Open ↗</a>
+                    </td>
                 </tr>
             `;
         }).join('');
@@ -1421,22 +1471,12 @@ function init_holec_trading_engine() {
                 <div style="display:flex;align-items:center;gap:12px;">
                     <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;">Lot Event Log</h1>
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <span style="font-size:13px;background:#edf2f7;padding:4px 10px;border-radius:4px;color:#4a5568;border:1px solid #cbd5e0;cursor:pointer;">List View ▾</span>
-                    <span style="font-size:13px;background:#edf2f7;padding:4px 10px;border-radius:4px;color:#4a5568;border:1px solid #cbd5e0;cursor:pointer;">Saved Filters ▾</span>
-                    <span style="font-size:14px;background:#edf2f7;padding:4px 8px;border-radius:4px;color:#4a5568;border:1px solid #cbd5e0;cursor:pointer;">⟳</span>
-                    <span style="font-size:14px;background:#edf2f7;padding:4px 8px;border-radius:4px;color:#4a5568;border:1px solid #cbd5e0;cursor:pointer;">⋯</span>
-                </div>
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;background:#ffffff;padding:10px 14px;border:1px solid #e2e8f0;border-radius:6px;">
                 <div style="display:flex;gap:8px;align-items:center;font-size:13px;color:#4a5568;">
                     <span style="background:#edf2f7;padding:4px 8px;border-radius:4px;border:1px solid #cbd5e0;">ID ≈</span>
-                    <input type="text" placeholder="Lot" style="border:1px solid #cbd5e0;border-radius:4px;padding:4px 8px;font-size:13px;width:120px;">
-                </div>
-                <div style="display:flex;gap:8px;align-items:center;font-size:13px;color:#4a5568;">
-                    <span style="background:#edf2f7;padding:4px 8px;border-radius:4px;border:1px solid #cbd5e0;">Filter ✕</span>
-                    <span style="background:#edf2f7;padding:4px 8px;border-radius:4px;border:1px solid #cbd5e0;">Changed At ↕</span>
+                    <input type="text" id="log-search-input" value="${searchTerm}" placeholder="Search Lot or ID" style="border:1px solid #cbd5e0;border-radius:4px;padding:4px 8px;font-size:13px;width:180px;">
                 </div>
             </div>
 
@@ -1449,14 +1489,24 @@ function init_holec_trading_engine() {
                             <th style="padding:12px 16px;">State</th>
                             <th style="padding:12px 16px;">Changed By</th>
                             <th style="padding:12px 16px;">Changed At</th>
+                            <th style="padding:12px 16px;text-align:right;">Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows}
+                        ${rows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No event logs found.</td></tr>`}
                     </tbody>
                 </table>
             </div>
         `;
+
+        const searchInput = document.getElementById('log-search-input');
+        searchInput.addEventListener('input', (e) => {
+            container._searchQuery = e.target.value;
+            renderTradeEventLog(container);
+            const updatedInput = document.getElementById('log-search-input');
+            updatedInput.focus();
+            updatedInput.setSelectionRange(updatedInput.value.length, updatedInput.value.length);
+        });
     }
 
     async function renderPaymentsList(container) {
