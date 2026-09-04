@@ -6,13 +6,9 @@ import re
 import frappe
 from openai import OpenAI
 from pypdf import PdfReader
-import base64
-import io
-import re
 from PIL import Image
 import pytesseract
-from pypdf import PdfReader
-import frappe
+import asyncio
 
 
 # ============================================================

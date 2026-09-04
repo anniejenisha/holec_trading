@@ -9,15 +9,13 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     "pytesseract",
-    "pdf2image",
     "Pillow",
     "openai"
 ]
 
 [deploy.dependencies.apt]
 packages = [
-    "tesseract-ocr",
-    "poppler-utils"
+    "tesseract-ocr"
 ]
 
 [build-system]
