@@ -2,13 +2,22 @@ import base64
 import io
 import json
 import re
+import asyncio
 
-import frappe
+import aiohttp
 from openai import OpenAI
 from pypdf import PdfReader
 from PIL import Image
 import pytesseract
-import asyncio
+import frappe
+
+# Safe fallback for cloud server aiohttp version discrepancies
+if not hasattr(aiohttp, "SocketTimeoutError"):
+    try:
+        from aiohttp.client_exceptions import ServerTimeoutError as _ServerTimeout
+        aiohttp.SocketTimeoutError = _ServerTimeout
+    except ImportError:
+        aiohttp.SocketTimeoutError = TimeoutError
 
 
 # ============================================================
@@ -17,7 +26,6 @@ import asyncio
 
 def find_kra_pin(text):
     """Helper function to extract KRA PIN from text using multi-strategy
-
     matching for standard and alternative document layouts.
     """
     if not text:
@@ -140,51 +148,22 @@ def extract_kra_pin(filedata, filename=None):
 # ============================================================
 
 def clean_weight(value):
-    """
-    Convert weight into numeric value.
-
-    Examples:
-        10.690 kg -> 10690
-        10,690 kg -> 10690
-        10690 kg  -> 10690
-        4.250 kg  -> 4250
-    """
-
+    """Convert weight into numeric value."""
     if value is None:
         return None
 
-    # --------------------------------------------------------
-    # Numeric value
-    # --------------------------------------------------------
-
-    if isinstance(
-        value,
-        (int, float)
-    ):
+    if isinstance(value, (int, float)):
         try:
             number = float(value)
-
             if number.is_integer():
                 return int(number)
-
             return number
         except Exception:
             return None
 
-    # --------------------------------------------------------
-    # Convert to string
-    # --------------------------------------------------------
-
-    value = str(
-        value
-    ).strip()
-
+    value = str(value).strip()
     if not value:
         return None
-
-    # --------------------------------------------------------
-    # Remove units
-    # --------------------------------------------------------
 
     value = re.sub(
         r"\b(KG|KGS|KILOGRAM|KILOGRAMS)\b",
@@ -192,93 +171,38 @@ def clean_weight(value):
         value,
         flags=re.IGNORECASE
     )
+    value = value.replace(" ", "")
 
-    # --------------------------------------------------------
-    # Remove spaces
-    # --------------------------------------------------------
-
-    value = value.replace(
-        " ",
-        ""
-    )
-
-    # --------------------------------------------------------
-    # Thousands separator
-    # --------------------------------------------------------
-
-    if re.fullmatch(
-        r"\d{1,3}(?:[.,]\d{3})+",
-        value
-    ):
-        value = (
-            value
-            .replace(".", "")
-            .replace(",", "")
-        )
-
+    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", value):
+        value = value.replace(".", "").replace(",", "")
         try:
             return int(value)
         except Exception:
             return None
 
-    # --------------------------------------------------------
-    # Integer
-    # --------------------------------------------------------
-
-    if re.fullmatch(
-        r"\d+",
-        value
-    ):
+    if re.fullmatch(r"\d+", value):
         try:
             return int(value)
         except Exception:
             return None
 
-    # --------------------------------------------------------
-    # Extract numeric value
-    # --------------------------------------------------------
-
-    match = re.search(
-        r"\d+(?:[.,]\d+)?",
-        value
-    )
-
+    match = re.search(r"\d+(?:[.,]\d+)?", value)
     if not match:
         return None
 
     number = match.group(0)
 
-    # --------------------------------------------------------
-    # 4.250 -> 4250
-    # --------------------------------------------------------
-
-    if re.fullmatch(
-        r"\d{1,3}[.,]\d{3}",
-        number
-    ):
-        number = (
-            number
-            .replace(".", "")
-            .replace(",", "")
-        )
-
+    if re.fullmatch(r"\d{1,3}[.,]\d{3}", number):
+        number = number.replace(".", "").replace(",", "")
         try:
             return int(number)
         except Exception:
             return None
 
-    # --------------------------------------------------------
-    # Normal decimal
-    # --------------------------------------------------------
-
     try:
-        result = float(
-            number.replace(",", "")
-        )
-
+        result = float(number.replace(",", ""))
         if result.is_integer():
             return int(result)
-
         return result
     except Exception:
         return None
@@ -289,49 +213,18 @@ def clean_weight(value):
 # ============================================================
 
 def clean_ai_json(content):
-    """
-    Clean JSON response from AI.
-    """
-
+    """Clean JSON response from AI."""
     if not content:
         return ""
 
     content = content.strip()
-
-    # Remove ```json
-    content = re.sub(
-        r"^```json\s*",
-        "",
-        content,
-        flags=re.IGNORECASE
-    )
-
-    # Remove ```
-    content = re.sub(
-        r"^```\s*",
-        "",
-        content
-    )
-
-    content = re.sub(
-        r"\s*```$",
-        "",
-        content
-    )
-
+    content = re.sub(r"^```json\s*", "", content, flags=re.IGNORECASE)
+    content = re.sub(r"^```\s*", "", content)
+    content = re.sub(r"\s*```$", "", content)
     content = content.strip()
 
-    # --------------------------------------------------------
-    # Find JSON object if AI added extra text
-    # --------------------------------------------------------
-
     if not content.startswith("{"):
-        match = re.search(
-            r"\{.*\}",
-            content,
-            re.DOTALL
-        )
-
+        match = re.search(r"\{.*\}", content, re.DOTALL)
         if match:
             content = match.group(0)
 
@@ -343,41 +236,23 @@ def clean_ai_json(content):
 # ============================================================
 
 def extract_pdf_text(file_bytes):
-    """
-    Extract selectable text from PDF.
-    """
-
+    """Extract selectable text from PDF."""
     try:
-        reader = PdfReader(
-            io.BytesIO(file_bytes)
-        )
-
+        reader = PdfReader(io.BytesIO(file_bytes))
         pages = []
 
         for page in reader.pages:
             try:
-                page_text = (
-                    page.extract_text()
-                    or ""
-                )
-
+                page_text = page.extract_text() or ""
                 if page_text:
-                    pages.append(
-                        page_text
-                    )
+                    pages.append(page_text)
             except Exception:
                 continue
 
-        return "\n".join(
-            pages
-        )
+        return "\n".join(pages)
 
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "PDF Text Extraction Error"
-        )
-
+        frappe.log_error(frappe.get_traceback(), "PDF Text Extraction Error")
         return ""
 
 
@@ -390,56 +265,32 @@ def extract_weights_via_openai(
     filename="",
     slip_type="gross"
 ):
-    """
-    Extract weights and ticket info from weighbridge slip.
-    """
-
+    """Extract weights and ticket info from weighbridge slip."""
     try:
-        ai_settings = frappe.get_single(
-            "AI Settings"
-        )
+        ai_settings = frappe.get_single("AI Settings")
 
-        if not ai_settings.get(
-            "enable_ai_processing"
-        ):
+        if not ai_settings.get("enable_ai_processing"):
             return {
                 "error": True,
-                "message": (
-                    "AI Processing is disabled "
-                    "in AI Settings."
-                )
+                "message": "AI Processing is disabled in AI Settings."
             }
 
-        api_key = ai_settings.get_password(
-            "api_key"
-        )
-
+        api_key = ai_settings.get_password("api_key")
         if not api_key:
             return {
                 "error": True,
-                "message": (
-                    "API Key is missing "
-                    "from AI Settings."
-                )
+                "message": "API Key is missing from AI Settings."
             }
 
         base_url = (
-            ai_settings.get(
-                "api_base_url"
-            )
+            ai_settings.get("api_base_url")
             or "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
-        )
-
-        base_url = base_url.strip()
+        ).strip()
 
         model_name = (
-            ai_settings.get(
-                "default_model"
-            )
+            ai_settings.get("default_model")
             or "qwen/qwen3.6-27b"
-        )
-
-        model_name = model_name.strip()
+        ).strip()
 
         deprecated_models = [
             "llama-3.2-11b-vision-preview",
@@ -447,24 +298,15 @@ def extract_weights_via_openai(
         ]
 
         if model_name in deprecated_models:
-            model_name = (
-                "qwen/qwen3.6-27b"
-            )
+            model_name = "qwen/qwen3.6-27b"
 
         client = OpenAI(
             api_key=api_key,
             base_url=base_url
         )
 
-        slip_type = (
-            slip_type
-            or "gross"
-        ).lower().strip()
-
-        if slip_type not in [
-            "gross",
-            "tare"
-        ]:
+        slip_type = (slip_type or "gross").lower().strip()
+        if slip_type not in ["gross", "tare"]:
             slip_type = "gross"
 
         system_prompt = """
@@ -490,26 +332,15 @@ Return ONLY valid JSON using exactly:
             }
         ]
 
-        filename_lower = (
-            filename or ""
-        ).lower()
+        filename_lower = (filename or "").lower()
 
-        if filename_lower.endswith(
-            ".pdf"
-        ):
-            extracted_text = (
-                extract_pdf_text(
-                    file_bytes
-                )
-            )
+        if filename_lower.endswith(".pdf"):
+            extracted_text = extract_pdf_text(file_bytes)
 
             if not extracted_text.strip():
                 return {
                     "error": True,
-                    "message": (
-                        "The PDF contains no selectable "
-                        "text. Please upload as JPG/PNG."
-                    )
+                    "message": "The PDF contains no selectable text. Please upload as JPG/PNG."
                 }
 
             user_content = f"""
@@ -529,12 +360,7 @@ Return JSON only.
             )
 
         else:
-            base64_image = (
-                base64.b64encode(
-                    file_bytes
-                ).decode("utf-8")
-            )
-
+            base64_image = base64.b64encode(file_bytes).decode("utf-8")
             extension = (
                 filename_lower.split(".")[-1]
                 if "." in filename_lower
@@ -544,21 +370,11 @@ Return JSON only.
             if extension == "jpg":
                 extension = "jpeg"
 
-            if extension not in [
-                "jpeg",
-                "png",
-                "webp"
-            ]:
+            if extension not in ["jpeg", "png", "webp"]:
                 extension = "jpeg"
 
-            mime_type = (
-                f"image/{extension}"
-            )
-
-            image_data_url = (
-                f"data:{mime_type};base64,"
-                f"{base64_image}"
-            )
+            mime_type = f"image/{extension}"
+            image_data_url = f"data:{mime_type};base64,{base64_image}"
 
             user_content = [
                 {
@@ -585,66 +401,39 @@ Return JSON only.
             "messages": messages,
             "temperature": 0,
             "max_tokens": int(
-                ai_settings.get(
-                    "max_tokens"
-                )
-                or 2000
+                ai_settings.get("max_tokens") or 2000
             )
         }
 
         try:
-            response = (
-                client
-                .chat
-                .completions
-                .create(
-                    **create_kwargs,
-                    response_format={
-                        "type": "json_object"
-                    }
-                )
+            response = client.chat.completions.create(
+                **create_kwargs,
+                response_format={
+                    "type": "json_object"
+                }
             )
         except Exception as first_error:
-            first_error_text = str(
-                first_error
-            )
+            first_error_text = str(first_error)
 
             if (
-                "decommissioned"
-                in first_error_text.lower()
-                or
-                "model_decommissioned"
-                in first_error_text.lower()
+                "decommissioned" in first_error_text.lower()
+                or "model_decommissioned" in first_error_text.lower()
             ):
                 return {
                     "error": True,
-                    "message": (
-                        "Groq model is decommissioned. "
-                        "Please use qwen/qwen3.6-27b."
-                    )
+                    "message": "Groq model is decommissioned. Please use qwen/qwen3.6-27b."
                 }
 
             try:
-                response = (
-                    client
-                    .chat
-                    .completions
-                    .create(
-                        **create_kwargs
-                    )
-                )
+                response = client.chat.completions.create(**create_kwargs)
             except Exception as second_error:
                 frappe.log_error(
                     frappe.get_traceback(),
                     "Groq/OpenAI API Error"
                 )
-
                 return {
                     "error": True,
-                    "message": (
-                        "AI API request failed:\n"
-                        + str(second_error)
-                    )
+                    "message": "AI API request failed:\n" + str(second_error)
                 }
 
         if not response or not response.choices:
@@ -653,27 +442,17 @@ Return JSON only.
                 "message": "AI returned an empty response."
             }
 
-        content = (
-            response
-            .choices[0]
-            .message
-            .content
-        )
-
+        content = response.choices[0].message.content
         if not content:
             return {
                 "error": True,
                 "message": "AI returned empty content."
             }
 
-        content = clean_ai_json(
-            content
-        )
+        content = clean_ai_json(content)
 
         try:
-            data = json.loads(
-                content
-            )
+            data = json.loads(content)
         except Exception as e:
             return {
                 "error": True,
@@ -709,10 +488,7 @@ Return JSON only.
                 data["vehicle_no"] = None
 
         if data.get("bag_count") is not None:
-            bag_match = re.search(
-                r"\d+",
-                str(data["bag_count"])
-            )
+            bag_match = re.search(r"\d+", str(data["bag_count"]))
             if bag_match:
                 data["bag_count"] = int(bag_match.group(0))
             else:
@@ -743,10 +519,7 @@ def extract_weighbridge_data(
     ticket_name=None,
     filename=None
 ):
-    """
-    Main API called from Frappe custom page.
-    """
-
+    """Main API called from Frappe custom page."""
     try:
         file_bytes = None
 
@@ -792,11 +565,7 @@ def extract_weighbridge_data(
                 "message": f"File size is {file_size_mb:.2f} MB. Please upload smaller than 20 MB."
             }
 
-        slip_type = (
-            slip_type
-            or "gross"
-        ).lower().strip()
-
+        slip_type = (slip_type or "gross").lower().strip()
         if slip_type not in ["gross", "tare"]:
             slip_type = "gross"
 
