@@ -12,7 +12,8 @@ dependencies = [
     "pdf2image",
     "pytesseract",
     "Pillow",
-    "openai"
+    "openai",
+    "aiohttp>=3.9.0"
 ]
 
 [deploy.dependencies.apt]
