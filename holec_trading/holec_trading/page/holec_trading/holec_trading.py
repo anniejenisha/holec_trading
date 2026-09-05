@@ -4,21 +4,11 @@ import json
 import re
 import asyncio
 
-import aiohttp
 from openai import OpenAI
 from pypdf import PdfReader
 from PIL import Image
 import pytesseract
 import frappe
-
-# Safe fallback for cloud server aiohttp version discrepancies
-if not hasattr(aiohttp, "SocketTimeoutError"):
-    try:
-        from aiohttp.client_exceptions import ServerTimeoutError as _ServerTimeout
-        aiohttp.SocketTimeoutError = _ServerTimeout
-    except ImportError:
-        aiohttp.SocketTimeoutError = TimeoutError
-
 
 # ============================================================
 # HELPER: EXTRACT KRA PIN
