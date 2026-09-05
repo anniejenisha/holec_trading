@@ -8,15 +8,17 @@ requires-python = ">=3.14"
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
-    "pytesseract>=0.3.10",
-    "Pillow>=10.0.0",
-    "openai>=1.50.0",
-    "aiohttp>=3.11.0,<3.14.0"
+    "pypdf",
+    "pdf2image",
+    "pytesseract",
+    "Pillow",
+    "openai"
 ]
 
 [deploy.dependencies.apt]
 packages = [
-    "tesseract-ocr"
+    "tesseract-ocr",
+    "poppler-utils"
 ]
 
 [build-system]
