@@ -2,6 +2,7 @@
  "actions": [],
  "allow_bulk_edit": 1,
  "allow_rename": 1,
+ "autoname": "PAQ-.######",
  "creation": "2026-09-07 10:01:34.414504",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -92,10 +93,11 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-07 10:17:01.078229",
+ "modified": "2026-09-07 10:38:57.715194",
  "modified_by": "Administrator",
  "module": "Holec Trading",
  "name": "Payment Approval Queue",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
