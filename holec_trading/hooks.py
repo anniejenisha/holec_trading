@@ -41,6 +41,7 @@ doc_events = {
 # from other apps on export.
 
 fixtures = [
+    {"dt": "Custom Field", "filters": [["module", "=", "Holec Trading"]]},
 	{"doctype": "Custom Field", "filters": [["dt", "in", ["Supplier", "Bank", "Buy Ticket"]]]},
 	{"doctype": "Role", "filters": [["role_name", "=", "Supplier"]]},
 	"Supplier Group",

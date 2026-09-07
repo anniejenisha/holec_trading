@@ -1,0 +1,119 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "creation": "2026-09-07 10:01:34.414504",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "payee",
+  "payment_type",
+  "amount",
+  "account",
+  "status",
+  "due_date",
+  "column_break_2tpx",
+  "receiver_account",
+  "receiver_name",
+  "receiver_bic",
+  "gateway_response",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Payment Approval Queue",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "payee",
+   "fieldtype": "Data",
+   "label": "Payee"
+  },
+  {
+   "fieldname": "payment_type",
+   "fieldtype": "Select",
+   "label": "Payment Type",
+   "options": "RTGS\nEFT\nPesalink\nMpesa"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "Bank Account"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nCompleted\nFailed"
+  },
+  {
+   "fieldname": "receiver_account",
+   "fieldtype": "Data",
+   "label": "Receiver Account"
+  },
+  {
+   "fieldname": "receiver_name",
+   "fieldtype": "Data",
+   "label": "Receiver Name"
+  },
+  {
+   "fieldname": "receiver_bic",
+   "fieldtype": "Data",
+   "label": "Receiver Bic"
+  },
+  {
+   "fieldname": "gateway_response",
+   "fieldtype": "Code",
+   "label": "Gateway Response"
+  },
+  {
+   "fieldname": "column_break_2tpx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "label": "Due Date"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-07 10:17:01.078229",
+ "modified_by": "Administrator",
+ "module": "Holec Trading",
+ "name": "Payment Approval Queue",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

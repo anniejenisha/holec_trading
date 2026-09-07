@@ -1,13 +1,154 @@
+import json
 import frappe
 from frappe.utils import getdate
 from erpnext.accounts.party import get_party_account
+from holec_trading.im_bank_client import IMBankClient
+
+
+@frappe.whitelist(allow_guest=True)
+def get_approval_queue():
+    """Fetches pending approval queue rows as HTML for HTMX frontends or JSON depending on caller requirements."""
+    payments = frappe.get_all(
+        "Payment Approval Queue",
+        filters={"status": "Pending"},
+        fields=["name", "payee", "payment_type", "amount", "account", "due_date", "status"]
+    )
+    
+    if not payments:
+        return '<tr><td colspan="7" class="text-center text-muted">No pending payments found</td></tr>'
+        
+    html_rows = ""
+    for p in payments:
+        html_rows += f"""
+        <tr>
+            <td>{p.payee or ''}</td>
+            <td>{p.payment_type or ''}</td>
+            <td>{p.payment_type or ''}</td>
+            <td>{p.amount or 0.00}</td>
+            <td>{p.account or ''}</td>
+            <td>{p.due_date or ''}</td>
+            <td><span class="badge bg-warning">{p.status}</span></td>
+        </tr>
+        """
+    return html_rows
+
+
+@frappe.whitelist()
+def execute_payment_approval(docname):
+    """Executes bank transaction when approval is clicked on the portal."""
+    queue_doc = frappe.get_doc("Payment Approval Queue", docname)
+    if queue_doc.status != "Pending":
+        frappe.throw("Payment is already processed.")
+        
+    bank_acc = frappe.get_doc("Bank Account", queue_doc.account)
+    client = IMBankClient(bank_acc)
+    
+    try:
+        if queue_doc.payment_type == "RTGS":
+            res = client.transfer_rtgs(
+                sender_account=bank_acc.bank_account_no,
+                sender_name=bank_acc.company,
+                receiver_account=queue_doc.receiver_account,
+                receiver_name=queue_doc.receiver_name,
+                receiver_bic=queue_doc.receiver_bic,
+                amount=str(queue_doc.amount)
+            )
+        else:
+            frappe.throw(f"Unsupported payment type: {queue_doc.payment_type}")
+
+        queue_doc.status = "Completed"
+        queue_doc.gateway_response = json.dumps(res)
+        queue_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return {"status": "success", "response": res}
+        
+    except Exception as e:
+        queue_doc.status = "Failed"
+        queue_doc.gateway_response = str(e)
+        queue_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        raise e
+
+
+@frappe.whitelist()
+def send_outgoing_payment(queue_docname):
+    """
+    Outgoing process method: formats and pushes queue payment details outward
+    to the bank/treasury gateway and handles response logging.
+    """
+    queue_doc = frappe.get_doc("Payment Approval Queue", queue_docname)
+    
+    if queue_doc.status != "Pending":
+        return {
+            "resultCode": 1,
+            "resultDesc": "Payment has already been processed or is not pending."
+        }
+
+    bank_acc = frappe.get_doc("Bank Account", queue_doc.account)
+    client = IMBankClient(bank_acc)
+
+    try:
+        # Build payload matching the required external gateway structure
+        payload = {
+            "paymentType": queue_doc.payment_type,
+            "transactionReference": queue_doc.name,
+            "transactionDate": str(frappe.utils.nowdate()),
+            "amount": float(queue_doc.amount),
+            "currency": "KES",
+            "additions": {
+                "customerRef": queue_doc.payee,
+                "externalRefNumber": getattr(queue_doc, "external_ref", ""),
+                "beneficiaryAccount": queue_doc.receiver_account,
+                "beneficiaryName": queue_doc.receiver_name,
+                "beneficiaryBankBIC": queue_doc.receiver_bic
+            }
+        }
+
+        # Dispatch via bank client wrapper
+        if queue_doc.payment_type == "RTGS":
+            res = client.transfer_rtgs(
+                sender_account=bank_acc.bank_account_no,
+                sender_name=bank_acc.company,
+                receiver_account=queue_doc.receiver_account,
+                receiver_name=queue_doc.receiver_name,
+                receiver_bic=queue_doc.receiver_bic,
+                amount=str(queue_doc.amount)
+            )
+        else:
+            return {
+                "resultCode": 1,
+                "resultDesc": f"Unsupported outgoing payment type: {queue_doc.payment_type}"
+            }
+
+        # Update status on success
+        queue_doc.status = "Completed"
+        queue_doc.gateway_response = json.dumps(res)
+        queue_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return {
+            "resultCode": 0,
+            "resultDesc": "Outgoing payment dispatched successfully",
+            "response": res
+        }
+
+    except Exception as e:
+        queue_doc.status = "Failed"
+        queue_doc.gateway_response = str(e)
+        queue_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        frappe.log_error(frappe.get_traceback(), "Outgoing Treasury Payment Error")
+        return {
+            "resultCode": 1,
+            "resultDesc": str(e)
+        }
 
 
 @frappe.whitelist(allow_guest=True)
 def receive_payment():
-
+    """Incoming payment hook processing inbound requests from external sources."""
     try:
-        # Get Treasury JSON
         data = frappe.request.get_json()
 
         if not data:
@@ -16,10 +157,6 @@ def receive_payment():
                 "resultDesc": "Request body is empty"
             }
 
-        # --------------------------------------------------
-        # Treasury fields
-        # --------------------------------------------------
-
         payment_type = data.get("paymentType")
         transaction_reference = data.get("transactionReference")
         transaction_date = data.get("transactionDate")
@@ -27,37 +164,16 @@ def receive_payment():
         currency = data.get("currency")
 
         additions = data.get("additions") or {}
-
         customer_ref = additions.get("customerRef")
-        external_ref = additions.get("externalRefNumber")
-        cheque_number = additions.get("chequeNumber")
-        payer_name = additions.get("payerName")
-
-        # --------------------------------------------------
-        # Validation
-        # --------------------------------------------------
 
         if not transaction_reference:
-            return {
-                "resultCode": 1,
-                "resultDesc": "transactionReference is required"
-            }
+            return {"resultCode": 1, "resultDesc": "transactionReference is required"}
 
         if not amount:
-            return {
-                "resultCode": 1,
-                "resultDesc": "amount is required"
-            }
+            return {"resultCode": 1, "resultDesc": "amount is required"}
 
         if not customer_ref:
-            return {
-                "resultCode": 1,
-                "resultDesc": "customerRef is required"
-            }
-
-        # --------------------------------------------------
-        # Check duplicate transaction
-        # --------------------------------------------------
+            return {"resultCode": 1, "resultDesc": "customerRef is required"}
 
         existing_payment = frappe.db.get_value(
             "Payment Entry",
@@ -66,22 +182,13 @@ def receive_payment():
         )
 
         if existing_payment:
-
             return {
                 "resultCode": 0,
                 "resultDesc": "Payment already processed",
                 "erpRefId": existing_payment
             }
 
-        # --------------------------------------------------
-        # Company
-        # --------------------------------------------------
-
         company = "Annie Group of Company"
-
-        # --------------------------------------------------
-        # Customer
-        # --------------------------------------------------
 
         customer = frappe.db.get_value(
             "Customer",
@@ -90,15 +197,7 @@ def receive_payment():
         )
 
         if not customer:
-
-            return {
-                "resultCode": 1,
-                "resultDesc": f"Customer not found: {customer_ref}"
-            }
-
-        # --------------------------------------------------
-        # Customer Receivable Account
-        # --------------------------------------------------
+            return {"resultCode": 1, "resultDesc": f"Customer not found: {customer_ref}"}
 
         paid_from = get_party_account(
             party_type="Customer",
@@ -107,30 +206,12 @@ def receive_payment():
         )
 
         if not paid_from:
-
-            return {
-                "resultCode": 1,
-                "resultDesc": f"Receivable account not found for {customer}"
-            }
-
-        # --------------------------------------------------
-        # Payment Mode
-        # --------------------------------------------------
+            return {"resultCode": 1, "resultDesc": f"Receivable account not found for {customer}"}
 
         if payment_type.upper() == "CHEQUE":
-
             mode_of_payment = "Cheque"
-
         else:
-
-            return {
-                "resultCode": 1,
-                "resultDesc": f"Payment type not supported yet: {payment_type}"
-            }
-
-        # --------------------------------------------------
-        # Payment Account
-        # --------------------------------------------------
+            return {"resultCode": 1, "resultDesc": f"Payment type not supported yet: {payment_type}"}
 
         paid_to = frappe.db.get_value(
             "Mode of Payment Account",
@@ -142,70 +223,26 @@ def receive_payment():
         )
 
         if not paid_to:
-
-            return {
-                "resultCode": 1,
-                "resultDesc": (
-                    f"No account configured for "
-                    f"{mode_of_payment} / {company}"
-                )
-            }
-
-        # --------------------------------------------------
-        # Currency check
-        # --------------------------------------------------
+            return {"resultCode": 1, "resultDesc": f"No account configured for {mode_of_payment} / {company}"}
 
         if currency and currency != "INR":
-
-            return {
-                "resultCode": 1,
-                "resultDesc": (
-                    f"Currency {currency} does not match "
-                    f"company currency INR"
-                )
-            }
-
-        # --------------------------------------------------
-        # Create Payment Entry
-        # --------------------------------------------------
+            return {"resultCode": 1, "resultDesc": f"Currency {currency} does not match company currency INR"}
 
         payment_entry = frappe.new_doc("Payment Entry")
-
         payment_entry.payment_type = "Receive"
-
         payment_entry.company = company
-
         payment_entry.posting_date = getdate(transaction_date)
-
         payment_entry.mode_of_payment = mode_of_payment
-
         payment_entry.party_type = "Customer"
         payment_entry.party = customer
-
-        # Customer account
         payment_entry.paid_from = paid_from
-
-        # Cash / bank account
         payment_entry.paid_to = paid_to
-
         payment_entry.paid_amount = amount
         payment_entry.received_amount = amount
-
-        # Treasury transaction reference
         payment_entry.reference_no = transaction_reference
         payment_entry.reference_date = getdate(transaction_date)
 
-        # --------------------------------------------------
-        # Insert
-        # --------------------------------------------------
-
-        payment_entry.insert(
-            ignore_permissions=True
-        )
-
-        # --------------------------------------------------
-        # Response
-        # --------------------------------------------------
+        payment_entry.insert(ignore_permissions=True)
 
         return {
             "resultCode": 0,
@@ -214,12 +251,7 @@ def receive_payment():
         }
 
     except Exception as e:
-
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Treasury Payment API Error"
-        )
-
+        frappe.log_error(frappe.get_traceback(), "Treasury Payment API Error")
         return {
             "resultCode": 1,
             "resultDesc": str(e)

@@ -1,8 +1,15 @@
 [
  {
-  "doctype": "Role",
-  "role_name": "Supplier",
   "desk_access": 1,
-  "name": "Supplier"
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 0,
+  "modified": "2026-08-28 14:17:36.432384",
+  "name": "Supplier",
+  "restrict_to_domain": null,
+  "role_name": "Supplier",
+  "two_factor_auth": 0
  }
 ]
