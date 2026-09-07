@@ -493,7 +493,7 @@ function init_holec_trading_engine() {
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
                     ${field({ label: 'Supplier Name *', id: 'ns-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Aggregator', 'Farmer', 'Trader', 'Transporter'] })}
+                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Holec Trading'] })}
                     ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
                 </div>
             </div>
@@ -559,14 +559,6 @@ function init_holec_trading_engine() {
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Account Name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
                     ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: ['Bank Transfer', 'RTGS', 'EFT', 'Cheque'] })}
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Bank Letter / Statement *</label>
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <button type="button" id="upload-bank-letter-btn" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
-                            <span id="bank-letter-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
-                        </div>
-                        <input type="hidden" id="ns-bank-letter" value="">
-                    </div>
                 </div>
             </div>
 
@@ -621,25 +613,6 @@ function init_holec_trading_engine() {
                                 }
                             }
                         });
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-            fileInput.click();
-        });
-
-        document.getElementById('upload-bank-letter-btn').addEventListener('click', () => {
-            const fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.accept = '.pdf,.jpg,.jpeg,.png';
-            fileInput.onchange = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(uploadEvent) {
-                        $('#ns-bank-letter').val(uploadEvent.target.result);
-                        $('#bank-letter-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
-                        showToast('Bank Letter / Statement uploaded and attached successfully');
                     };
                     reader.readAsDataURL(file);
                 }
@@ -727,7 +700,6 @@ function init_holec_trading_engine() {
                     bank_branch: branch,
                     account_number: accountNo,
                     account_name: accountName,
-                    bank_letter: bankLetter,
                     holec_contacts: contactsToSave
                 });
 
