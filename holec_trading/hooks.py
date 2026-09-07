@@ -42,12 +42,6 @@ doc_events = {
 
 fixtures = [
     {"dt": "Custom Field", "filters": [["module", "=", "Holec Trading"]]},
-	{"doctype": "Custom Field", "filters": [["dt", "in", ["Supplier", "Bank", "Buy Ticket"]]]},
-	{"doctype": "Role", "filters": [["role_name", "=", "Supplier"]]},
-	"Supplier Group",
-	"Bank",
-	"Bank Branch",
-	"Charge Master",
 ]
 
 # ---------------------------------------------------------------------------
