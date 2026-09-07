@@ -12,9 +12,9 @@
   "payment_type",
   "amount",
   "account",
-  "status",
   "due_date",
   "column_break_2tpx",
+  "status",
   "receiver_account",
   "receiver_name",
   "receiver_bic",
@@ -64,16 +64,19 @@
   {
    "fieldname": "receiver_account",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "Receiver Account"
   },
   {
    "fieldname": "receiver_name",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "Receiver Name"
   },
   {
    "fieldname": "receiver_bic",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "Receiver Bic"
   },
   {
@@ -101,7 +104,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-07 12:54:04.315577",
+ "modified": "2026-09-07 14:29:57.649861",
  "modified_by": "Administrator",
  "module": "Holec Trading",
  "name": "Payment Approval Queue",
