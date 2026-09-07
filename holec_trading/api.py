@@ -152,18 +152,16 @@ def receive_payment():
         data = frappe.request.get_json()
 
         if not data:
-            return {
-                "resultCode": 1,
-                "resultDesc": "Request body is empty"
-            }
+            return {"resultCode": 1, "resultDesc": "Request body is empty"}
 
         payment_type = data.get("paymentType")
         transaction_reference = data.get("transactionReference")
         transaction_date = data.get("transactionDate")
         amount = data.get("amount")
         currency = data.get("currency")
-        
-        # Extract company dynamically from payload (falls back if not provided)
+        short_code = data.get("shortCode")
+
+        # Extract company from JSON root, or fallback to finding it via shortCode/bank profile
         company = data.get("company") or data.get("companyName")
 
         additions = data.get("additions") or {}
@@ -178,15 +176,25 @@ def receive_payment():
         if not customer_ref:
             return {"resultCode": 1, "resultDesc": "customerRef is required"}
 
-        if not company:
-            return {"resultCode": 1, "resultDesc": "company is required in the request payload"}
+        # Fallback: If company is missing in JSON, try resolving it via shortCode using Bank Account Profile
+        if not company and short_code:
+            bank_profile = frappe.db.get_value(
+                "Bank Account Profile",
+                {"channel_id": short_code}, # Adjust field name if your shortcode maps differently
+                "company"
+            )
+            if bank_profile:
+                company = bank_profile
 
+        if not company:
+            return {"resultCode": 1, "resultDesc": "Company could not be determined. Please provide 'company' in the JSON payload."}
+
+        # Check duplicate transaction
         existing_payment = frappe.db.get_value(
             "Payment Entry",
             {"reference_no": transaction_reference},
             "name"
         )
-
         if existing_payment:
             return {
                 "resultCode": 0,
@@ -194,29 +202,35 @@ def receive_payment():
                 "erpRefId": existing_payment
             }
 
+        # Map payment type to ERPNext mode of payment
+        payment_mapping = {
+            "MPESA": "MPesa",
+            "CHEQUE": "Cheque",
+            "CASH": "Cash",
+            "BANK": "Bank Transfer"
+        }
+        mode_of_payment = payment_mapping.get(payment_type.upper())
+        if not mode_of_payment:
+            return {"resultCode": 1, "resultDesc": f"Payment type not supported: {payment_type}"}
+
         customer = frappe.db.get_value(
             "Customer",
             {"name": customer_ref},
             "name"
         )
-
         if not customer:
             return {"resultCode": 1, "resultDesc": f"Customer not found: {customer_ref}"}
 
+        # Get Customer Receivable Account for this specific company
         paid_from = get_party_account(
             party_type="Customer",
             party=customer,
             company=company
         )
-
         if not paid_from:
             return {"resultCode": 1, "resultDesc": f"Receivable account not found for {customer} under company {company}"}
 
-        if payment_type.upper() == "CHEQUE":
-            mode_of_payment = "Cheque"
-        else:
-            return {"resultCode": 1, "resultDesc": f"Payment type not supported yet: {payment_type}"}
-
+        # Get Bank/Cash Account from Mode of Payment Account table for this company
         paid_to = frappe.db.get_value(
             "Mode of Payment Account",
             {
@@ -225,15 +239,15 @@ def receive_payment():
             },
             "default_account"
         )
-
         if not paid_to:
-            return {"resultCode": 1, "resultDesc": f"No account configured for {mode_of_payment} / {company}"}
+            return {"resultCode": 1, "resultDesc": f"No account configured for {mode_of_payment} under company {company}"}
 
-        # Dynamically fetch company default currency instead of hardcoding INR
+        # Currency validation matching company currency
         company_currency = frappe.get_cached_value("Company", company, "default_currency")
         if currency and currency != company_currency:
             return {"resultCode": 1, "resultDesc": f"Currency {currency} does not match company currency {company_currency}"}
 
+        # Create Payment Entry
         payment_entry = frappe.new_doc("Payment Entry")
         payment_entry.payment_type = "Receive"
         payment_entry.company = company
