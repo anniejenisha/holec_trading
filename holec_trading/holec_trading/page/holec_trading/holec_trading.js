@@ -339,7 +339,6 @@ function init_holec_trading_engine() {
         searchInput.addEventListener('input', (e) => {
             container._searchQuery = e.target.value;
             renderCustomers(container);
-            // Keep focus on input and set cursor to end
             const updatedInput = document.getElementById('customer-search-input');
             updatedInput.focus();
             updatedInput.setSelectionRange(updatedInput.value.length, updatedInput.value.length);
@@ -493,7 +492,7 @@ function init_holec_trading_engine() {
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
                     ${field({ label: 'Supplier Name *', id: 'ns-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Holec Trading'] })}
+                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Aggregator', 'Farmer', 'Trader', 'Transporter'] })}
                     ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
                 </div>
             </div>
@@ -648,10 +647,9 @@ function init_holec_trading_engine() {
             const accountNo = $('#ns-accno').val();
             const accountName = $('#ns-accname').val();
             const paymentRail = $('#ns-rail').val();
-            const bankLetter = $('#ns-bank-letter').val();
 
-            if (!supplierName || !supplierGroup || !taxId || !bank || !accountNo || !bankLetter) {
-                frappe.msgprint(__('Please fill out all mandatory fields (including Supplier Name, Group, KRA PIN, Bank, Account Number, and Bank Letter / Statement).'));
+            if (!supplierName || !supplierGroup || !taxId || !bank || !accountNo) {
+                frappe.msgprint(__('Please fill out all mandatory fields (including Supplier Name, Group, KRA PIN, Bank, and Account Number).'));
                 return;
             }
 
