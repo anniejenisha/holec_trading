@@ -557,7 +557,7 @@ function init_holec_trading_engine() {
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Account Name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
-                    ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: ['Bank Transfer', 'RTGS', 'EFT', 'Cheque'] })}
+                    ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: ['Pesalink', 'RTGS'] })}
                 </div>
             </div>
 

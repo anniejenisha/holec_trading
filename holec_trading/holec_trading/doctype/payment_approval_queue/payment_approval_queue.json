@@ -15,10 +15,10 @@
   "due_date",
   "column_break_2tpx",
   "status",
+  "gateway_response",
   "receiver_account",
   "receiver_name",
   "receiver_bic",
-  "gateway_response",
   "amended_from"
  ],
  "fields": [
@@ -36,7 +36,7 @@
    "fieldname": "payee",
    "fieldtype": "Link",
    "label": "Payee",
-   "options": "Supplier"
+   "options": "Customer"
   },
   {
    "fieldname": "payment_type",
@@ -104,7 +104,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-07 14:29:57.649861",
+ "modified": "2026-09-08 11:13:53.008591",
  "modified_by": "Administrator",
  "module": "Holec Trading",
  "name": "Payment Approval Queue",
