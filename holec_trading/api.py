@@ -62,7 +62,7 @@ def receive_payment():
         if existing_payment:
             return {"resultCode": 0, "resultDesc": "Payment already processed", "erpRefId": existing_payment}
 
-        customer = frappe.db.get_value("Customer", {"name": customer_ref}, "name")
+        customer = frappe.db.get_value("Customer", {"alias": customer_ref}, "name")
         if not customer:
             return {"resultCode": 1, "resultDesc": f"Customer not found: {customer_ref}"}
 
