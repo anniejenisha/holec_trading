@@ -561,6 +561,7 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
+            
             <div style="display:flex;gap:12px;align-items:center;">
                 <button class="h-btn primary" id="submit-draft-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
                 <button class="h-btn ghost" id="cancel-supplier-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
