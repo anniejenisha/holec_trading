@@ -193,7 +193,7 @@ def submit_payment_to_bank(doc, method=None):
     """
     try:
         # 1. Validate customer first (non-strict, but still worth logging)
-        customer_ref = doc.payee  # map to your actual customer ref field
+        customer_ref = frappe.db.get_value("Customer",{"name":doc.payee},["alias"])  # map to your actual customer ref field
         v_status, v_body = validate_customer(customer_ref)
 
         if v_status != 200:
