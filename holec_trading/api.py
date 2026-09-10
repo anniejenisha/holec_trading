@@ -120,6 +120,7 @@ def receive_payment():
         payment_entry.payment_type = "Receive"
         payment_entry.company = company
         payment_entry.posting_date = getdate(transaction_date)
+        payment_entry.mode_of_payment = payment_entry
         payment_entry.party_type = "Customer"
         payment_entry.party = customer
         payment_entry.paid_from = paid_from
