@@ -82,6 +82,9 @@ def receive_payment():
         if not company:
             return {"resultCode": 1, "resultDesc": "Company could not be determined from URL shortCode mapping."}
 
+        if not paid_to:
+            return {"resultCode": 1, "resultDesc": f"Bank Account '{bank_account_name}' has no linked GL Account set (paid_to)."}
+
         existing_payment = frappe.db.get_value("Payment Entry", {"reference_no": transaction_reference}, "name")
         if existing_payment:
             return {"resultCode": 0, "resultDesc": "Payment already processed", "erpRefId": existing_payment}
@@ -123,6 +126,7 @@ def receive_payment():
         payment_entry.paid_to = paid_to
         payment_entry.paid_amount = amount
         payment_entry.received_amount = amount
+        payment_entry.source_exchange_rate = 1
         payment_entry.target_exchange_rate = 1
         payment_entry.reference_no = transaction_reference
         payment_entry.reference_date = getdate(transaction_date)
