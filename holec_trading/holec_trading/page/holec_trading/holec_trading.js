@@ -360,7 +360,7 @@ function init_holec_trading_engine() {
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Customer Name *', id: 'nc-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Customer Group *', id: 'nc-group', type: 'select', required: true, options: groupOptions })}
+                    ${field({ label: 'Customer Group *', id: 'nc-group', type: 'select', required: true, options:['Holec Trading'] })}
                     ${field({ label: 'KRA PIN', id: 'nc-krapin', placeholder: '' })}
                 </div>
                 ${field({ label: 'Address', id: 'nc-address', type: 'textarea', span: true })}
@@ -492,7 +492,7 @@ function init_holec_trading_engine() {
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
                     ${field({ label: 'Supplier Name *', id: 'ns-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Aggregator', 'Farmer', 'Trader', 'Transporter'] })}
+                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Holec Trading'] })}
                     ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
                 </div>
             </div>
