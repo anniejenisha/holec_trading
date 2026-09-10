@@ -1104,6 +1104,7 @@ function init_holec_trading_engine() {
 
                 await frappe.db.insert({
                     doctype: 'Payment Entry',
+                    company:'Holec (E.A.) Limited',
                     payment_type: 'Receive',
                     party_type: 'Customer',
                     party: l.customer,
@@ -2605,6 +2606,7 @@ function init_holec_trading_engine() {
             try {
                 await frappe.db.insert({
                     doctype: 'Sales Invoice',
+                    company:'Holec (E.A.) Limited',
                     customer: customer,
                     grand_total: flt(qty * sellRate),
                     currency: 'KES',

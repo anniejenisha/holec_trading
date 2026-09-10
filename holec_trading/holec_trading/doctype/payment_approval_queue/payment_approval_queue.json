@@ -13,6 +13,7 @@
   "amount",
   "account",
   "due_date",
+  "payment_entry",
   "column_break_2tpx",
   "status",
   "gateway_response",
@@ -36,7 +37,7 @@
    "fieldname": "payee",
    "fieldtype": "Link",
    "label": "Payee",
-   "options": "Customer"
+   "options": "Supplier"
   },
   {
    "fieldname": "payment_type",
@@ -98,13 +99,19 @@
    "fieldtype": "Link",
    "label": "Company",
    "options": "Company"
+  },
+  {
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Payment Entry"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-08 11:13:53.008591",
+ "modified": "2026-09-08 16:37:20.831420",
  "modified_by": "Administrator",
  "module": "Holec Trading",
  "name": "Payment Approval Queue",

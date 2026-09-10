@@ -7,10 +7,12 @@
  "engine": "InnoDB",
  "field_order": [
   "base_url",
+  "token_url",
   "channel_id",
   "short_code",
   "auth_username",
-  "auth_password"
+  "auth_password",
+  "environment"
  ],
  "fields": [
   {
@@ -37,13 +39,24 @@
    "fieldname": "short_code",
    "fieldtype": "Data",
    "label": "Short Code"
+  },
+  {
+   "fieldname": "token_url",
+   "fieldtype": "Data",
+   "label": "Token URL"
+  },
+  {
+   "fieldname": "environment",
+   "fieldtype": "Select",
+   "label": "Environment",
+   "options": "Test\nProduction"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-08 11:21:20.895356",
+ "modified": "2026-09-08 15:30:14.278330",
  "modified_by": "Administrator",
  "module": "Holec Trading",
  "name": "IM Bank Settings",

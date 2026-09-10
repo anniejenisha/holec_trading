@@ -10,7 +10,7 @@ frappe.ui.form.on('Payment Approval Queue', {
         frm.set_query('payee', () => {
             return {
                 filters: {
-                    "customer_group": "Holec Trading"
+                    "supplier_group": "Holec Trading"
                 }
             };
         });
