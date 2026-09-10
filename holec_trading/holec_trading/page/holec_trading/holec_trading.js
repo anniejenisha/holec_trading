@@ -1090,44 +1090,123 @@ function init_holec_trading_engine() {
         `;
 
         document.getElementById('cancel-payment-btn').addEventListener('click', () => navigate('lots', { id: l.name }));
-        document.getElementById('confirm-settle-btn').addEventListener('click', async () => {
-            const rail = $('#f-payment-rail').val();
+        // ============================================================
+    // NEW HELPERS — account lookups + generic submit
+    // ============================================================
 
-            try {
-                if (l.invoice_number) {
-                    const invoices = await frappe.db.get_list('Sales Invoice', { filters: { name: l.invoice_number }, fields: ['name', 'docstatus'] });
-                    if (invoices.length > 0 && invoices[0].docstatus === 0) {
-                        await frappe.call({
-                            method: 'frappe.desk.form.save.savedocs',
-                            args: {
-                                doc: { doctype: 'Sales Invoice', name: l.invoice_number, docstatus: 1 },
-                                action: 'Submit'
-                            }
-                        });
-                    }
+    async function getModeOfPaymentAccount(modeOfPayment, company) {
+        try {
+            const mop = await frappe.db.get_doc('Mode of Payment', modeOfPayment);
+            const acc = (mop.accounts || []).find(a => a.company === company);
+            return acc ? acc.default_account : null;
+        } catch (e) {
+            console.error('Error fetching Mode of Payment account:', e);
+            return null;
+        }
+    }
+
+    async function getCustomerReceivableAccount(customer, company) {
+        try {
+            const cust = await frappe.db.get_doc('Customer', customer);
+            const acc = (cust.accounts || []).find(a => a.company === company);
+            if (acc && acc.account) return acc.account;
+        } catch (e) {
+            console.error('Error fetching customer default account:', e);
+        }
+        // Fallback: company's default receivable account
+        try {
+            const comp = await frappe.db.get_doc('Company', company);
+            return comp.default_receivable_account || null;
+        } catch (e) {
+            console.error('Error fetching company default receivable account:', e);
+            return null;
+        }
+    }
+
+    async function submitFrappeDoc(doc) {
+        return frappe.call({
+            method: 'frappe.client.submit',
+            args: { doc: doc }
+        });
+    }
+
+    // ============================================================
+    // renderPayments — updated confirm-settle-btn handler
+    // Replace the existing handler in renderPayments() with this.
+    // ============================================================
+
+    document.getElementById('confirm-settle-btn').addEventListener('click', async () => {
+        const rail = $('#f-payment-rail').val();
+        const company = 'Holec (E.A.) Limited';
+
+        try {
+            // 1. Submit the Sales Invoice first (if still draft)
+            let siDoc = null;
+            if (l.invoice_number) {
+                siDoc = await frappe.db.get_doc('Sales Invoice', l.invoice_number);
+                if (siDoc.docstatus === 0) {
+                    await submitFrappeDoc(siDoc);
+                    siDoc = await frappe.db.get_doc('Sales Invoice', l.invoice_number); // re-fetch post-submit values
                 }
-
-                await frappe.db.insert({
-                    doctype: 'Payment Entry',
-                    company:'Holec (E.A.) Limited',
-                    payment_type: 'Receive',
-                    party_type: 'Customer',
-                    party: l.customer,
-                    paid_amount: amountDue,
-                    received_amount: amountDue,
-                    target_exchange_rate:1,
-                    mode_of_payment: rail,
-                    custom_buy_ticket: l.name
-                });
-            } catch (err) {
-                console.error('Error submitting invoice or creating payment entry:', err);
             }
 
-            await frappe.db.set_value('Buy Ticket', l.name, { status: 'Settled' });
-            showToast(`Payment of KES ${amountDue.toLocaleString('en-KE')} received via ${rail} and lot settled`);
-            await loadMasterData();
-            navigate('lots', { id: l.name });
-        });
+            if (!siDoc) {
+                frappe.msgprint(__('No Sales Invoice found for this ticket. Cannot record payment.'));
+                return;
+            }
+
+            // 2. Resolve paid_from / paid_to accounts
+            const paidTo = await getModeOfPaymentAccount(rail, company);
+            const paidFrom = await getCustomerReceivableAccount(l.customer, company);
+
+            if (!paidFrom || !paidTo) {
+                frappe.msgprint(__(
+                    'Could not determine Paid From / Paid To accounts. Check that the Customer has a default receivable account and "{0}" has a default account set for {1}.',
+                    [rail, company]
+                ));
+                return;
+            }
+
+            // 3. Create the Payment Entry as a draft, linked to the Sales Invoice
+            const amountDue = flt(siDoc.outstanding_amount || siDoc.grand_total);
+
+            const pe = await frappe.db.insert({
+                doctype: 'Payment Entry',
+                company: company,
+                payment_type: 'Receive',
+                party_type: 'Customer',
+                party: l.customer,
+                paid_from: paidFrom,
+                paid_to: paidTo,
+                paid_amount: amountDue,
+                received_amount: amountDue,
+                source_exchange_rate: 1,
+                target_exchange_rate: 1,
+                mode_of_payment: rail,
+                custom_buy_ticket: l.name,
+                references: [{
+                    reference_doctype: 'Sales Invoice',
+                    reference_name: siDoc.name,
+                    total_amount: siDoc.grand_total,
+                    outstanding_amount: siDoc.outstanding_amount,
+                    allocated_amount: amountDue
+                }]
+            });
+
+            // 4. Submit the Payment Entry so it actually reconciles against the invoice
+            await submitFrappeDoc(pe);
+
+        } catch (err) {
+            console.error('Error submitting invoice or creating payment entry:', err);
+            frappe.msgprint(__('Failed to record payment: ') + (err.message || err));
+            return;
+        }
+
+        await frappe.db.set_value('Buy Ticket', l.name, { status: 'Settled' });
+        showToast(`Payment received via ${rail} and lot settled`);
+        await loadMasterData();
+        navigate('lots', { id: l.name });
+    });
     }
 
     function renderCostLedger(container) {
@@ -2560,20 +2639,19 @@ function init_holec_trading_engine() {
 
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Sales Invoice + eTIMS</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-                    ${field({ label: 'Invoice Number', id: 'f-invoice-no', value: l.invoice_number || 'INV-5503', placeholder: '' })}
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">eTIMS Control Unit Number</label>
-                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#a0aec0;">Generated on submit</div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Invoice Number</label>
+                    <div id="f-invoice-no-display" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:${l.invoice_number ? '#2d3748' : '#a0aec0'};font-weight:${l.invoice_number ? '600' : '400'};">
+                        ${l.invoice_number || 'Generated on submit'}
                     </div>
-                </div>
+                </div>;
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
                 <button class="h-btn primary" id="submit-etims-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit Invoice & Transmit to eTIMS</button>
                 <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
             </div>
-        `;
+        `
 
         const updateCalculations = () => {
             const sellRate = flt($('#f-sell-rate').val()) || 0;
@@ -2596,49 +2674,54 @@ function init_holec_trading_engine() {
 
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
         document.getElementById('submit-etims-btn').addEventListener('click', async () => {
-            const customer = $('#f-customer').val();
-            const sellRate = flt($('#f-sell-rate').val());
-            const invoiceNo = $('#f-invoice-no').val();
-
-            if (!customer) {
-                frappe.msgprint(__('Please select a Customer.'));
-                return;
-            }
-            if (sellRate <= 0) {
-                frappe.msgprint(__('Please enter a valid Sell Rate.'));
-                return;
-            }
-
-            try {
-                await frappe.db.insert({
-                    doctype: 'Sales Invoice',
-                    company:'Holec (E.A.) Limited',
-                    customer: customer,
-                    grand_total: flt(qty * sellRate),
-                    currency: 'KES',
-                    custom_buy_ticket: l.name,
-                    items: [{
-                        item_code: l.commodity || LIVE_STORE.items[0]?.name || 'Commodity',
-                        qty: flt(qty),
-                        rate: flt(sellRate),
-                        amount: flt(qty * sellRate)
-                    }]
-                });
-            } catch (err) {
-                console.error('Error creating Sales Invoice:', err);
-            }
-
-            await frappe.db.set_value('Buy Ticket', l.name, {
-                status: 'Invoiced',
+        const customer = $('#f-customer').val();
+        const sellRate = flt($('#f-sell-rate').val());
+ 
+        if (!customer) {
+            frappe.msgprint(__('Please select a Customer.'));
+            return;
+        }
+        if (sellRate <= 0) {
+            frappe.msgprint(__('Please enter a valid Sell Rate.'));
+            return;
+        }
+ 
+        let invoiceDoc = null;
+        try {
+            invoiceDoc = await frappe.db.insert({
+                doctype: 'Sales Invoice',
+                company: 'Holec (E.A.) Limited',
                 customer: customer,
-                sell_rate: sellRate,
-                invoice_number: invoiceNo
+                grand_total: flt(qty * sellRate),
+                currency: 'KES',
+                custom_buy_ticket: l.name,
+                items: [{
+                    item_code: l.commodity || LIVE_STORE.items[0]?.name || 'Commodity',
+                    qty: flt(qty),
+                    rate: flt(sellRate),
+                    amount: flt(qty * sellRate)
+                }]
             });
-
-            showToast(`Invoice ${invoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
-            await loadMasterData();
-            navigate('lots', { id: l.name });
+        } catch (err) {
+            console.error('Error creating Sales Invoice:', err);
+            frappe.msgprint(__('Failed to create Sales Invoice: ') + (err.message || err));
+            return; // stop here — do NOT advance the ticket on failure
+        }
+ 
+        // The real, Frappe-assigned document name — not user-typed text
+        const realInvoiceNo = invoiceDoc.name;
+ 
+        await frappe.db.set_value('Buy Ticket', l.name, {
+            status: 'Invoiced',
+            customer: customer,
+            sell_rate: sellRate,
+            invoice_number: realInvoiceNo
         });
+ 
+        showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
+        await loadMasterData();
+        navigate('lots', { id: l.name });
+    });
     }
 
     const MODULE_REGISTRY = [
