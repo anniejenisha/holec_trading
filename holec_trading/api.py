@@ -11,7 +11,6 @@ import frappe
 from frappe.utils import getdate
 from erpnext.accounts.party import get_party_account
 
-
 import re
 
 UNIDENTIFIED_CUSTOMER = "Unidentified Customer"  # adjust to your actual placeholder Customer name
@@ -21,9 +20,20 @@ UNIDENTIFIED_CUSTOMER = "Unidentified Customer"  # adjust to your actual placeho
 def receive_payment():
     """Incoming payment hook processing requests by parsing shortCode from the URL path."""
     try:
-        data = frappe.request.get_json()
-        if not data:
+        # --- Body parsing: don't rely on get_json(), which raises 415 if the
+        # caller's Content-Type header isn't exactly 'application/json'. ---
+        raw_body = frappe.request.get_data(as_text=True)
+        if not raw_body:
             return {"resultCode": 1, "resultDesc": "Request body is empty"}
+
+        try:
+            data = json.loads(raw_body)
+        except (ValueError, TypeError):
+            frappe.log_error(raw_body, "Treasury Payment API - Invalid JSON body")
+            return {"resultCode": 1, "resultDesc": "Request body is not valid JSON"}
+
+        if not isinstance(data, dict):
+            return {"resultCode": 1, "resultDesc": "Request body must be a JSON object"}
 
         # --- shortCode: URL only, never trust payload for this ---
         # Strip query string / fragment defensively, then take the last non-empty segment.
@@ -107,13 +117,13 @@ def receive_payment():
         payment_entry.payment_type = "Receive"
         payment_entry.company = company
         payment_entry.posting_date = getdate(transaction_date)
-        payment_entry.mode_of_payment = "Bank Transfer"
         payment_entry.party_type = "Customer"
         payment_entry.party = customer
         payment_entry.paid_from = paid_from
         payment_entry.paid_to = paid_to
         payment_entry.paid_amount = amount
         payment_entry.received_amount = amount
+        payment_entry.target_exchange_rate = 1
         payment_entry.reference_no = transaction_reference
         payment_entry.reference_date = getdate(transaction_date)
 
