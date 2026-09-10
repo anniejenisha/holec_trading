@@ -1039,9 +1039,14 @@ function init_holec_trading_engine() {
         const sellRate = flt(l.sell_rate || 48);
         const amountDue = Math.round(qty * sellRate);
 
-        let modeOfPayments = ['Bank Draft', 'Cash', 'Cheque', 'Credit Card', 'Wire Transfer'];
+        // Only Bank-type Mode of Payment records should appear here (customer bank receipt)
+        let modeOfPayments = ['Bank Draft', 'Wire Transfer', 'RTGS', 'Pesalink'];
         try {
-            const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], order_by: 'name asc' });
+            const mopList = await frappe.db.get_list('Mode of Payment', {
+                filters: { type: 'Bank' },
+                fields: ['name'],
+                order_by: 'name asc'
+            });
             if (mopList && mopList.length > 0) {
                 modeOfPayments = mopList.map(m => m.name);
             }
@@ -1110,6 +1115,7 @@ function init_holec_trading_engine() {
                     party: l.customer,
                     paid_amount: amountDue,
                     received_amount: amountDue,
+                    target_exchange_rate:1,
                     mode_of_payment: rail,
                     custom_buy_ticket: l.name
                 });
