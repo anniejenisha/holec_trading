@@ -357,7 +357,7 @@ def _create_payment_entry(doc, bank_account, gateway_response):
             return None
 
         pe = frappe.new_doc("Payment Entry")
-        pe.payment_type == "Pay"
+        pe.payment_type = "Pay"
         pe.company = doc.get("company")
         pe.posting_date = nowdate()
         pe.mode_of_payment = doc.get("payment_type")  # e.g. "M-PESA"
