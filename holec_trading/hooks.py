@@ -33,7 +33,7 @@ doc_events = {
 	},
     "Payment Approval Queue": {
         "validate": "holec_trading.im_bank.treasury.submit_payment_to_bank"
-	}
+    }
 }
 
 # ---------------------------------------------------------------------------
