@@ -242,10 +242,25 @@ import json
 
 @frappe.whitelist(allow_guest=True)
 def im_bank_callback(channel_id=None, secret=None):
+    if not channel_id:
+        frappe.local.response["http_status_code"] = 400
+        return {"message": "Missing channel_id"}
+
+    # Find the Bank Account matching this channel_id
+    bank_account_name = frappe.db.get_value(
+        "Bank Account", 
+        {"custom_channel_id": channel_id}, 
+        "name"
+    )
+
+    if not bank_account_name:
+        frappe.local.response["http_status_code"] = 404
+        return {"message": "Unknown channel ID"}
+
+    bank_doc = frappe.get_doc("Bank Account", bank_account_name)
+    expected_secret = bank_doc.get_password("custom_webhook_secret")
+
     # Secure token validation
-    expected_secret = frappe.db.get_single_value("System Settings", "im_bank_webhook_secret") or frappe.conf.get("im_bank_webhook_secret")
-    
-    # Fallback or strict check against your secure token
     if not secret or secret != expected_secret:
         frappe.local.response["http_status_code"] = 403
         return {"message": "Forbidden: Invalid or missing security token"}
@@ -258,6 +273,7 @@ def im_bank_callback(channel_id=None, secret=None):
         raw = frappe.request.get_data(as_text=True)
         data = json.loads(raw) if raw else {}
     except Exception:
+        frappe.log_error(frappe.get_traceback(), "I&M Bank Callback - bad payload")
         frappe.local.response["http_status_code"] = 400
         return {"message": "Invalid JSON payload"}
 
