@@ -250,12 +250,20 @@ def im_bank_callback(channel_id=None):
         raw = frappe.request.get_data(as_text=True)
         data = json.loads(raw) if raw else {}
     except Exception:
+        frappe.log_error(frappe.get_traceback(), "I&M Bank Callback - bad payload")
         frappe.local.response["http_status_code"] = 400
         return {"message": "Invalid JSON payload"}
 
-    # Your matching logic here using channel_id and data...
-    ref_num = data.get("requestRefNum") or data.get("targetRefNumber")
+    ref_num = (
+        data.get("requestRefNum")
+        or data.get("targetRefNumber")
+        or data.get("paymentSystemRefNumber")
+    )
     
+    if not ref_num:
+        frappe.local.response["http_status_code"] = 400
+        return {"message": "Missing reference number in callback"}
+
     matches = frappe.get_all(
         "Payment Approval Queue",
         filters={"custom_request_ref_num": ref_num},
@@ -269,8 +277,26 @@ def im_bank_callback(channel_id=None):
 
     doc = frappe.get_doc("Payment Approval Queue", matches[0])
     doc.db_set("gateway_response", json.dumps(data, indent=2))
-    
-    # Update status...
+
+    response_code = str(data.get("responseCode") or "").upper()
+
+    if response_code in ("SUCCESS", "COMPLETED", "APPROVED", "00", "000"):
+        # Force set status to Completed
+        doc.db_set("status", "Completed")
+        
+        # Auto-create Payment Entry if not already present
+        if not (doc.meta.has_field("payment_entry") and doc.get("payment_entry")):
+            try:
+                # Import your payment entry builder or run the creation logic here
+                from holec_trading.www.im_bank_treasury_callback import _create_payment_entry
+                _create_payment_entry(doc, doc.get("account"), data)
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    f"I&M Bank Callback: Payment Entry creation failed for {doc.name}",
+                )
+    elif response_code in ("FAILED", "REJECTED", "DECLINED"):
+        doc.db_set("status", "Failed")
+
     frappe.db.commit()
-    
     return {"resultCode": 0, "resultDesc": "Received"}
