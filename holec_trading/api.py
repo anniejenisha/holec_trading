@@ -241,7 +241,15 @@ import frappe
 import json
 
 @frappe.whitelist(allow_guest=True)
-def im_bank_callback(channel_id=None):
+def im_bank_callback(channel_id=None, secret=None):
+    # Secure token validation
+    expected_secret = frappe.db.get_single_value("System Settings", "im_bank_webhook_secret") or frappe.conf.get("im_bank_webhook_secret")
+    
+    # Fallback or strict check against your secure token
+    if not secret or secret != expected_secret:
+        frappe.local.response["http_status_code"] = 403
+        return {"message": "Forbidden: Invalid or missing security token"}
+
     if frappe.request.method != "POST":
         frappe.local.response["http_status_code"] = 405
         return {"message": "Only POST is supported"}
@@ -250,7 +258,6 @@ def im_bank_callback(channel_id=None):
         raw = frappe.request.get_data(as_text=True)
         data = json.loads(raw) if raw else {}
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "I&M Bank Callback - bad payload")
         frappe.local.response["http_status_code"] = 400
         return {"message": "Invalid JSON payload"}
 
@@ -281,13 +288,9 @@ def im_bank_callback(channel_id=None):
     response_code = str(data.get("responseCode") or "").upper()
 
     if response_code in ("SUCCESS", "COMPLETED", "APPROVED", "00", "000"):
-        # Force set status to Completed
         doc.db_set("status", "Completed")
-        
-        # Auto-create Payment Entry if not already present
-        if not (doc.meta.has_field("payment_entry") and doc.get("payment_entry")):
+        if not (doc.meta.has_field("custom_payment_entry") and doc.get("custom_payment_entry")):
             try:
-                # Import your payment entry builder or run the creation logic here
                 from holec_trading.www.im_bank_treasury_callback import _create_payment_entry
                 _create_payment_entry(doc, doc.get("account"), data)
             except Exception:
