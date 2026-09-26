@@ -242,8 +242,10 @@ import json
 
 @frappe.whitelist(allow_guest=True)
 def im_bank_callback():
-    channel_id = frappe.form_dict.get("channel_id")
-    secret = frappe.form_dict.get("secret")
+    # Safely pull parameters directly from the URL query string
+    args = frappe.local.request.args if frappe.local.request else {}
+    channel_id = args.get("channel_id")
+    secret = args.get("secret")
     
     if not channel_id:
         frappe.local.response["http_status_code"] = 400
