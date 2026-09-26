@@ -1,18 +1,44 @@
 """
-I&M Bank Treasury Integration — OUTGOING payments (per Bank Account)
---------------------------------------------------------------------------
-App: apps/holec_trading/holec_trading/im_bank/treasury.py
+I&M Bank Treasury Integration — OUTGOING payments + Async Callback
+=====================================================================
+Merged single file: contains BOTH the outgoing MakePayment flow (OAuth2
+client_credentials + checksum) AND the async transaction status callback
+handler, since M-Pesa (and possibly other) payment types confirm their
+real result later via callback rather than in MakePayment's own response.
 
-CREDENTIALS LIVE ON BANK ACCOUNT
-------------------------------------
-Different bank accounts can have different I&M Bank channels, so
-credentials are read straight off the "Bank Account" doctype instead of
-a separate settings doctype. Add these custom fields to Bank Account
-(Customize Form -> Bank Account). NOTE: fields added via Customize Form
-are automatically stored with a "custom_" prefix on the fieldname, e.g.
-label "channel_id" -> fieldname "custom_channel_id". All reads below use
-the prefixed fieldname.
+FILE LOCATION (IMPORTANT)
+--------------------------
+This file MUST live under the app's www/ folder so Frappe can serve
+get_context() as a URL - that also means its dotted import path changes
+from the old "holec_trading.im_bank.treasury" to:
 
+    apps/holec_trading/holec_trading/www/im_bank_treasury_callback.py
+    -> dotted path: holec_trading.www.im_bank_treasury_callback
+
+Update every reference that used the old path:
+  - hooks.py doc_events (see below)
+  - bench console imports (see test helper at the bottom)
+  - the old separate im_bank_treasury.py and im_bank_treasury_callback.py
+    files can be deleted once this replaces them
+
+REQUIRED hooks.py ENTRIES
+---------------------------
+    doc_events = {
+        "Payment Approval Queue": {
+            "on_submit": "holec_trading.www.im_bank_treasury_callback.submit_payment_to_bank"
+        }
+    }
+
+    website_route_rules = [
+        {"from_route": "/im-bank-treasury-callback/<channel_id>", "to_route": "im_bank_treasury_callback"},
+    ]
+
+Callback URL to give I&M Bank (Mohammed Raghib):
+    https://yoursite.com/im-bank-treasury-callback/<channel_id>
+
+REQUIRED CUSTOM FIELDS
+-----------------------
+On "Bank Account" (Customize Form) - credentials, per account:
     custom_channel_id                     Data
     custom_client_id                       Data
     custom_client_secret                   Password
@@ -23,33 +49,23 @@ the prefixed fieldname.
     custom_production_service_base_url            Data   defaults to api.imbank.com if blank
     custom_production_token_url                    Data   defaults to api.imbank.com if blank
 
-Fill these in on each Bank Account that should be able to send outgoing
-payments. An account with no custom_channel_id / custom_client_id /
-custom_public_key filled in will fail clearly (not silently) if someone
-tries to submit a payment from it.
-
-ALSO ADD to "Payment Approval Queue" (Customize Form):
-    custom_payment_entry    Link -> Payment Entry   (read-only, set by
-                             this script once a Payment Entry is
-                             auto-created on success)
-
-WHAT THIS SENDS
------------------
-Direct calls to I&M Bank's real Payment Gateway API (OAuth2
-client_credentials -> MakePayment with a checkSum header) — not the old
-treasury portal. Scope right now: M-Pesa outgoing only, Test environment.
-
-On a successful bank response, this now also auto-creates and submits a
-Payment Entry — see _create_payment_entry() below. Success is checked at
-BOTH the HTTP status level AND the response body's own responseCode,
-because this bank can return HTTP 200 with a business-level failure
-inside the body (responseCode: "FAILED"). Confirm the exact success code
-string(s) against real I&M Bank documentation or a genuine successful
-test response - the values in _is_bank_success() below are a best guess.
+On "Payment Approval Queue" (Customize Form):
+    custom_payment_entry       Link -> Payment Entry   (set on success)
+    custom_request_ref_num    Data                     (set right after
+                                MakePayment is called; used by the
+                                callback below to match the async
+                                response back to this document)
 
 DEPENDENCIES
 -------------
     bench pip install rsa cryptography --break-system-packages
+
+UNCONFIRMED / BEST-GUESS ITEMS (get real docs from I&M Bank to replace these)
+-------------------------------------------------------------------------------
+  - _is_bank_success(): the exact success responseCode value(s)
+  - the callback's field names for ref_num and responseCode
+  - whether MakePayment's own synchronous response is ever final for
+    M-Pesa, or always provisional pending the callback
 """
 
 import base64
@@ -251,7 +267,9 @@ def _call_make_payment(cfg, service_name, payload, retry=True):
         get_access_token(cfg, force_refresh=True)
         return _call_make_payment(cfg, service_name, payload, retry=False)
 
-    return resp.status_code, _safe_json(resp)
+    # ref_num is returned so the caller can store it on the source doc -
+    # this is how the async callback (M-Pesa) gets matched back later.
+    return resp.status_code, _safe_json(resp), ref_num
 
 
 def _safe_json(resp):
@@ -269,8 +287,7 @@ def _is_bank_success(body):
     when the body itself confirms it.
 
     NOTE: the accepted values below are a best guess pending confirmation
-    from I&M Bank. Update this once you've seen a genuine successful
-    response and know the real responseCode value(s) they use.
+    from I&M Bank.
     """
     response_code = str(body.get("responseCode") or "").upper()
     return response_code in ("SUCCESS", "COMPLETED", "APPROVED", "00", "000")
@@ -303,7 +320,7 @@ PAYLOAD_BUILDERS = {
 
 def _map_payment_type(erpnext_payment_type):
     """Case/format-insensitive so values like 'MPesa', 'M-Pesa', 'mpesa'
-    all resolve correctly - this bit tripped things up before."""
+    all resolve correctly."""
     mapping = {
         "MPESA": "MPESA",
         "BANKDRAFT": "RTGS",
@@ -315,26 +332,20 @@ def _map_payment_type(erpnext_payment_type):
 
 
 # ---------------------------------------------------------------------------
-# Payment Entry auto-creation on successful bank response
+# Payment Entry auto-creation on confirmed success
 # ---------------------------------------------------------------------------
 
 def _create_payment_entry(doc, bank_account, gateway_response):
     """
     Creates and submits a Payment Entry once I&M Bank confirms the
-    payment succeeded, so the GL actually reflects the outgoing payment.
+    payment succeeded (either synchronously, or via the callback below).
 
     ASSUMPTIONS — review before relying on this in production:
     1. paid_from: read from the Bank Account's standard 'account' field.
-    2. party_type is "Supplier" (confirmed to match your Payee field's
-       current Link target). If you ever repoint Payee to a different
-       doctype, update this.
-    3. reference_no: taken from the bank response's 'transactionId'
-       field - update if I&M Bank's real field name differs.
-
-    Failure here does NOT roll back the already-successful bank
-    payment or the Completed status — it logs the error and appends a
-    note to Gateway Response so Finance knows to create the Payment
-    Entry manually.
+    2. party_type is "Supplier" (confirmed to match the Payee field's
+       current Link target).
+    3. reference_no: taken from the bank response's 'transactionId' or
+       'targetTranID' field.
     """
     try:
         paid_from_account = frappe.get_cached_value(
@@ -357,12 +368,16 @@ def _create_payment_entry(doc, bank_account, gateway_response):
         pe.payment_type = "Pay"
         pe.company = doc.get("company")
         pe.posting_date = nowdate()
-        pe.mode_of_payment = doc.get("payment_type")  # e.g. "M-PESA"
+        pe.mode_of_payment = doc.get("payment_type")
         pe.paid_amount = doc.amount
         pe.received_amount = doc.amount
         pe.source_exchange_rate = 1
         pe.target_exchange_rate = 1
-        pe.reference_no = gateway_response.get("transactionId") or doc.name
+        pe.reference_no = (
+            gateway_response.get("transactionId")
+            or gateway_response.get("targetTranID")
+            or doc.name
+        )
         pe.reference_date = nowdate()
         pe.remarks = (
             f"Auto-created from Payment Approval Queue {doc.name} "
@@ -379,8 +394,8 @@ def _create_payment_entry(doc, bank_account, gateway_response):
         pe.insert(ignore_permissions=True)
         pe.submit()
 
-        if doc.meta.has_field("payment_entry"):
-            doc.db_set("payment_entry", pe.name)
+        if doc.meta.has_field("custom_payment_entry"):
+            doc.db_set("custom_payment_entry", pe.name)
 
         return pe.name
 
@@ -401,8 +416,14 @@ def _append_gateway_note(doc, note):
     doc.db_set("gateway_response", existing + "\n\n[" + note + "]")
 
 
+def _mark_failed(doc, message):
+    doc.db_set("status", "Failed")
+    doc.db_set("gateway_response", message)
+
+
 # ---------------------------------------------------------------------------
 # Doc event: hook this to "Payment Approval Queue" on_submit
+# hooks.py -> "on_submit": "holec_trading.www.im_bank_treasury_callback.submit_payment_to_bank"
 # ---------------------------------------------------------------------------
 
 def submit_payment_to_bank(doc, method=None):
@@ -436,11 +457,16 @@ def submit_payment_to_bank(doc, method=None):
             doc.get("narration") or doc.name,
             doc.get("payer_mobile_number"),
         )
-        status, body = _call_make_payment(cfg, service_name, payload)
+        status, body, ref_num = _call_make_payment(cfg, service_name, payload)
 
-        # Check BOTH the HTTP status and the body's own responseCode -
-        # this bank can return HTTP 200 with responseCode "FAILED".
+        # Store ref_num regardless of outcome - the async callback below
+        # needs it to identify which document it's reporting on.
+        if doc.meta.has_field("custom_request_ref_num"):
+            doc.db_set("custom_request_ref_num", ref_num)
+
         if status in (200, 201) and _is_bank_success(body):
+            # NOTE: for M-Pesa this is typically "accepted for processing",
+            # not final - the real outcome arrives via the callback below.
             doc.db_set("status", "Completed")
             doc.db_set("gateway_response", json.dumps(body, indent=2))
             _create_payment_entry(doc, bank_account_name, body)
@@ -452,11 +478,6 @@ def submit_payment_to_bank(doc, method=None):
         _mark_failed(doc, "Unexpected error - check Error Log")
 
 
-def _mark_failed(doc, message):
-    doc.db_set("status", "Failed")
-    doc.db_set("gateway_response", message)
-
-
 @frappe.whitelist()
 def retry_payment(docname):
     doc = frappe.get_doc("Payment Approval Queue", docname)
@@ -466,15 +487,11 @@ def retry_payment(docname):
 
 # ---------------------------------------------------------------------------
 # TEST HELPER — verify the flow works end-to-end without a real
-# Payment Approval Queue doc. Run from bench console:
+# Payment Approval Queue doc.
 #
 #   bench --site yoursite.com console
-#   >>> from holec_trading.im_bank.treasury import test_mpesa_payment
-#   >>> test_mpesa_payment("Bank Draft - I&M Bank")
-#
-# NOTE: this helper bypasses Payment Approval Queue entirely, so it does
-# NOT create a Payment Entry - that only happens via submit_payment_to_bank
-# (the real on_submit path).
+#   >>> import holec_trading.www.im_bank_treasury_callback as treasury
+#   >>> treasury.test_mpesa_payment("Bank Draft - I&M Bank")
 # ---------------------------------------------------------------------------
 
 @frappe.whitelist()
@@ -499,8 +516,89 @@ def test_mpesa_payment(bank_account_name, amount=10, currency="KES",
         sender_account_no, amount, currency, narration, payer_mobile_number
     )
 
-    status, body = _call_make_payment(cfg, service_name, payload)
+    status, body, ref_num = _call_make_payment(cfg, service_name, payload)
 
     print(f"HTTP {status}")
+    print(f"ref_num: {ref_num}")
     print(json.dumps(body, indent=2))
     return status, body
+
+
+# ===========================================================================
+# ASYNC CALLBACK — this is what makes the file a URL (via get_context)
+# Served at: https://yoursite.com/im-bank-treasury-callback/<channel_id>
+# ===========================================================================
+
+def get_context(context):
+    if frappe.request.method != "POST":
+        frappe.local.response["http_status_code"] = 405
+        frappe.local.response.update({"message": "Only POST is supported"})
+        raise frappe.PermissionError
+
+    channel_id = frappe.form_dict.get("channel_id")
+
+    try:
+        raw = frappe.request.get_data(as_text=True)
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "I&M Bank Treasury Callback - bad payload")
+        frappe.local.response["http_status_code"] = 400
+        frappe.local.response.update({"message": "Invalid JSON payload"})
+        raise frappe.ValidationError
+
+    frappe.log_error(
+        title="I&M Bank Treasury Callback received",
+        message=f"channel_id={channel_id} payload={json.dumps(data)}",
+    )
+
+    # Best-guess field names for how the bank identifies which request
+    # this callback is about - confirm the real one with I&M Bank.
+    ref_num = (
+        data.get("requestRefNum")
+        or data.get("targetRefNumber")
+        or data.get("paymentSystemRefNumber")
+    )
+
+    if not ref_num:
+        frappe.local.response["http_status_code"] = 400
+        frappe.local.response.update({"message": "Missing reference number in callback"})
+        raise frappe.ValidationError
+
+    matches = frappe.get_all(
+        "Payment Approval Queue",
+        filters={"custom_request_ref_num": ref_num},
+        pluck="name",
+        limit=1,
+    )
+
+    if not matches:
+        frappe.local.response["http_status_code"] = 404
+        frappe.local.response.update({"message": "Unknown reference number"})
+        raise frappe.DoesNotExistError
+
+    doc = frappe.get_doc("Payment Approval Queue", matches[0])
+    doc.db_set("gateway_response", json.dumps(data, indent=2))
+
+    response_code = str(data.get("responseCode") or "").upper()
+
+    if response_code in ("SUCCESS", "COMPLETED", "APPROVED", "00", "000"):
+        doc.db_set("status", "Completed")
+        if not (doc.meta.has_field("custom_payment_entry") and doc.get("custom_payment_entry")):
+            try:
+                _create_payment_entry(doc, doc.get("account"), data)
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    f"I&M Bank Treasury Callback: Payment Entry creation failed for {doc.name}",
+                )
+    elif response_code in ("FAILED", "REJECTED", "DECLINED"):
+        doc.db_set("status", "Failed")
+    else:
+        frappe.log_error(
+            title="I&M Bank Treasury Callback - unrecognized responseCode",
+            message=f"doc={doc.name} responseCode={response_code} payload={json.dumps(data)}",
+        )
+
+    frappe.db.commit()
+    frappe.local.response["type"] = "json"
+    frappe.local.response.update({"resultCode": 0, "resultDesc": "Received"})

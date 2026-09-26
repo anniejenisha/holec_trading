@@ -16,6 +16,7 @@
   "payment_entry",
   "column_break_2tpx",
   "status",
+  "custom_request_ref_num",
   "gateway_response",
   "receiver_account",
   "receiver_name",
@@ -106,14 +107,19 @@
    "fieldtype": "Link",
    "label": "Payment Entry",
    "options": "Payment Entry"
+  },
+  {
+   "fieldname": "custom_request_ref_num",
+   "fieldtype": "Data",
+   "label": "Request Ref Num"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-12 10:36:19.678856",
- "modified_by": "Administrator",
+ "modified": "2026-09-26 12:34:56.406998",
+ "modified_by": "anniejenisha.p@gmail.com",
  "module": "Holec Trading",
  "name": "Payment Approval Queue",
  "naming_rule": "Expression",
@@ -129,6 +135,7 @@
    "report": 1,
    "role": "System Manager",
    "share": 1,
+   "submit": 1,
    "write": 1
   }
  ],

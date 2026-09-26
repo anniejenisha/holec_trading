@@ -32,10 +32,16 @@ doc_events = {
 		"validate": "holec_trading.holec_trading.supplier_hooks.validate_supplier",
 	},
     "Payment Approval Queue": {
-        "on_submit": "holec_trading.im_bank.treasury.submit_payment_to_bank"
+           "on_submit": "holec_trading.www.im_bank_treasury_callback.submit_payment_to_bank"
     }
 }
 
+website_route_rules = [
+    {
+        "from_route": "/some-route",
+        "to_route": "some-page",
+    }
+]
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
