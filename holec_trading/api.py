@@ -235,3 +235,42 @@ def receive_payment():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Treasury Payment API Error")
         return {"resultCode": 1, "resultDesc": str(e)}
+
+
+import frappe
+import json
+
+@frappe.whitelist(allow_guest=True)
+def im_bank_callback(channel_id=None):
+    if frappe.request.method != "POST":
+        frappe.local.response["http_status_code"] = 405
+        return {"message": "Only POST is supported"}
+
+    try:
+        raw = frappe.request.get_data(as_text=True)
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        frappe.local.response["http_status_code"] = 400
+        return {"message": "Invalid JSON payload"}
+
+    # Your matching logic here using channel_id and data...
+    ref_num = data.get("requestRefNum") or data.get("targetRefNumber")
+    
+    matches = frappe.get_all(
+        "Payment Approval Queue",
+        filters={"custom_request_ref_num": ref_num},
+        pluck="name",
+        limit=1,
+    )
+
+    if not matches:
+        frappe.local.response["http_status_code"] = 404
+        return {"message": "Unknown reference number"}
+
+    doc = frappe.get_doc("Payment Approval Queue", matches[0])
+    doc.db_set("gateway_response", json.dumps(data, indent=2))
+    
+    # Update status...
+    frappe.db.commit()
+    
+    return {"resultCode": 0, "resultDesc": "Received"}
