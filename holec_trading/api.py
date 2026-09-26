@@ -241,7 +241,10 @@ import frappe
 import json
 
 @frappe.whitelist(allow_guest=True)
-def im_bank_callback(channel_id=None, secret=None):
+def im_bank_callback():
+    channel_id = frappe.form_dict.get("channel_id")
+    secret = frappe.form_dict.get("secret")
+    
     if not channel_id:
         frappe.local.response["http_status_code"] = 400
         return {"message": "Missing channel_id"}
