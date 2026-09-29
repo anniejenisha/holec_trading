@@ -10,7 +10,6 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 import frappe
 from frappe.utils import getdate
 from erpnext.accounts.party import get_party_account
-
 import re
 
 UNIDENTIFIED_CUSTOMER = "Unidentified Customer"  # adjust to your actual placeholder Customer name
@@ -29,6 +28,7 @@ PAYMENT_TYPE_MODE_MAP = {
     "ITAXPayment": "iTax",
     "SWIFTPayment": "SWIFT",
     "MpesaPayment": "M-PESA",
+    "MPESA": "M-PESA",  # Added alias matching your Bruno test payload
     "AirtelPayment": "Airtel",
     "UtilityPayment": "Utility Payment",
 }
@@ -94,17 +94,16 @@ def _resolve_mode_of_payment(payment_type, additions, bank_acc_doc):
 def receive_payment():
     """Incoming payment hook processing requests by parsing shortCode from the URL path."""
     try:
-        # --- Body parsing: don't rely on get_json(), which raises 415 if the
-        # caller's Content-Type header isn't exactly 'application/json'. ---
+        # --- Body parsing with fallback support ---
         raw_body = frappe.request.get_data(as_text=True)
-        if not raw_body:
-            return {"resultCode": 1, "resultDesc": "Request body is empty"}
-
-        try:
-            data = json.loads(raw_body)
-        except (ValueError, TypeError):
-            frappe.log_error(raw_body, "Treasury Payment API - Invalid JSON body")
-            return {"resultCode": 1, "resultDesc": "Request body is not valid JSON"}
+        if not raw_body and frappe.local.form_dict:
+            data = frappe.local.form_dict
+        else:
+            try:
+                data = json.loads(raw_body) if raw_body else {}
+            except (ValueError, TypeError):
+                frappe.log_error(raw_body, "Treasury Payment API - Invalid JSON body")
+                return {"resultCode": 1, "resultDesc": "Request body is not valid JSON"}
 
         if not isinstance(data, dict):
             return {"resultCode": 1, "resultDesc": "Request body must be a JSON object"}
@@ -166,7 +165,7 @@ def receive_payment():
             return {
                 "resultCode": 1,
                 "resultDesc": f"No Mode of Payment mapping configured for paymentType '{payment_type}'"
-                              + (f" ({pesalink_note})" if pesalink_note else "")
+                            + (f" ({pesalink_note})" if pesalink_note else "")
             }
         if not frappe.db.exists("Mode of Payment", mode_of_payment):
             return {
@@ -235,7 +234,6 @@ def receive_payment():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Treasury Payment API Error")
         return {"resultCode": 1, "resultDesc": str(e)}
-
 
 import frappe
 import json
