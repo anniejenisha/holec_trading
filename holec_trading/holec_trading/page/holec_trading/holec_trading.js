@@ -351,89 +351,504 @@ function init_holec_trading_engine() {
         });
     }
 
-    function renderNewCustomer(container) {
-        const groupOptions = LIVE_STORE.customer_groups.map(g => ({ value: g.name, label: g.customer_group_name || g.name }));
-        const termsOptions = ['Net 7', 'Net 14', 'Net 30', 'Advance'];
+    // =====================================================================
+// Holec ERP - NEW CUSTOMER (replaces the existing renderNewCustomer)
+// Paste inside init_holec_trading_engine(), in place of the old function.
+// Uses existing helpers: showToast(), navigate(), loadMasterData(), flt(), cint()
+// =====================================================================
+function renderNewCustomer(container) {
+    // ---------- CONFIG ----------
+    const KRA_LOOKUP_ENABLED = false;   // flip to true once GavaConnect API access exists (rule 4)
+    const MAX_DELIVERY_POINTS = 5;      // set to 1 if Holec wants strictly ONE delivery point
+    const MAX_CONTACTS = 3;
+    const OCR_MIN_CONFIDENCE = 0.8;     // below this -> PIN Status = Manual (rule 5)
+    const MAX_FILE_MB = 10;
+    const DEFAULT_GROUP = 'Holec Trading';       // hidden backend default
+    const DEFAULT_TERRITORY = 'All Territories'; // hidden backend default
 
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">New customer</span>
+    const KRA_REGEX = /^[AP]\d{9}[A-Z]$/;        // rule 2: A or P + 9 digits + 1 letter
+    const PHONE_REGEX = /^(?:\+?254|0)[17]\d{8}$/;
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    // ---------- STATE ----------
+    const state = {
+        kraFile: null,
+        crFile: null,
+        pinStatus: null,        // 'Verified' | 'Mismatch' | 'Manual' | null
+        nameTouched: false,     // true once user edits Customer Name manually
+        pinDuplicate: false,
+        deliveryPoints: [{ name: '', address: '' }],
+        contacts: [{ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: true }]
+    };
+
+    // ---------- STYLE HELPERS ----------
+    const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
+    const CELL_INPUT = 'width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;background:#fff;box-sizing:border-box;';
+    const CARD = 'background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;';
+    const SECTION = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;';
+    const HELP = 'font-size:12px;color:#718096;';
+    const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
+    const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
+    const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+    const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
+    const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+    const fld = ({ label, id, required, optional, type = 'text', value = '', placeholder = '', hint = '', step, readonly }) => `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <label for="${id}" style="${LABEL}">${label}${required ? req : ''}${optional ? opt : ''}</label>
+            <input type="${type}" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}"
+                ${step ? `step="${step}"` : ''} ${readonly ? 'readonly' : ''} style="${INPUT}${readonly ? 'background:#f7fafc;' : ''}">
+            ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
+        </div>`;
+
+    const selectFld = ({ label, id, required, options = [], hint = '' }) => `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <label for="${id}" style="${LABEL}">${label}${required ? req : ''}</label>
+            <select id="${id}" style="${INPUT}">
+                <option value="">Select</option>
+                ${options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
+            </select>
+            ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
+        </div>`;
+
+    const dropzone = (id, label, required) => `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <label style="${LABEL}">${label}${required ? req : opt}</label>
+            <div id="${id}-zone" style="display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid #a0b4c8;border-radius:8px;background:#f7fafc;cursor:pointer;">
+                <div style="width:32px;height:32px;border-radius:8px;background:#ebf8ff;color:#3182ce;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">↑</div>
+                <div style="flex:1;min-width:0;">
+                    <div id="${id}-title" style="font-weight:600;font-size:13px;color:#2d3748;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Choose a file to upload</div>
+                    <div style="font-size:11px;color:#718096;">PDF, JPG or PNG · up to ${MAX_FILE_MB} MB</div>
+                </div>
+                <span style="font-size:12px;color:#718096;">Browse</span>
             </div>
+            <input type="file" id="${id}-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none;">
+        </div>`;
+
+    // ---------- LAYOUT ----------
+    container.innerHTML = `
+        <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+            <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">New customer</span>
+        </div>
+        <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New customer</h1>
+
+        <!-- 1. KRA VERIFICATION -->
+        <div style="${CARD}">
+            <div style="${SECTION}margin-bottom:16px;">KRA VERIFICATION</div>
+            <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', true)}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
+                ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true, hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
+                ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true })}
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="${LABEL}">PIN Status</label>
+                    <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. CUSTOMER DETAILS -->
+        <div style="${CARD}">
+            <div style="${SECTION}margin-bottom:16px;">CUSTOMER DETAILS</div>
             
-            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New customer</h1>
-
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Customer Name *', id: 'nc-name', required: true, placeholder: '' })}
-                    ${field({ label: 'Customer Group *', id: 'nc-group', type: 'select', required: true, options:['Holec Trading'] })}
-                    ${field({ label: 'KRA PIN', id: 'nc-krapin', placeholder: '' })}
-                </div>
-                ${field({ label: 'Address', id: 'nc-address', type: 'textarea', span: true })}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+                ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Enter customer ID' })}
+                ${fld({ label: 'Customer Name', id: 'nc-name', required: true, placeholder: 'Enter customer name' })}
+                ${dropzone('nc-cr12', 'Business Registration / CR12', false)}
             </div>
+        </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">COMMERCIAL TERMS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Credit Limit (KES)', id: 'nc-credit-limit', type: 'number', value: '0' })}
-                    ${field({ label: 'Credit Terms', id: 'nc-terms', type: 'select', options: termsOptions })}
-                    ${field({ label: 'Exposure Limit (KES)', id: 'nc-exposure', type: 'number', value: '0' })}
-                </div>
-                ${field({ label: 'Guarantee / Security Held', id: 'nc-guarantee' })}
+        <!-- 3. DELIVERY POINTS -->
+        <div style="${CARD}">
+            <div style="${SECTION}margin-bottom:2px;">DELIVERY POINTS</div>
+            <div style="${HELP}margin-bottom:14px;" id="nc-dp-help"></div>
+            <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                        <th style="${TH}width:60px;">No.</th>
+                        <th style="${TH}">Delivery Point Name</th>
+                        <th style="${TH}">Location / Address</th>
+                        <th style="${TH}width:40px;"></th>
+                    </tr></thead>
+                    <tbody id="nc-dp-tbody"></tbody>
+                </table>
             </div>
+            <button type="button" id="nc-dp-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
+        </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">QUALITY PROFILE</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Moisture Rule', id: 'nc-moisture', placeholder: 'e.g. 13.5% max' })}
-                    ${field({ label: 'Foreign Matter Rule', id: 'nc-fm', placeholder: 'e.g. 2.0% max' })}
-                </div>
-                <div style="max-width:320px;">
-                    ${field({ label: 'Offloading Borne By', id: 'nc-offloading', type: 'select', options: ['Supplier', 'Customer', 'Shared'] })}
-                </div>
+        <!-- 4. CONTACT PERSONS -->
+        <div style="${CARD}">
+            <div style="${SECTION}margin-bottom:2px;">CONTACT PERSONS</div>
+            <div style="${HELP}margin-bottom:14px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
+            <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px;">
+                    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                        <th style="${TH}width:50px;">No.</th>
+                        <th style="${TH}">Name</th>
+                        <th style="${TH}">Role</th>
+                        <th style="${TH}">Phone</th>
+                        <th style="${TH}width:90px;text-align:center;">Same as WA</th>
+                        <th style="${TH}">WhatsApp</th>
+                        <th style="${TH}">Email</th>
+                        <th style="${TH}width:70px;text-align:center;">Primary</th>
+                        <th style="${TH}width:40px;"></th>
+                    </tr></thead>
+                    <tbody id="nc-ct-tbody"></tbody>
+                </table>
             </div>
+            <button type="button" id="nc-ct-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
+        </div>
 
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-draft-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
-                <button class="h-btn ghost" id="cancel-customer-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+        <!-- 5. COMMERCIAL TERMS -->
+        <div style="${CARD}">
+            <div style="${SECTION}margin-bottom:16px;">COMMERCIAL TERMS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+                ${selectFld({ label: 'Payment Terms', id: 'nc-terms', required: true, hint: 'Invoice due date = invoice date + payment terms.' })}
+                ${selectFld({ label: 'Offloading Borne By', id: 'nc-offload', required: true, options: [{ value: 'Holec', label: 'Holec' }, { value: 'Customer', label: 'Customer' }], hint: "Who pays the labour to unload at the customer's site." })}
             </div>
-        `;
+        </div>
 
-        document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
-        document.getElementById('cancel-customer-btn').addEventListener('click', () => navigate('customers'));
+        <!-- 6. QUALITY SPEC -->
+        <div style="${CARD}">
+            <div style="${SECTION}margin-bottom:16px;">QUALITY SPEC</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                ${fld({ label: 'Moisture Max (%)', id: 'nc-moist', required: true, type: 'number', value: '13.5', step: '0.1' })}
+                ${fld({ label: 'Foreign Matter Max (%)', id: 'nc-fm', required: true, type: 'number', value: '2.0', step: '0.1' })}
+                ${fld({ label: 'Aflatoxin Max (ppb)', id: 'nc-afla', required: true, type: 'number', value: '10', step: '1' })}
+            </div>
+        </div>
 
-        document.getElementById('submit-draft-customer-btn').addEventListener('click', async () => {
-            const customerName = $('#nc-name').val();
-            const customerGroup = $('#nc-group').val();
-            const creditLimit = flt($('#nc-credit-limit').val());
-            const paymentTerms = $('#nc-terms').val();
+        <div style="display:flex;gap:12px;align-items:center;">
+            <button class="h-btn primary" id="nc-save-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Save as Draft</button>
+            <button class="h-btn ghost" id="nc-cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+        </div>
+    `;
 
-            if (!customerName || !customerGroup) {
-                frappe.msgprint(__('Please fill out the mandatory Customer Name and Customer Group fields.'));
-                return;
-            }
+    // ---------- NAV ----------
+    document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
+    document.getElementById('nc-cancel-btn').addEventListener('click', () => navigate('customers'));
 
-            try {
-                const res = await frappe.db.insert({
-                    doctype: 'Customer',
-                    customer_name: customerName,
-                    customer_group: customerGroup,
-                    payment_terms: paymentTerms,
-                    disabled: 0,
-                    credit_limits: creditLimit > 0 ? [{ credit_limit: creditLimit }] : []
-                });
+    // ---------- PAYMENT TERMS (ERPNext) ----------
+    // Customer.payment_terms links to "Payment Terms Template". Holec to confirm which list to expose.
+    frappe.db.get_list('Payment Terms Template', { fields: ['name'], order_by: 'name asc', limit: 100 })
+        .then(rows => {
+            $('#nc-terms').append((rows || []).map(r => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join(''));
+        })
+        .catch(() => showToast('Could not load Payment Terms', 'orange'));
 
-                if (res) {
-                    showToast(`Customer ${res.name} created as Draft successfully`);
-                    await loadMasterData();
-                    navigate('customers');
-                }
-            } catch (err) {
-                console.error('Error creating customer document:', err);
-                showToast('Failed to create customer document', 'red');
-            }
+    // ---------- FILE PICKER ----------
+    function bindDropzone(id, onFile) {
+        const zone = document.getElementById(`${id}-zone`);
+        const input = document.getElementById(`${id}-input`);
+        zone.addEventListener('click', () => input.click());
+        input.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (!/\.(pdf|jpe?g|png)$/i.test(file.name)) { showToast('Only PDF, JPG or PNG files are allowed.', 'red'); input.value = ''; return; }
+            if (file.size > MAX_FILE_MB * 1024 * 1024) { showToast(`File must be ${MAX_FILE_MB} MB or less.`, 'red'); input.value = ''; return; }
+            $(`#${id}-title`).text(file.name).css('color', '#276749');
+            onFile(file);
         });
     }
+
+    // ---------- PIN STATUS ----------
+    function setPinStatus(status) {
+        state.pinStatus = status;
+        const map = {
+            Verified: ['#f0fff4', '#276749', '#38a169'],
+            Mismatch: ['#fff5f5', '#c53030', '#e53e3e'],
+            Manual:   ['#fffaf0', '#9c4221', '#dd6b20']
+        };
+        const [bg, color, dot] = map[status] || ['#edf2f7', '#4a5568', '#a0aec0'];
+        $('#nc-pin-status').html(status
+            ? `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dot};border-radius:50%;"></span>${status}</span>`
+            : '<span style="color:#a0aec0;font-size:13px;">—</span>');
+
+        // KRA PIN (and name) editable only when Manual (rule 5)
+        const locked = status !== 'Manual';
+        $('#nc-pin, #nc-regname').prop('readonly', locked).css('background', locked ? '#f7fafc' : '#fff');
+    }
+
+    // ---------- PIN VALIDATION (format + duplicate) ----------
+    async function validatePin(pin) {
+        $('#nc-pin-err').text('');
+        state.pinDuplicate = false;
+        if (!pin) return false;
+        if (!KRA_REGEX.test(pin)) {
+            $('#nc-pin-err').text('Invalid KRA PIN. Format: A or P, 9 digits, 1 letter (e.g. A123456789Z).');
+            return false;
+        }
+        try {
+            const dup = await frappe.db.get_list('Customer', { filters: { tax_id: pin }, fields: ['name', 'customer_name'], limit: 1 });
+            if (dup && dup.length) {
+                state.pinDuplicate = true;
+                $('#nc-pin-err').text(`This KRA PIN already exists on customer ${dup[0].customer_name || dup[0].name}.`);
+                return false;
+            }
+        } catch (e) { console.error('Duplicate PIN check failed', e); }
+        return true;
+    }
+
+    // ---------- KRA CERTIFICATE UPLOAD -> OCR ----------
+    function applyKraResult(r) {
+        const pin = String(r.pin || '').toUpperCase().trim();
+        const regName = String(r.name || '').trim();
+        $('#nc-pin').val(pin);
+        $('#nc-regname').val(regName);
+        if (regName && !state.nameTouched) $('#nc-name').val(regName);   // prefill, still editable
+
+        const lowConfidence = !pin || !regName || flt(r.confidence) < OCR_MIN_CONFIDENCE || !KRA_REGEX.test(pin);
+        let status = 'Manual';                                              // rule 5 (default)
+        if (!lowConfidence && KRA_LOOKUP_ENABLED && r.lookup && r.lookup !== 'unavailable') {
+            status = r.lookup === 'match' ? 'Verified' : 'Mismatch';        // rule 4
+        }
+        setPinStatus(status);
+        validatePin(pin);
+        if (status === 'Manual') showToast('Please confirm the KRA PIN and name manually. Finance will verify.', 'orange');
+        else if (status === 'Mismatch') showToast('Name on certificate differs from KRA records. Finance will decide.', 'orange');
+        else showToast(`KRA PIN ${pin} verified`);
+    }
+
+    bindDropzone('nc-kra', (file) => {
+        state.kraFile = file;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            showToast('Reading KRA certificate...', 'orange');
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_details',
+                args: { filedata: ev.target.result, filename: file.name },
+                freeze: true,
+                freeze_message: 'Reading KRA certificate...',
+                callback: (r) => {
+                    if (r && r.message && (r.message.pin || r.message.name)) {
+                        applyKraResult(r.message);
+                    } else {
+                        setPinStatus('Manual');   // OCR failed -> manual entry
+                        showToast('Could not read the certificate. Enter the PIN and name manually.', 'orange');
+                    }
+                },
+                error: () => {
+                    setPinStatus('Manual');
+                    showToast('Certificate reading failed. Enter the PIN and name manually.', 'orange');
+                }
+            });
+        };
+        reader.readAsDataURL(file);
+    });
+
+    bindDropzone('nc-cr12', (file) => { state.crFile = file; });   // attachment only, no OCR
+
+    $('#nc-name').on('input', () => { state.nameTouched = true; });
+    $('#nc-pin').on('input', function () {
+        this.value = this.value.toUpperCase().replace(/\s/g, '');
+        validatePin(this.value);
+    });
+
+    // ---------- DELIVERY POINTS TABLE ----------
+    function renderDeliveryPoints() {
+        $('#nc-dp-help').text(MAX_DELIVERY_POINTS === 1 ? 'One delivery point only.' : `At least 1, at most ${MAX_DELIVERY_POINTS}.`);
+        $('#nc-dp-add').toggle(MAX_DELIVERY_POINTS > 1);
+        $('#nc-dp-tbody').html(state.deliveryPoints.map((d, i) => `
+            <tr style="border-bottom:1px solid #edf2f7;">
+                <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
+                <td style="padding:8px 12px;"><input class="dp" data-k="name" data-i="${i}" value="${esc(d.name)}" style="${CELL_INPUT}"></td>
+                <td style="padding:8px 12px;"><input class="dp" data-k="address" data-i="${i}" value="${esc(d.address)}" style="${CELL_INPUT}"></td>
+                <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="dp-del" data-i="${i}">${state.deliveryPoints.length > 1 ? '🗑' : ''}</td>
+            </tr>`).join(''));
+    }
+    $('#nc-dp-tbody').on('input', '.dp', function () {
+        state.deliveryPoints[this.dataset.i][this.dataset.k] = this.value;
+    });
+    $('#nc-dp-tbody').on('click', '.dp-del', function () {
+        if (state.deliveryPoints.length > 1) { state.deliveryPoints.splice(this.dataset.i, 1); renderDeliveryPoints(); }
+    });
+    $('#nc-dp-add').on('click', () => {
+        if (state.deliveryPoints.length >= MAX_DELIVERY_POINTS) return showToast(`Maximum ${MAX_DELIVERY_POINTS} delivery points allowed.`, 'orange');
+        state.deliveryPoints.push({ name: '', address: '' });
+        renderDeliveryPoints();
+    });
+
+    // ---------- CONTACT PERSONS TABLE ----------
+    function renderContacts() {
+        $('#nc-ct-tbody').html(state.contacts.map((c, i) => `
+            <tr style="border-bottom:1px solid #edf2f7;">
+                <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
+                <td style="padding:8px 12px;"><input class="ct" data-k="name" data-i="${i}" value="${esc(c.name)}" style="${CELL_INPUT}"></td>
+                <td style="padding:8px 12px;"><input class="ct" data-k="role" data-i="${i}" value="${esc(c.role)}" style="${CELL_INPUT}"></td>
+                <td style="padding:8px 12px;"><input class="ct" data-k="phone" data-i="${i}" value="${esc(c.phone)}" placeholder="07XX XXX XXX" style="${CELL_INPUT}"></td>
+                <td style="padding:8px 12px;text-align:center;"><input type="checkbox" class="ct-wa" data-i="${i}" ${c.same_as_wa ? 'checked' : ''}></td>
+                <td style="padding:8px 12px;">${c.same_as_wa
+                    ? '<span style="color:#a0aec0;font-size:12px;">— same as phone</span>'
+                    : `<input class="ct" data-k="whatsapp" data-i="${i}" value="${esc(c.whatsapp)}" style="${CELL_INPUT}">`}</td>
+                <td style="padding:8px 12px;"><input class="ct" data-k="email" data-i="${i}" value="${esc(c.email)}" style="${CELL_INPUT}"></td>
+                <td style="padding:8px 12px;text-align:center;"><input type="radio" name="nc-primary" class="ct-primary" data-i="${i}" ${c.is_primary ? 'checked' : ''}></td>
+                <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="ct-del" data-i="${i}">${state.contacts.length > 1 ? '🗑' : ''}</td>
+            </tr>`).join(''));
+    }
+    $('#nc-ct-tbody').on('input', '.ct', function () { state.contacts[this.dataset.i][this.dataset.k] = this.value; });
+    $('#nc-ct-tbody').on('change', '.ct-wa', function () {
+        state.contacts[this.dataset.i].same_as_wa = this.checked;   // ticked by default
+        renderContacts();
+    });
+    $('#nc-ct-tbody').on('change', '.ct-primary', function () {
+        state.contacts.forEach((c, i) => c.is_primary = (i == this.dataset.i));
+    });
+    $('#nc-ct-tbody').on('click', '.ct-del', function () {
+        if (state.contacts.length > 1) {
+            const wasPrimary = state.contacts[this.dataset.i].is_primary;
+            state.contacts.splice(this.dataset.i, 1);
+            if (wasPrimary) state.contacts[0].is_primary = true;
+            renderContacts();
+        }
+    });
+    $('#nc-ct-add').on('click', () => {
+        if (state.contacts.length >= MAX_CONTACTS) return showToast(`Maximum ${MAX_CONTACTS} contact persons allowed.`, 'orange');
+        state.contacts.push({ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: false });
+        renderContacts();
+    });
+
+    renderDeliveryPoints();
+    renderContacts();
+    setPinStatus(null);
+
+    // ---------- HELPERS ----------
+    const cleanPhone = (p) => String(p || '').replace(/[\s\-()]/g, '');
+    const toIntl = (p) => {
+        p = cleanPhone(p);
+        if (p.startsWith('+254')) return p;
+        if (p.startsWith('254')) return '+' + p;
+        if (p.startsWith('0')) return '+254' + p.slice(1);
+        return p;
+    };
+
+    async function uploadToDoc(file, docname, fieldname) {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+        fd.append('is_private', 1);
+        fd.append('doctype', 'Customer');
+        fd.append('docname', docname);
+        fd.append('fieldname', fieldname);
+        const res = await fetch('/api/method/upload_file', {
+            method: 'POST',
+            headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
+            body: fd
+        });
+        if (!res.ok) throw new Error('Upload failed: ' + file.name);
+        return res.json();
+    }
+
+    // ---------- SAVE AS DRAFT ----------
+    document.getElementById('nc-save-btn').addEventListener('click', async () => {
+        const errors = [];
+        const id = ($('#nc-id').val() || '').trim();
+        const name = ($('#nc-name').val() || '').trim();
+        const pin = ($('#nc-pin').val() || '').toUpperCase().trim();
+        const regName = ($('#nc-regname').val() || '').trim();
+        const terms = $('#nc-terms').val();
+        const offload = $('#nc-offload').val();
+        const moist = $('#nc-moist').val();
+        const fm = $('#nc-fm').val();
+        const afla = $('#nc-afla').val();
+
+        // 1. KRA
+        if (!state.kraFile) errors.push('KRA PIN Certificate is required.');
+        if (!pin) errors.push('KRA PIN is required.');
+        else if (!KRA_REGEX.test(pin)) errors.push('KRA PIN format is invalid (A or P, 9 digits, 1 letter).');
+        else if (!(await validatePin(pin))) errors.push('This KRA PIN already exists on another customer.');   // rule 3
+        if (!regName) errors.push('Registered Name (per KRA) is required.');
+
+        // 2. Customer details
+        if (!name) errors.push('Customer Name is required.');
+        if(!id) errors.push('Customer ID is Required')
+        // 3. Delivery points
+        state.deliveryPoints.forEach((d, i) => {
+            if (!d.name.trim() || !d.address.trim()) errors.push(`Delivery point ${i + 1}: name and location are required.`);
+        });
+
+        // 4. Contacts
+        if (state.contacts.length < 1 || state.contacts.length > MAX_CONTACTS) errors.push(`Add between 1 and ${MAX_CONTACTS} contact persons.`);
+        if (state.contacts.filter(c => c.is_primary).length !== 1) errors.push('Exactly one contact must be marked Primary.');
+        state.contacts.forEach((c, i) => {
+            const n = i + 1;
+            if (!c.name.trim()) errors.push(`Contact ${n}: Name is required.`);
+            if (!c.phone.trim()) errors.push(`Contact ${n}: Phone is required.`);
+            else if (!PHONE_REGEX.test(cleanPhone(c.phone))) errors.push(`Contact ${n}: Phone must be a valid Kenyan number.`);
+            if (!c.same_as_wa) {
+                if (!c.whatsapp.trim()) errors.push(`Contact ${n}: WhatsApp number is required when "Same as WA" is unticked.`);
+                else if (!PHONE_REGEX.test(cleanPhone(c.whatsapp))) errors.push(`Contact ${n}: WhatsApp must be a valid Kenyan number.`);
+            }
+            if (c.email.trim() && !EMAIL_REGEX.test(c.email.trim())) errors.push(`Contact ${n}: Email format is invalid.`);
+        });
+
+        // 5. Commercial terms
+        if (!terms) errors.push('Payment Terms is required.');
+        if (!offload) errors.push('Offloading Borne By is required.');
+
+        // 6. Quality spec
+        [['Moisture Max', moist], ['Foreign Matter Max', fm], ['Aflatoxin Max', afla]].forEach(([l, v]) => {
+            if (v === '' || isNaN(flt(v)) || flt(v) < 0) errors.push(`${l} is required and must be a valid number.`);
+        });
+
+        if (errors.length) {
+            frappe.msgprint({ title: __('Please fix the following'), indicator: 'red', message: '<ul style="padding-left:18px;margin:0;">' + errors.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>' });
+            return;
+        }
+
+        const btn = $('#nc-save-btn').prop('disabled', true).text('Saving...');
+        try {
+            const doc = await frappe.db.insert({
+                doctype: 'Customer',
+                alias:id,
+                customer_name: name,
+                customer_type: 'Company',
+                // hidden backend defaults
+                customer_group: DEFAULT_GROUP,
+                territory: DEFAULT_TERRITORY,
+                custom_vat_registered: 0,
+                // KRA
+                tax_id: pin,
+                custom_kra_registered_name: regName,
+                custom_kra_pin_status: state.pinStatus || 'Manual',
+                // commercial terms
+                payment_terms: terms,
+                custom_offloading_borne_by: offload,
+                // quality spec (applies to future lots only)
+                custom_moisture_max: flt(moist),
+                custom_foreign_matter_max: flt(fm),
+                custom_aflatoxin_max: flt(afla),
+                // Draft: not usable for invoicing until Finance approves -> Active
+                custom_approval_status: 'Draft',
+                disabled: 0,
+                holec_delivery_points: state.deliveryPoints.map(d => ({ delivery_point_name: d.name.trim(), location: d.address.trim() })),
+                holec_contacts: state.contacts.map(c => ({
+                    contact_name: c.name.trim(),
+                    role: c.role.trim(),
+                    phone: toIntl(c.phone),
+                    same_as_wa: c.same_as_wa ? 1 : 0,
+                    whatsapp_number: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
+                    email_id: c.email.trim(),
+                    is_primary: c.is_primary ? 1 : 0
+                }))
+            });
+
+            if (doc) {
+                try {
+                    if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_certificate');
+                    if (state.crFile) await uploadToDoc(state.crFile, doc.name, 'custom_business_registration');
+                } catch (upErr) {
+                    console.error(upErr);
+                    showToast('Customer saved, but a file upload failed. Re-attach it from the Customer record.', 'orange');
+                }
+                showToast(`Customer ${doc.name} saved as Draft. Awaiting Finance approval.`);
+                await loadMasterData();
+                navigate('customers');
+            }
+        } catch (err) {
+            console.error('Error creating customer document:', err);
+            showToast('Failed to create customer', 'red');
+            btn.prop('disabled', false).text('Save as Draft');
+        }
+    });
+}
 
     function renderNewSupplier(container) {
         const countyOptions = (LIVE_STORE?.countries || []).map(c => ({ value: c.name, label: c.country_name || c.name }));

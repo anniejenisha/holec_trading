@@ -9,9 +9,10 @@ import pytesseract
 import frappe
 
 # NOTE: `openai` is intentionally NOT imported here at module level.
-# It's imported lazily inside extract_weights_via_openai() so that a broken
-# dependency in the AI stack (openai/httpx/aiohttp) cannot break the
-# KRA PIN extraction endpoints, which don't need it at all.
+# It's imported lazily inside the AI helpers so that a broken dependency in
+# the AI stack (openai/httpx/aiohttp) cannot break the OCR-only endpoints.
+
+KRA_PIN_RE = re.compile(r"^[AP]\d{9}[A-Z]$")
 
 # ============================================================
 # HELPER: EXTRACT KRA PIN
@@ -45,6 +46,57 @@ def find_kra_pin(text):
         match = re.search(pattern, normalized_text)
         if match:
             return match.group(1)
+
+    return None
+
+
+def find_valid_kra_pin(text):
+    """Like find_kra_pin, but only returns PINs that start with A or P."""
+    if not text:
+        return None
+    compact = re.sub(r"\s+", "", text.upper().replace("\xa0", ""))
+    m = re.search(r"[AP]\d{9}[A-Z]", compact)
+    if m:
+        return m.group(0)
+    pin = find_kra_pin(text)
+    return pin if pin and KRA_PIN_RE.match(pin) else None
+
+
+def find_kra_name(text):
+    """
+    Extract the taxpayer name from KRA certificate text.
+    Looks for a line starting with 'Name' (or 'Taxpayer Name'). 'Area Name'
+    is not matched because the label must be at the start of the line.
+    """
+    if not text:
+        return None
+
+    label_re = re.compile(r"^\s*(?:TAXPAYER\s+)?NAME\s*[:|\-]?\s*(.*)$", re.IGNORECASE)
+    lines = [ln.strip() for ln in text.splitlines()]
+
+    for i, line in enumerate(lines):
+        m = label_re.match(line)
+        if not m:
+            continue
+
+        value = m.group(1).strip()
+        if not value:  # value printed on the next non-empty line
+            for nxt in lines[i + 1:i + 3]:
+                if nxt:
+                    value = nxt
+                    break
+
+        # cut off when another label starts on the same line
+        value = re.split(
+            r"\s{2,}|\b(?:TAX\s*PAYER|TAXPAYER|REGISTRATION|ACTIVITY|CATEGORY|PIN)\b",
+            value,
+            flags=re.IGNORECASE,
+        )[0]
+        value = re.sub(r"[^A-Za-z0-9 .,&'()\-]", " ", value)
+        value = re.sub(r"\s+", " ", value).strip(" .,-|")
+
+        if len(value) >= 3 and re.search(r"[A-Za-z]{2,}", value):
+            return value.upper()
 
     return None
 
@@ -93,7 +145,7 @@ def extract_kra_pin_from_pdf(pdf_bytes):
 
 @frappe.whitelist()
 def extract_kra_pin(filedata, filename=None):
-    """Whitelisted entry point called from the frontend JavaScript."""
+    """Whitelisted entry point (used by the New Supplier screen)."""
     try:
         if "," in filedata:
             filedata = filedata.split(",", 1)[1]
@@ -123,6 +175,163 @@ def extract_kra_pin(filedata, filename=None):
     except Exception:
         frappe.log_error(frappe.get_traceback(), "KRA PIN Extraction Error")
         return None
+
+
+# ============================================================
+# HELPER: SHARED AI CLIENT (AI Settings doctype)
+# ============================================================
+
+def _get_ai_client():
+    """Returns (client, model_name, max_tokens) from the AI Settings doctype."""
+    try:
+        from openai import OpenAI
+    except Exception as import_error:
+        frappe.log_error(frappe.get_traceback(), "OpenAI Import Error")
+        raise Exception(f"AI library failed to load: {import_error}")
+
+    ai_settings = frappe.get_single("AI Settings")
+    if not ai_settings.get("enable_ai_processing"):
+        raise Exception("AI Processing is disabled in AI Settings.")
+
+    api_key = ai_settings.get_password("api_key")
+    if not api_key:
+        raise Exception("API Key is missing from AI Settings.")
+
+    base_url = (ai_settings.get("api_base_url") or "https://api.groq.com/openai/v1").strip()
+    model_name = (ai_settings.get("default_model") or "qwen/qwen3.6-27b").strip()
+    if model_name in ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
+        model_name = "qwen/qwen3.6-27b"
+
+    max_tokens = int(ai_settings.get("max_tokens") or 1000)
+    return OpenAI(api_key=api_key, base_url=base_url), model_name, max_tokens
+
+
+def _chat_json(client, model_name, max_tokens, messages):
+    """Calls the chat API, preferring JSON mode, and returns parsed JSON (dict)."""
+    kwargs = {"model": model_name, "messages": messages, "temperature": 0, "max_tokens": max_tokens}
+    try:
+        response = client.chat.completions.create(**kwargs, response_format={"type": "json_object"})
+    except Exception:
+        response = client.chat.completions.create(**kwargs)
+
+    if not response or not response.choices or not response.choices[0].message.content:
+        raise Exception("AI returned an empty response.")
+
+    return json.loads(clean_ai_json(response.choices[0].message.content))
+
+
+# ============================================================
+# KRA CERTIFICATE -> PIN + REGISTERED NAME (New Customer screen)
+# ============================================================
+
+def _first_page_png(pdf_bytes):
+    """Renders page 1 of a PDF to PNG bytes (for the AI vision fallback)."""
+    from pdf2image import convert_from_bytes
+    pages = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=1)
+    buf = io.BytesIO()
+    pages[0].save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _kra_via_ai(ocr_text, image_bytes, image_ext):
+    """AI fallback. Uses OCR text when available, otherwise sends the image."""
+    client, model_name, max_tokens = _get_ai_client()
+
+    system_prompt = (
+        "You read Kenya Revenue Authority Taxpayer Registration Certificates. "
+        "Extract ONLY values that are actually printed. Do not guess. "
+        'Return ONLY valid JSON: {"pin": null, "name": null}. '
+        '"pin" is the Taxpayer PIN (one letter, 9 digits, one letter). '
+        '"name" is the value printed next to the label "Name" under "General Data of the Taxpayer".'
+    )
+    messages = [{"role": "system", "content": system_prompt}]
+
+    if ocr_text and ocr_text.strip():
+        messages.append({"role": "user", "content": f"CERTIFICATE TEXT:\n{ocr_text[:20000]}\n\nReturn JSON only."})
+    elif image_bytes:
+        ext = image_ext if image_ext in ("jpeg", "png", "webp") else "jpeg"
+        data_url = f"data:image/{ext};base64,{base64.b64encode(image_bytes).decode()}"
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "This is a KRA Taxpayer Registration Certificate. Return JSON only."},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        })
+    else:
+        raise Exception("Nothing to send to AI.")
+
+    data = _chat_json(client, model_name, max_tokens, messages)
+
+    pin = re.sub(r"\s+", "", str(data.get("pin") or "")).upper()
+    pin = pin if KRA_PIN_RE.match(pin) else ""
+    name = re.sub(r"\s+", " ", str(data.get("name") or "")).strip().upper()
+    return pin, name
+
+
+@frappe.whitelist()
+def extract_kra_details(filedata, filename=None):
+    """
+    Called by the New Customer screen.
+    Returns {pin, name, confidence, lookup, error}.
+      1. Text layer / tesseract OCR (fast, free)
+      2. AI Settings model as a fallback for anything missing
+    """
+    pin, name, error = "", "", ""
+    confidence = 0.0
+
+    try:
+        if "," in filedata:
+            filedata = filedata.split(",", 1)[1]
+        file_bytes = base64.b64decode(filedata)
+
+        fname = (filename or "").lower()
+        is_pdf = fname.endswith(".pdf") or file_bytes[:4] == b"%PDF"
+        ext = "png" if fname.endswith(".png") else ("webp" if fname.endswith(".webp") else "jpeg")
+
+        # ---- 1. text layer / OCR ----
+        if is_pdf:
+            _, text = extract_kra_pin_from_pdf(file_bytes)
+        else:
+            _, text = extract_pin_from_image(file_bytes)
+
+        pin = find_valid_kra_pin(text) or ""
+        name = find_kra_name(text) or ""
+
+        # ---- 2. AI fallback for whatever is still missing ----
+        if not (pin and name):
+            try:
+                image_bytes, image_ext = (None, ext)
+                if not (text or "").strip():
+                    if is_pdf:
+                        image_bytes, image_ext = _first_page_png(file_bytes), "png"
+                    else:
+                        image_bytes = file_bytes
+                ai_pin, ai_name = _kra_via_ai(text, image_bytes, image_ext)
+                pin = pin or ai_pin
+                name = name or ai_name
+            except Exception as ai_err:
+                error = f"AI fallback failed: {ai_err}"
+                frappe.log_error(frappe.get_traceback(), "extract_kra_details AI fallback")
+
+        if pin and name:
+            confidence = 0.9
+        elif pin:
+            confidence = 0.5
+        if not pin and not error:
+            error = "No valid KRA PIN found in the document."
+
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+        frappe.log_error(frappe.get_traceback(), "extract_kra_details failed")
+
+    return {
+        "pin": pin,
+        "name": name,
+        "confidence": confidence,
+        "lookup": "unavailable",   # "match" / "mismatch" once GavaConnect is connected
+        "error": error,
+    }
 
 
 # ============================================================
