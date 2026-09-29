@@ -40,7 +40,9 @@ function init_holec_trading_engine() {
         lots: [],
         lotEventLogs: [],
         banks: [],
-        bank_branches: []
+        bank_branches: [],
+        origin_area: [],
+        origin_county: []
     };
 
     let route = { module: 'lots', params: {} };
@@ -125,7 +127,7 @@ function init_holec_trading_engine() {
 
     async function loadMasterData() {
         try {
-            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches] = await Promise.all([
+            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches,origin_area,origin_county] = await Promise.all([
                 frappe.db.get_list('Supplier', { filters: { supplier_group: 'Holec Trading' }, fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'] }),
                 frappe.db.get_list('Customer', { filters: { customer_group: 'Holec Trading' }, 
                     fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'], 
@@ -160,7 +162,9 @@ function init_holec_trading_engine() {
                     limit: 100
                 }).catch(() => []),
                 frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], order_by: 'name asc' }).catch(() => []),
-                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => [])
+                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Origin Area', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Origin County', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
             ]);
 
             LIVE_STORE.suppliers = suppliers || [];
@@ -173,6 +177,8 @@ function init_holec_trading_engine() {
             LIVE_STORE.lotEventLogs = lotEventLogs || [];
             LIVE_STORE.banks = banks || [];
             LIVE_STORE.bank_branches = bankBranches || [];
+            LIVE_STORE.origin_area = origin_area || [];
+            LIVE_STORE.origin_county = origin_county || [];
         } catch (e) {
             console.error('Error loading master data from DocTypes:', e);
         }
@@ -430,9 +436,10 @@ function init_holec_trading_engine() {
     }
 
     function renderNewSupplier(container) {
-        const countyOptions = LIVE_STORE.countries.map(c => ({ value: c.name, label: c.country_name || c.name }));
-        const bankOptions = LIVE_STORE.banks.map(b => ({ value: b.name, label: b.bank_name ? `${b.bank_name} (${b.name})` : b.name }));
-        
+        const countyOptions = (LIVE_STORE?.countries || []).map(c => ({ value: c.name, label: c.country_name || c.name }));
+        const areaOptions = (LIVE_STORE?.origin_area || []).map(d => ({ value: d.name, label: d.area_name || d.name }));
+        const counOptions = (LIVE_STORE?.origin_county || []).map(a => ({ value: a.name, label: a.area_name || a.name }));
+        const bankOptions = (LIVE_STORE?.banks || []).map(b => ({ value: b.name, label: b.bank_name ? `\({b.bank_name} (\){b.name})` : b.name }));  
         let contactRows = [
             { name: '', role: '', phone: '', email: '', is_primary: true }
         ];
@@ -523,10 +530,11 @@ function init_holec_trading_engine() {
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">ADDITIONAL DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'County', id: 'ns-county', type: 'select', options: countyOptions })}
-                    ${field({ label: 'Area', id: 'ns-area', placeholder: 'Select county first' })}
+                    ${field({ label: 'Country', id: 'ns-county', type: 'select', options: countyOptions })}
+                    ${field({ label: 'Area', id: 'ns-area', type: 'select', options: areaOptions })}
                     ${field({ label: 'Business Reg / National ID Number', id: 'ns-reg' })}
                 </div>
+                ${field({ label: 'County', id: 'ns-coun', type: 'select', options: counOptions })}
                 ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true })}
             </div>
 
