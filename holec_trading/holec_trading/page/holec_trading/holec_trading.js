@@ -42,7 +42,8 @@ function init_holec_trading_engine() {
         banks: [],
         bank_branches: [],
         origin_area: [],
-        origin_county: []
+        origin_county: [],
+        branch:[]
     };
 
     let route = { module: 'lots', params: {} };
@@ -127,7 +128,7 @@ function init_holec_trading_engine() {
 
     async function loadMasterData() {
         try {
-            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches,origin_area,origin_county] = await Promise.all([
+            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches,origin_area,origin_county,branch] = await Promise.all([
                 frappe.db.get_list('Supplier', { filters: { supplier_group: 'Holec Trading' }, fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'] }),
                 frappe.db.get_list('Customer', { filters: { customer_group: 'Holec Trading' }, 
                     fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'], 
@@ -165,6 +166,7 @@ function init_holec_trading_engine() {
                 frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => []),
                 frappe.db.get_list('Origin Area', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
                 frappe.db.get_list('Origin County', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Bank Branch', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
             ]);
 
             LIVE_STORE.suppliers = suppliers || [];
@@ -179,6 +181,7 @@ function init_holec_trading_engine() {
             LIVE_STORE.bank_branches = bankBranches || [];
             LIVE_STORE.origin_area = origin_area || [];
             LIVE_STORE.origin_county = origin_county || [];
+            LIVE_STORE.branch = branch || [];
         } catch (e) {
             console.error('Error loading master data from DocTypes:', e);
         }
@@ -836,9 +839,8 @@ function renderNewCustomer(container) {
             territory: DEFAULT_TERRITORY,
             custom_vat_registered: 0,
             // KRA
-            tax_id: pin,
-            custom_kra_registered_name: regName,
-            custom_kra_pin_status: str(state.pinStatus) || 'Manual',
+            custom_kra_pin: pin,
+            custom_registered_name_per_kra: regName,
             // commercial terms
             payment_terms: terms,
             custom_offloading_borne_by: offload,
@@ -853,13 +855,13 @@ function renderNewCustomer(container) {
                 delivery_point_name: str(d.name),
                 location: str(d.address)
             })),
-            holec_contacts: state.contacts.map(c => ({
+            custom_holec_contacts: state.contacts.map(c => ({
                 contact_name: str(c.name),
                 role: str(c.role),
                 phone: toIntl(c.phone),
-                same_as_wa: c.same_as_wa ? 1 : 0,
-                whatsapp_number: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
-                email_id: str(c.email),
+                same_as_phone: c.same_as_wa ? 1 : 0,
+                whatsapp: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
+                email: str(c.email),
                 is_primary: c.is_primary ? 1 : 0
             }))
         };
@@ -901,9 +903,16 @@ function renderNewCustomer(container) {
         const countyOptions = (LIVE_STORE?.countries || []).map(c => ({ value: c.name, label: c.country_name || c.name }));
         const areaOptions = (LIVE_STORE?.origin_area || []).map(d => ({ value: d.name, label: d.area_name || d.name }));
         const counOptions = (LIVE_STORE?.origin_county || []).map(a => ({ value: a.name, label: a.area_name || a.name }));
-        const bankOptions = (LIVE_STORE?.banks || []).map(b => ({ value: b.name, label: b.bank_name ? `\({b.bank_name} (\){b.name})` : b.name }));  
+        const bankOptions = (LIVE_STORE?.banks || []).map(b => ({ value: b.name, label: b.bank_name ? `${b.bank_name} (${b.name})` : b.name }));
+        const branchList = LIVE_STORE?.branch || [];
+        const branchLabel = e => {
+            const n = e.branch_name || e.bank_name;
+            return n ? `${n} (${e.name})` : e.name;
+        };
+        const branchOptions = branchList.map(e => ({ value: e.name, label: branchLabel(e) }));
+
         let contactRows = [
-            { name: '', role: '', phone: '', email: '', is_primary: true }
+            { name: '', role: '', phone: '', wa_same: true, whatsapp: '', email: '', is_primary: true }
         ];
 
         const renderContactsTable = () => {
@@ -916,8 +925,8 @@ function renderNewCustomer(container) {
                     <td style="padding:10px 12px;"><input type="text" class="cp-name" data-idx="${idx}" value="${row.name}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
                     <td style="padding:10px 12px;"><input type="text" class="cp-role" data-idx="${idx}" value="${row.role}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
                     <td style="padding:10px 12px;"><input type="text" class="cp-phone" data-idx="${idx}" value="${row.phone}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:10px 12px;text-align:center;"><input type="checkbox" checked disabled></td>
-                    <td style="padding:10px 12px;color:#a0aec0;font-size:12px;">— same as phone</td>
+                    <td style="padding:10px 12px;text-align:center;"><input type="checkbox" class="cp-same" data-idx="${idx}" ${row.wa_same ? 'checked' : ''}></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-wa" data-idx="${idx}" value="${row.wa_same ? row.phone : row.whatsapp}" ${row.wa_same ? 'disabled' : ''} style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;${row.wa_same ? 'background:#f7fafc;color:#a0aec0;' : ''}"></td>
                     <td style="padding:10px 12px;"><input type="text" class="cp-email" data-idx="${idx}" value="${row.email}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
                     <td style="padding:10px 12px;text-align:center;"><input type="radio" name="primary-contact" class="cp-primary" data-idx="${idx}" ${row.is_primary ? 'checked' : ''}></td>
                     <td style="padding:10px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="delete-contact" data-idx="${idx}">${contactRows.length > 1 ? '🗑' : ''}</td>
@@ -929,8 +938,27 @@ function renderNewCustomer(container) {
                     const i = e.target.dataset.idx;
                     if (e.target.classList.contains('cp-name')) contactRows[i].name = e.target.value;
                     if (e.target.classList.contains('cp-role')) contactRows[i].role = e.target.value;
-                    if (e.target.classList.contains('cp-phone')) contactRows[i].phone = e.target.value;
+                    if (e.target.classList.contains('cp-phone')) {
+                        contactRows[i].phone = e.target.value;
+                        if (contactRows[i].wa_same) {
+                            // mirror phone into the WhatsApp field live
+                            const wa = tbody.querySelector(`.cp-wa[data-idx="${i}"]`);
+                            if (wa) wa.value = e.target.value;
+                        }
+                    }
+                    if (e.target.classList.contains('cp-wa')) contactRows[i].whatsapp = e.target.value;
                     if (e.target.classList.contains('cp-email')) contactRows[i].email = e.target.value;
+                });
+            });
+
+            tbody.querySelectorAll('.cp-same').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const i = e.target.dataset.idx;
+                    contactRows[i].wa_same = e.target.checked;
+                    if (!e.target.checked && !contactRows[i].whatsapp) {
+                        contactRows[i].whatsapp = contactRows[i].phone; // start from phone, then editable
+                    }
+                    renderContactsTable();
                 });
             });
 
@@ -945,6 +973,8 @@ function renderNewCustomer(container) {
                 btn.addEventListener('click', (e) => {
                     const i = e.target.dataset.idx;
                     contactRows.splice(i, 1);
+                    // keep exactly one primary contact
+                    if (!contactRows.some(r => r.is_primary) && contactRows.length) contactRows[0].is_primary = true;
                     renderContactsTable();
                 });
             });
@@ -994,9 +1024,8 @@ function renderNewCustomer(container) {
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Country', id: 'ns-county', type: 'select', options: countyOptions })}
                     ${field({ label: 'Area', id: 'ns-area', type: 'select', options: areaOptions })}
-                    ${field({ label: 'Business Reg / National ID Number', id: 'ns-reg' })}
+                    ${field({ label: 'County', id: 'ns-coun', type: 'select', options: counOptions })}
                 </div>
-                ${field({ label: 'County', id: 'ns-coun', type: 'select', options: counOptions })}
                 ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true })}
             </div>
 
@@ -1022,12 +1051,17 @@ function renderNewCustomer(container) {
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BANKING</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Bank *', id: 'ns-bank', type: 'select', required: true, options: bankOptions })}
-                    ${field({ label: 'Branch *', id: 'ns-branch', type: 'select', required: true, options: [] })}
-                    ${field({ label: 'Account Number *', id: 'ns-accno', required: true })}
+                    ${field({ label: 'Bank Code *', id: 'ns-bank-code', type: 'text', required: true })}
+                    ${field({ label: 'Swift Code *', id: 'ns-swift-code', type: 'text', required: true })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Account Name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
+                    ${field({ label: 'Branch *', id: 'ns-branch', type: 'select', required: true, options: branchOptions })}
+                    ${field({ label: 'Branch Code *', id: 'ns-branch-code', type: 'text', required: true })}
                     ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: ['Pesalink', 'RTGS'] })}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${field({ label: 'Account Number *', id: 'ns-accno', required: true })}
+                    ${field({ label: 'Account Name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name' })}
                 </div>
             </div>
 
@@ -1040,17 +1074,20 @@ function renderNewCustomer(container) {
 
         renderContactsTable();
 
+        // Narrow the branch list to the selected bank (falls back to all branches if none match)
         $('#ns-bank').on('change', function() {
             const selectedBank = $(this).val();
             const branchSelect = $('#ns-branch');
             branchSelect.empty().append('<option value="">Select...</option>');
-            
+
+            let branches = branchList;
             if (selectedBank) {
-                const filteredBranches = LIVE_STORE.bank_branches.filter(b => b.bank === selectedBank);
-                filteredBranches.forEach(b => {
-                    branchSelect.append(`<option value="${b.name}">${b.branch_name ? b.branch_name + ' (' + b.name + ')' : b.name}</option>`);
-                });
+                const matches = branchList.filter(b => b.bank === selectedBank);
+                if (matches.length) branches = matches;
             }
+            branches.forEach(b => {
+                branchSelect.append(`<option value="${b.name}">${branchLabel(b)}</option>`);
+            });
         });
 
         document.getElementById('upload-kra-btn').addEventListener('click', () => {
@@ -1092,7 +1129,7 @@ function renderNewCustomer(container) {
 
         document.getElementById('add-contact-row-btn').addEventListener('click', () => {
             if (contactRows.length < 3) {
-                contactRows.push({ name: '', role: '', phone: '', email: '', is_primary: false });
+                contactRows.push({ name: '', role: '', phone: '', wa_same: true, whatsapp: '', email: '', is_primary: false });
                 renderContactsTable();
             } else {
                 showToast('Maximum 3 contact persons allowed.', 'orange');
@@ -1109,18 +1146,20 @@ function renderNewCustomer(container) {
             const taxId = $('#ns-krapin').val();
             const county = $('#ns-county').val();
             const area = $('#ns-area').val();
-            const businessReg = $('#ns-reg').val();
             const address = $('#ns-address').val();
             const vatStatus = $('#ns-vat').val();
             const etimsStatus = $('#ns-etims').val();
             const bank = $('#ns-bank').val();
+            const bankCode = $('#ns-bank-code').val();
             const branch = $('#ns-branch').val();
+            const branchCode = $('#ns-branch-code').val();
+            const swiftCode = $('#ns-swift-code').val();
             const accountNo = $('#ns-accno').val();
             const accountName = $('#ns-accname').val();
             const paymentRail = $('#ns-rail').val();
 
-            if (!supplierName || !supplierGroup || !taxId || !bank || !accountNo) {
-                frappe.msgprint(__('Please fill out all mandatory fields (including Supplier Name, Group, KRA PIN, Bank, and Account Number).'));
+            if (!supplierName || !supplierGroup || !taxId || !bank || !bankCode || !branch || !branchCode || !swiftCode || !accountNo || !accountName) {
+                frappe.msgprint(__('Please fill out all mandatory fields (Supplier Name, Group, KRA PIN, Bank, Bank Code, Branch, Branch Code, Swift Code, Account Number and Account Name).'));
                 return;
             }
 
@@ -1133,24 +1172,20 @@ function renderNewCustomer(container) {
                         const phoneInput = tr.querySelector('.cp-phone');
                         const emailInput = tr.querySelector('.cp-email');
                         const primaryRadio = tr.querySelector('.cp-primary');
+                        const sameCb = tr.querySelector('.cp-same');
+                        const waInput = tr.querySelector('.cp-wa');
 
                         if (nameInput) contactRows[idx].name = nameInput.value;
                         if (roleInput) contactRows[idx].role = roleInput.value;
                         if (phoneInput) contactRows[idx].phone = phoneInput.value;
                         if (emailInput) contactRows[idx].email = emailInput.value;
                         if (primaryRadio) contactRows[idx].is_primary = primaryRadio.checked;
+                        if (sameCb) contactRows[idx].wa_same = sameCb.checked;
+                        if (waInput && !waInput.disabled) contactRows[idx].whatsapp = waInput.value;
                     }
                 });
             }
 
-            const contactsToSave = contactRows.map(r => ({
-                contact_name: r.name,
-                role: r.role,
-                phone: r.phone,
-                whatsapp_number: r.phone,
-                email_id: r.email,
-                is_primary: r.is_primary ? 1 : 0
-            })).filter(r => r.contact_name && r.contact_name.trim() !== '');
 
             try {
                 const res = await frappe.db.insert({
@@ -1166,10 +1201,21 @@ function renderNewCustomer(container) {
                     custom_vat_status: vatStatus,
                     custom_etims_status: etimsStatus,
                     bank: bank,
+                    bank_code: bankCode,
                     bank_branch: branch,
+                    branch_code: branchCode,
+                    swift_code: swiftCode,
                     account_number: accountNo,
                     account_name: accountName,
-                    holec_contacts: contactsToSave
+                    custom_holec_contacts: contactRows.map(c => ({
+                        contact_name: str(c.name),
+                        role: str(c.role),
+                        phone: toIntl(c.phone),
+                        same_as_phone: c.same_as_wa ? 1 : 0,
+                        whatsapp: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
+                        email: str(c.email),
+                        is_primary: c.is_primary ? 1 : 0
+                    }))
                 });
 
                 if (res) {
