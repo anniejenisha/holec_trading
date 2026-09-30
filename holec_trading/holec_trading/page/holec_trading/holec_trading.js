@@ -1653,9 +1653,14 @@ function renderNewCustomer(container) {
     // Replace the existing handler in renderPayments() with this.
     // ============================================================
 
-    document.getElementById('confirm-settle-btn').addEventListener('click', async () => {
+   document.getElementById('confirm-settle-btn').addEventListener('click', async () => {
         const rail = $('#f-payment-rail').val();
         const company = 'Holec (E.A.) Limited';
+
+        if (!rail) {
+            frappe.msgprint(__('Please select a payment rail.'));
+            return;
+        }
 
         try {
             // 1. Submit the Sales Invoice first (if still draft)
@@ -1673,45 +1678,61 @@ function renderNewCustomer(container) {
                 return;
             }
 
-            // 2. Resolve paid_from / paid_to accounts
+            // 2. Resolve the account the money lands in (from the Mode of Payment)
             const paidTo = await getModeOfPaymentAccount(rail, company);
-            const paidFrom = await getCustomerReceivableAccount(l.customer, company);
-
-            if (!paidFrom || !paidTo) {
+            if (!paidTo) {
                 frappe.msgprint(__(
-                    'Could not determine Paid From / Paid To accounts. Check that the Customer has a default receivable account and "{0}" has a default account set for {1}.',
+                    'Could not determine the Paid To account. Check that "{0}" has a default account set for {1}.',
                     [rail, company]
                 ));
                 return;
             }
 
-            // 3. Create the Payment Entry as a draft, linked to the Sales Invoice
-            const amountDue = flt(siDoc.outstanding_amount || siDoc.grand_total);
+            // 3. Let ERPNext build a fully populated Payment Entry from the Sales Invoice.
+            //    It fills every mandatory field: payment_type, party_type, party, party_name,
+            //    company, posting_date, paid_from (the invoice's receivable account),
+            //    account types/currencies, paid_amount, received_amount, exchange rates,
+            //    base amounts, cost_center and the references table.
+            const res = await frappe.call({
+                method: 'erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry',
+                args: { dt: 'Sales Invoice', dn: siDoc.name }
+            });
+            const peDoc = res.message;
+            if (!peDoc) {
+                frappe.msgprint(__('Could not build a Payment Entry from Sales Invoice {0}.', [siDoc.name]));
+                return;
+            }
 
-            const pe = await frappe.db.insert({
-                doctype: 'Payment Entry',
-                company: company,
-                payment_type: 'Receive',
-                party_type: 'Customer',
-                party: l.customer,
-                paid_from: paidFrom,
-                paid_to: paidTo,
-                paid_amount: amountDue,
-                received_amount: amountDue,
-                source_exchange_rate: 1,
-                target_exchange_rate: 1,
+            // 4. Currency safety check (Paid To account must be in the same currency as the invoice account)
+            const paidToCurrency = (await frappe.db.get_value('Account', paidTo, 'account_currency')).message.account_currency;
+            if (paidToCurrency !== peDoc.paid_from_account_currency) {
+                frappe.msgprint(__(
+                    'Currency mismatch: the invoice account is in {0} but the "{1}" account is in {2}.',
+                    [peDoc.paid_from_account_currency, rail, paidToCurrency]
+                ));
+                return;
+            }
+
+            // 5. Reference No / Date are mandatory when the Paid To account is a Bank account.
+            //    Uses the optional inputs if they exist on the screen, otherwise falls back.
+            const refNo = ($('#f-payment-ref').val() || '').trim() || siDoc.name;
+            const refDate = $('#f-payment-date').val() || frappe.datetime.get_today();
+
+            Object.assign(peDoc, {
+                posting_date: frappe.datetime.get_today(),
                 mode_of_payment: rail,
+                paid_to: paidTo,
+                paid_to_account_currency: paidToCurrency,
+                target_exchange_rate: 1,
+                received_amount: peDoc.paid_amount,
+                reference_no: refNo,
+                reference_date: refDate,
                 custom_buy_ticket: l.name,
-                references: [{
-                    reference_doctype: 'Sales Invoice',
-                    reference_name: siDoc.name,
-                    total_amount: siDoc.grand_total,
-                    outstanding_amount: siDoc.outstanding_amount,
-                    allocated_amount: amountDue
-                }]
+                remarks: `Payment received via ${rail} for Sales Invoice ${siDoc.name} (Buy Ticket ${l.name}). Ref: ${refNo}`
             });
 
-            // 4. Submit the Payment Entry so it actually reconciles against the invoice
+            // 6. Save as draft, then submit so it reconciles against the invoice
+            const pe = await frappe.db.insert(peDoc);
             await submitFrappeDoc(pe);
 
         } catch (err) {
@@ -2667,6 +2688,8 @@ function renderNewCustomer(container) {
         if (!l) return navigate('lots');
 
         const waitingTickets = LIVE_STORE.lots.filter(x => (x.status || 'Ticket') === 'Ticket');
+        const areaOptions = (LIVE_STORE?.origin_area || []).map(d => ({ value: d.name, label: d.area_name || d.name }));
+        const counOptions = (LIVE_STORE?.origin_county || []).map(a => ({ value: a.name, label: a.area_name || a.name }));
         const vehicleOptions = LIVE_STORE.vehicles.map(v => {
             const labelStr = v.license_plate ? `${v.license_plate} (${v.name})` : v.name;
             return { value: v.name, label: labelStr };
@@ -2734,8 +2757,8 @@ function renderNewCustomer(container) {
                     ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'County', id: 'f-county', type: 'select', value: l.county || '', options: LIVE_STORE.countries.map(c => ({ value: c.name, label: c.country_name || c.name })) })}
-                    ${field({ label: 'Area', id: 'f-area', value: l.region || '', placeholder: 'e.g. Njoro' })}
+                    ${field({ label: 'County', id: 'f-county', type: 'select', options: counOptions })}
+                    ${field({ label: 'Area', id: 'f-area', type: 'select', options: areaOptions })}
                 </div>
                 ${field({ label: 'Reason Code (if foreign matter judgement or wet buy)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
             </div>
