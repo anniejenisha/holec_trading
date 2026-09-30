@@ -748,6 +748,7 @@ function renderNewCustomer(container) {
         const moist = $('#nc-moist').val();
         const fm = $('#nc-fm').val();
         const afla = $('#nc-afla').val();
+        const bussiness = state.crFile
 
         // 1. KRA
         if (!state.kraFile) errors.push('KRA PIN Certificate is required.');
@@ -805,9 +806,10 @@ function renderNewCustomer(container) {
                 territory: DEFAULT_TERRITORY,
                 custom_vat_registered: 0,
                 // KRA
-                tax_id: pin,
-                custom_kra_registered_name: regName,
-                custom_kra_pin_status: state.pinStatus || 'Manual',
+                custom_kra_pin_certificate: state.kraFile,
+                custom_kra_pin: pin,
+                custom_registered_name_per_kra: regName,
+                custom_business_registration:bussiness,
                 // commercial terms
                 payment_terms: terms,
                 custom_offloading_borne_by: offload,
@@ -819,7 +821,7 @@ function renderNewCustomer(container) {
                 custom_approval_status: 'Draft',
                 disabled: 0,
                 holec_delivery_points: state.deliveryPoints.map(d => ({ delivery_point_name: d.name.trim(), location: d.address.trim() })),
-                holec_contacts: state.contacts.map(c => ({
+                custom_holec_contacts: state.contacts.map(c => ({
                     contact_name: c.name.trim(),
                     role: c.role.trim(),
                     phone: toIntl(c.phone),
@@ -832,7 +834,7 @@ function renderNewCustomer(container) {
 
             if (doc) {
                 try {
-                    if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_certificate');
+                    if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_pin_certificate');
                     if (state.crFile) await uploadToDoc(state.crFile, doc.name, 'custom_business_registration');
                 } catch (upErr) {
                     console.error(upErr);
