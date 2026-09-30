@@ -851,7 +851,7 @@ function renderNewCustomer(container) {
             // Draft: not usable for invoicing until Finance approves -> Active
             custom_approval_status: 'Draft',
             disabled: 0,
-            holec_delivery_points: state.deliveryPoints.map(d => ({
+            custom_holec_delivery_points: state.deliveryPoints.map(d => ({
                 delivery_point_name: str(d.name),
                 location: str(d.address)
             })),
@@ -1163,6 +1163,7 @@ function renderNewCustomer(container) {
                 return;
             }
 
+            // Sync the latest values from the DOM into contactRows
             const currentTbody = document.getElementById('contacts-tbody');
             if (currentTbody) {
                 currentTbody.querySelectorAll('tr').forEach((tr, idx) => {
@@ -1186,6 +1187,15 @@ function renderNewCustomer(container) {
                 });
             }
 
+            const contactsToSave = contactRows.map(r => ({
+                contact_name: r.name,
+                role: r.role,
+                phone: r.phone,
+                same_as_phone: r.wa_same ? 1 : 0,
+                whatsapp: r.wa_same ? r.phone : r.whatsapp,
+                email: r.email,
+                is_primary: r.is_primary ? 1 : 0
+            })).filter(r => r.contact_name && r.contact_name.trim() !== '');
 
             try {
                 const res = await frappe.db.insert({
@@ -1207,15 +1217,7 @@ function renderNewCustomer(container) {
                     swift_code: swiftCode,
                     account_number: accountNo,
                     account_name: accountName,
-                    custom_holec_contacts: contactRows.map(c => ({
-                        contact_name: str(c.name),
-                        role: str(c.role),
-                        phone: toIntl(c.phone),
-                        same_as_phone: c.same_as_wa ? 1 : 0,
-                        whatsapp: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
-                        email: str(c.email),
-                        is_primary: c.is_primary ? 1 : 0
-                    }))
+                    holec_contacts: contactsToSave
                 });
 
                 if (res) {
