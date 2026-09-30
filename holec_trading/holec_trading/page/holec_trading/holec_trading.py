@@ -180,14 +180,36 @@ def extract_kra_pin(filedata, filename=None):
 # ============================================================
 # HELPER: SHARED AI CLIENT (AI Settings doctype)
 # ============================================================
+# The model name comes ONLY from AI Settings -> Default Model. There is no
+# hardcoded fallback, so when the provider retires a model you just change
+# the setting (no code change / deploy needed).
 
-def _get_ai_client():
+MODEL_HELP_URL = "https://console.groq.com/docs/models"
+
+
+def _model_error_message(err, model_name):
+    """Returns a friendly message if `err` means the model is unavailable, else None."""
+    text = str(err).lower()
+    if any(k in text for k in ("model_not_found", "model_decommissioned", "decommissioned", "does not exist")):
+        return (
+            f"AI model '{model_name}' is not available on this provider "
+            "(retired, renamed, or your key has no access). Open AI Settings and set "
+            f"'Default Model' to a currently available vision-capable model. See {MODEL_HELP_URL}"
+        )
+    return None
+
+
+def _get_ai_client(default_max_tokens=1000):
     """Returns (client, model_name, max_tokens) from the AI Settings doctype."""
     try:
         from openai import OpenAI
     except Exception as import_error:
         frappe.log_error(frappe.get_traceback(), "OpenAI Import Error")
-        raise Exception(f"AI library failed to load: {import_error}")
+        raise Exception(
+            "AI library failed to load on this server. This usually means a "
+            "dependency (openai/httpx/aiohttp) version mismatch. "
+            f"Details: {import_error}"
+        )
 
     ai_settings = frappe.get_single("AI Settings")
     if not ai_settings.get("enable_ai_processing"):
@@ -198,11 +220,15 @@ def _get_ai_client():
         raise Exception("API Key is missing from AI Settings.")
 
     base_url = (ai_settings.get("api_base_url") or "https://api.groq.com/openai/v1").strip()
-    model_name = (ai_settings.get("default_model") or "qwen/qwen3.6-27b").strip()
-    if model_name in ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
-        model_name = "qwen/qwen3.6-27b"
 
-    max_tokens = int(ai_settings.get("max_tokens") or 1000)
+    model_name = (ai_settings.get("default_model") or "").strip()
+    if not model_name:
+        raise Exception(
+            "Default Model is not set in AI Settings. Set a vision-capable model. "
+            f"See {MODEL_HELP_URL}"
+        )
+
+    max_tokens = int(ai_settings.get("max_tokens") or default_max_tokens)
     return OpenAI(api_key=api_key, base_url=base_url), model_name, max_tokens
 
 
@@ -211,13 +237,37 @@ def _chat_json(client, model_name, max_tokens, messages):
     kwargs = {"model": model_name, "messages": messages, "temperature": 0, "max_tokens": max_tokens}
     try:
         response = client.chat.completions.create(**kwargs, response_format={"type": "json_object"})
-    except Exception:
-        response = client.chat.completions.create(**kwargs)
+    except Exception as first_error:
+        friendly = _model_error_message(first_error, model_name)
+        if friendly:
+            raise Exception(friendly)
+        # JSON mode may be unsupported by the model - retry without it
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as second_error:
+            friendly = _model_error_message(second_error, model_name)
+            raise Exception(friendly or f"AI API request failed: {second_error}")
 
     if not response or not response.choices or not response.choices[0].message.content:
         raise Exception("AI returned an empty response.")
 
-    return json.loads(clean_ai_json(response.choices[0].message.content))
+    content = clean_ai_json(response.choices[0].message.content)
+    try:
+        return json.loads(content)
+    except Exception as e:
+        raise Exception(f"AI returned invalid JSON: {e}")
+
+
+@frappe.whitelist()
+def list_ai_models():
+    """
+    Diagnostic (System Manager only): lists the model IDs your API key can use
+    on the configured provider. Pick a vision-capable one for AI Settings.
+    Bench console:  frappe.call("holec_trading.holec_trading.page.holec_trading.holec_trading.list_ai_models")
+    """
+    frappe.only_for("System Manager")
+    client, _model, _max = _get_ai_client()
+    return sorted(m.id for m in client.models.list().data)
 
 
 # ============================================================
@@ -438,44 +488,11 @@ def extract_pdf_text(file_bytes):
 def extract_weights_via_openai(file_bytes, filename="", slip_type="gross"):
     """Extract weights and ticket info from weighbridge slip using AI."""
     try:
-        # Lazy import: isolates any openai/httpx/aiohttp import failure to
-        # ONLY this function, instead of breaking the whole module.
+        # Shared client: model / key / base URL all come from AI Settings.
         try:
-            from openai import OpenAI
-        except Exception as import_error:
-            frappe.log_error(frappe.get_traceback(), "OpenAI Import Error")
-            return {
-                "error": True,
-                "message": (
-                    "AI library failed to load on this server. This usually means "
-                    "a dependency (openai/httpx/aiohttp) version mismatch. "
-                    f"Details: {import_error}"
-                )
-            }
-
-        ai_settings = frappe.get_single("AI Settings")
-
-        if not ai_settings.get("enable_ai_processing"):
-            return {"error": True, "message": "AI Processing is disabled in AI Settings."}
-
-        api_key = ai_settings.get_password("api_key")
-        if not api_key:
-            return {"error": True, "message": "API Key is missing from AI Settings."}
-
-        base_url = (
-            ai_settings.get("api_base_url") or "https://api.groq.com/openai/v1"
-        ).strip()
-
-        model_name = (ai_settings.get("default_model") or "qwen/qwen3.6-27b").strip()
-
-        deprecated_models = [
-            "llama-3.2-11b-vision-preview",
-            "llama-3.2-90b-vision-preview"
-        ]
-        if model_name in deprecated_models:
-            model_name = "qwen/qwen3.6-27b"
-
-        client = OpenAI(api_key=api_key, base_url=base_url)
+            client, model_name, max_tokens = _get_ai_client(default_max_tokens=2000)
+        except Exception as setup_error:
+            return {"error": True, "message": str(setup_error)}
 
         slip_type = (slip_type or "gross").lower().strip()
         if slip_type not in ["gross", "tare"]:
@@ -535,44 +552,11 @@ Return JSON only.
                 ]
             })
 
-        create_kwargs = {
-            "model": model_name,
-            "messages": messages,
-            "temperature": 0,
-            "max_tokens": int(ai_settings.get("max_tokens") or 2000)
-        }
-
         try:
-            response = client.chat.completions.create(
-                **create_kwargs,
-                response_format={"type": "json_object"}
-            )
-        except Exception as first_error:
-            first_error_text = str(first_error)
-            if "decommissioned" in first_error_text.lower() or "model_decommissioned" in first_error_text.lower():
-                return {
-                    "error": True,
-                    "message": "Groq model is decommissioned. Please use qwen/qwen3.6-27b."
-                }
-            try:
-                response = client.chat.completions.create(**create_kwargs)
-            except Exception as second_error:
-                frappe.log_error(frappe.get_traceback(), "Groq/OpenAI API Error")
-                return {"error": True, "message": "AI API request failed:\n" + str(second_error)}
-
-        if not response or not response.choices:
-            return {"error": True, "message": "AI returned an empty response."}
-
-        content = response.choices[0].message.content
-        if not content:
-            return {"error": True, "message": "AI returned empty content."}
-
-        content = clean_ai_json(content)
-
-        try:
-            data = json.loads(content)
-        except Exception as e:
-            return {"error": True, "message": "AI returned invalid JSON: " + str(e), "raw_response": content}
+            data = _chat_json(client, model_name, max_tokens, messages)
+        except Exception as api_error:
+            frappe.log_error(frappe.get_traceback(), "Weighbridge AI API Error")
+            return {"error": True, "message": str(api_error)}
 
         required_fields = ["gross_weight", "tare_weight", "net_weight", "ticket_no", "vehicle_no", "bag_count"]
         for field in required_fields:
