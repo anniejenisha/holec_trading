@@ -370,7 +370,7 @@ function renderNewCustomer(container) {
     const MAX_FILE_MB = 10;
     const DEFAULT_GROUP = 'Holec Trading';       // hidden backend default
     const DEFAULT_TERRITORY = 'All Territories'; // hidden backend default
-    const CUSTOMER_ID_FIELD = 'custom_customer_id'; // Data field on Customer (create it, mark Unique)
+    const CUSTOMER_ID_FIELD = 'alias'; // Data field on Customer (create it, mark Unique)
 
     const KRA_REGEX = /^[AP]\d{9}[A-Z]$/;        // rule 2: A or P + 9 digits + 1 letter
     const PHONE_REGEX = /^(?:\+?254|0)[17]\d{8}$/;
