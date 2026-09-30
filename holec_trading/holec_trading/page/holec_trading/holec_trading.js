@@ -2105,103 +2105,215 @@ function renderNewCustomer(container) {
         });
     }
 
-    async function renderPaymentsList(container) {
-        let paymentEntries = [];
-        let pendingTickets = [];
+    // ============================================================
+// PAY TRANSPORTER - UI changes for holec_trading.js
+// (all of this lives inside init_holec_trading_engine())
+// ============================================================
 
-        try {
-            [paymentEntries, pendingTickets] = await Promise.all([
-                frappe.db.get_list('Payment Entry', {
-                    fields: ['name', 'party', 'party_type', 'paid_amount', 'mode_of_payment', 'docstatus', 'creation'],
-                    order_by: 'creation desc',
-                    limit: 50
-                }),
-                frappe.db.get_list('Buy Ticket', {
-                    filters: [['status', 'in', ['Position', 'Invoiced', 'Settled']]],
-                    fields: ['name', 'transporter', 'haulage_kes', 'cess_kes', 'status'],
-                    limit: 50
-                })
-            ]);
-        } catch (e) {
-            console.error('Error fetching payment data:', e);
-        }
+// ---- 1. loadMasterData(): add 'transport_paid' to the Buy Ticket fields list ----
+//   'sell_rate', 'invoice_number', 'transport_paid'
 
-        const transporterRows = (pendingTickets || []).filter(t => flt(t.haulage_kes) > 0).map(t => `
-            <tr style="border-bottom:1px solid #edf2f7;">
-                <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${t.name}</td>
-                <td style="padding:12px 16px;color:#2d3748;">${t.transporter || 'Rift Valley Logistics (Transport)'}</td>
-                <td style="padding:12px 16px;color:#2d3748;">KES ${flt(t.haulage_kes).toLocaleString('en-KE')}</td>
-                <td style="padding:12px 16px;color:#2d3748;">KES ${flt(t.cess_kes).toLocaleString('en-KE')}</td>
-                <td style="padding:12px 16px;text-align:right;">
-                    <button class="h-btn sm primary pay-transporter-btn" data-id="${t.name}" style="background:#1a202c;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">Pay Transporter</button>
-                </td>
-            </tr>
-        `).join('');
+// ---- 2. REPLACE renderPaymentsList with this ----
+async function renderPaymentsList(container) {
+    let paymentEntries = [];
+    let transportTickets = [];
 
-        const historyRows = (paymentEntries || []).map(pe => `
-            <tr style="border-bottom:1px solid #edf2f7;">
-                <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${pe.name}</td>
-                <td style="padding:12px 16px;color:#2d3748;">${pe.party || '—'}</td>
-                <td style="padding:12px 16px;color:#718096;">${pe.party_type || 'Customer'}</td>
-                <td style="padding:12px 16px;color:#2d3748;font-weight:500;">KES ${flt(pe.paid_amount).toLocaleString('en-KE')}</td>
-                <td style="padding:12px 16px;color:#718096;">${pe.mode_of_payment || 'Bank Transfer'}</td>
-                <td style="padding:12px 16px;"><span style="display:inline-flex;align-items:center;gap:6px;background:#f0fff4;color:#276749;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:#38a169;border-radius:50%;"></span>Completed</span></td>
-            </tr>
-        `).join('');
-
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
-            </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Payments <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${(paymentEntries || []).length}</span></h1>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYABLE TO TRANSPORTERS</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead>
-                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                            <th style="padding:12px 16px;">Ticket</th>
-                            <th style="padding:12px 16px;">Transporter</th>
-                            <th style="padding:12px 16px;">Haulage</th>
-                            <th style="padding:12px 16px;">Cess</th>
-                            <th style="padding:12px 16px;text-align:right;">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${transporterRows || `<tr><td colspan="5" style="padding:20px;text-align:center;color:#718096;">No pending transporter payments.</td></tr>`}
-                    </tbody>
-                </table>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead>
-                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                            <th style="padding:12px 16px;">ID</th>
-                            <th style="padding:12px 16px;">Party</th>
-                            <th style="padding:12px 16px;">Type</th>
-                            <th style="padding:12px 16px;">Amount</th>
-                            <th style="padding:12px 16px;">Rail</th>
-                            <th style="padding:12px 16px;">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${historyRows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No payment history found.</td></tr>`}
-                    </tbody>
-                </table>
-            </div>
-        `;
-
-        container.querySelectorAll('.pay-transporter-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                navigate('payments_form', { id: btn.dataset.id });
-            });
-        });
+    try {
+        [paymentEntries, transportTickets] = await Promise.all([
+            frappe.db.get_list('Payment Entry', {
+                fields: ['name', 'party', 'party_type', 'paid_amount', 'mode_of_payment', 'docstatus', 'creation'],
+                order_by: 'creation desc',
+                limit: 50
+            }),
+            frappe.db.get_list('Buy Ticket', {
+                filters: [
+                    ['transporter', 'is', 'set'],          // has a transporter
+                    ['transport_paid', '=', 0],            // not paid yet
+                    ['status', 'in', ['Position', 'Invoiced', 'Settled']]
+                ],
+                fields: ['name', 'transporter', 'haulage_kes', 'cess_kes', 'status'],
+                order_by: 'creation desc',
+                limit: 100
+            })
+        ]);
+    } catch (e) {
+        console.error('Error fetching payment data:', e);
     }
+
+    // Only tickets with haulage or cess to pay
+    const dueTickets = (transportTickets || []).filter(t => flt(t.haulage_kes) > 0 || flt(t.cess_kes) > 0);
+
+    const transporterRows = dueTickets.map(t => `
+        <tr style="border-bottom:1px solid #edf2f7;">
+            <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${t.name}</td>
+            <td style="padding:12px 16px;color:#2d3748;">${t.transporter}</td>
+            <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.haulage_kes)}</td>
+            <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.cess_kes)}</td>
+            <td style="padding:12px 16px;text-align:right;">
+                <button class="h-btn sm primary pay-transporter-btn" data-id="${t.name}" style="background:#1a202c;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">Pay Transporter</button>
+            </td>
+        </tr>
+    `).join('');
+
+    const historyRows = (paymentEntries || []).map(pe => `
+        <tr style="border-bottom:1px solid #edf2f7;">
+            <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${pe.name}</td>
+            <td style="padding:12px 16px;color:#2d3748;">${pe.party || '—'}</td>
+            <td style="padding:12px 16px;color:#718096;">${pe.party_type || 'Customer'}</td>
+            <td style="padding:12px 16px;color:#2d3748;font-weight:500;">KES ${flt(pe.paid_amount).toLocaleString('en-KE')}</td>
+            <td style="padding:12px 16px;color:#718096;">${pe.mode_of_payment || '—'}</td>
+            <td style="padding:12px 16px;"><span style="display:inline-flex;align-items:center;gap:6px;background:#f0fff4;color:#276749;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:#38a169;border-radius:50%;"></span>Completed</span></td>
+        </tr>
+    `).join('');
+
+    container.innerHTML = `
+        <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+            <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Payments <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${(paymentEntries || []).length}</span></h1>
+        </div>
+
+        <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYABLE TO TRANSPORTERS</div>
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                        <th style="padding:12px 16px;">Ticket</th>
+                        <th style="padding:12px 16px;">Transporter</th>
+                        <th style="padding:12px 16px;">Haulage</th>
+                        <th style="padding:12px 16px;">Cess</th>
+                        <th style="padding:12px 16px;text-align:right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${transporterRows || `<tr><td colspan="5" style="padding:20px;text-align:center;color:#718096;">No pending transporter payments.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+
+        <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY</div>
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                        <th style="padding:12px 16px;">ID</th>
+                        <th style="padding:12px 16px;">Party</th>
+                        <th style="padding:12px 16px;">Type</th>
+                        <th style="padding:12px 16px;">Amount</th>
+                        <th style="padding:12px 16px;">Rail</th>
+                        <th style="padding:12px 16px;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${historyRows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No payment history found.</td></tr>`}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.querySelectorAll('.pay-transporter-btn').forEach(btn => {
+        btn.addEventListener('click', () => navigate('payments_form', { id: btn.dataset.id }));
+    });
+}
+
+// ---- 3. ADD this new screen (the page the "Pay Transporter" button opens) ----
+async function renderPayTransporter(container, params) {
+    const l = LIVE_STORE.lots.find(x => x.name === params.id);
+    if (!l) return navigate('payments_list');
+
+    const haulage = flt(l.haulage_kes);
+    const cess = flt(l.cess_kes);
+    const amount = haulage + cess;
+
+    // Same condition as the list: transporter set, not paid, haulage or cess > 0
+    if (!l.transporter || cint(l.transport_paid) || amount <= 0) {
+        showToast('Nothing payable to a transporter for this ticket.', 'orange');
+        return navigate('payments_list');
+    }
+
+    const transporter = (LIVE_STORE.suppliers || []).find(s => s.name === l.transporter);
+    const transporterLabel = transporter && transporter.supplier_name ? `${transporter.supplier_name} (${l.transporter})` : l.transporter;
+
+    let modeOfPayments = ['Bank Transfer', 'Pesalink', 'Mpesa'];
+    try {
+        const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], order_by: 'name asc', limit: 50 });
+        if (mopList && mopList.length) modeOfPayments = mopList.map(m => m.name);
+    } catch (e) {
+        console.error('Error fetching Mode of Payment:', e);
+    }
+
+    const readonlyBox = (label, value, bold) => `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <label style="font-size:13px;font-weight:500;color:#4a5568;">${label}</label>
+            <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:${bold ? '700' : '500'};">${value}</div>
+        </div>`;
+
+    container.innerHTML = `
+        <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+            <span>Holec Trading</span> › <span>Finance</span> › <a href="#" id="back-payments-link" style="color:#3182ce;text-decoration:none;">Payments</a> › <span style="color:#2d3748;font-weight:500;">Pay transporter</span>
+        </div>
+
+        <div style="margin-bottom:20px;">
+            <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Pay transporter</h1>
+            <span style="font-size:13px;color:#718096;">${l.name} · ${transporterLabel}</span>
+        </div>
+
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport payment</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
+                ${readonlyBox('Haulage', fmtKES(haulage))}
+                ${readonlyBox('Cess', fmtKES(cess))}
+                ${readonlyBox('Total payable', fmtKES(amount), true)}
+                ${field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: modeOfPayments, value: modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '') })}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                ${field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)' })}
+                ${field({ label: 'Reference Date', id: 'f-tp-date', type: 'date', value: frappe.datetime.get_today() })}
+            </div>
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:center;">
+            <button class="h-btn primary" id="confirm-tp-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Confirm payment</button>
+            <button class="h-btn ghost" id="cancel-tp-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+        </div>
+    `;
+
+    document.getElementById('back-payments-link').addEventListener('click', (e) => { e.preventDefault(); navigate('payments_list'); });
+    document.getElementById('cancel-tp-btn').addEventListener('click', () => navigate('payments_list'));
+
+    document.getElementById('confirm-tp-btn').addEventListener('click', () => {
+        const rail = $('#f-tp-rail').val();
+        if (!rail) {
+            frappe.msgprint(__('Please select a Mode of Payment.'));
+            return;
+        }
+        const btn = $('#confirm-tp-btn').prop('disabled', true).text('Paying...');
+
+        frappe.call({
+            method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.pay_transporter',
+            args: {
+                ticket: l.name,
+                mode_of_payment: rail,
+                reference_no: ($('#f-tp-ref').val() || '').trim(),
+                reference_date: $('#f-tp-date').val() || frappe.datetime.get_today()
+            },
+            freeze: true,
+            freeze_message: 'Recording payment...',
+            callback: async (r) => {
+                if (r && r.message) {
+                    showToast(`${transporterLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
+                    await loadMasterData();
+                    navigate('payments_list');
+                } else {
+                    btn.prop('disabled', false).text('Confirm payment');
+                }
+            },
+            error: () => btn.prop('disabled', false).text('Confirm payment')
+        });
+    });
+}
 
     function renderTicketDetail(container, id) {
         const l = LIVE_STORE.lots.find(x => x.name === id);
@@ -3278,6 +3390,7 @@ function renderNewCustomer(container) {
         { id: 'sale_invoicing', group: 'TRADE', name: 'Sale & Invoicing', render: renderSaleInvoicing },
         { id: 'payments_list', group: 'FINANCE', name: 'Payments', render: renderPaymentsList },
         { id: 'payments', group: 'FINANCE', name: 'Record Payment', render: renderPayments },
+        { id: 'payments_form', group: 'FINANCE', name: 'Pay Transporter', render: renderPayTransporter },
         { id: 'ledger', group: 'INSIGHT', name: 'Cost Ledger & Margin', render: renderCostLedger },
         { id: 'reports', group: 'INSIGHT', name: 'Reports', render: renderReports },
         { id: 'event_log', group: 'INSIGHT', name: 'Trade event log', render: renderTradeEventLog }

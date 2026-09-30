@@ -644,3 +644,95 @@ def extract_weighbridge_data(filedata=None, file_url=None, slip_type="gross", ti
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Weighbridge AI Processing Error")
         return {"success": False, "message": "Weighbridge AI processing failed: " + str(e)}
+
+
+# Add to: apps/holec_trading/holec_trading/holec_trading/page/holec_trading/holec_trading.py
+# (imports at the top of that file: `import frappe` and `from frappe.utils import flt, nowdate` are already/also needed)
+
+import frappe
+from frappe.utils import flt, nowdate
+
+COMPANY = "Holec (E.A.) Limited"
+
+
+def _mode_of_payment_account(mode_of_payment, company):
+    return frappe.db.get_value(
+        "Mode of Payment Account",
+        {"parent": mode_of_payment, "company": company},
+        "default_account",
+    )
+
+
+@frappe.whitelist()
+def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=None):
+    """
+    Pays the transporter for one Buy Ticket (haulage + cess) and marks it paid.
+
+    Condition (same as the UI prototype): the ticket must have a transporter,
+    must not already be paid (transport_paid = 0) and must have haulage or cess > 0.
+    Everything runs in one request, so if any step fails nothing is saved.
+    """
+    from erpnext.accounts.party import get_party_account
+
+    frappe.has_permission("Payment Entry", "create", throw=True)
+
+    t = frappe.get_doc("Buy Ticket", ticket)
+
+    if not t.transporter:
+        frappe.throw("This ticket has no transporter.")
+    if frappe.utils.cint(t.get("transport_paid")):
+        frappe.throw(f"Transport for {t.name} is already paid.")
+
+    haulage = flt(t.get("haulage_kes"))
+    cess = flt(t.get("cess_kes"))
+    amount = haulage + cess
+    if amount <= 0:
+        frappe.throw("Haulage and cess are both zero - nothing to pay.")
+
+    if not mode_of_payment:
+        frappe.throw("Please select a Mode of Payment.")
+
+    # Money leaves this account (bank / cash of the chosen mode of payment)
+    paid_from = _mode_of_payment_account(mode_of_payment, COMPANY)
+    if not paid_from:
+        frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
+
+    # ...and reduces what we owe the transporter (the transporter's payable account)
+    paid_to = get_party_account("Supplier", t.transporter, COMPANY)
+    if not paid_to:
+        frappe.throw(f"No payable account found for transporter {t.transporter}.")
+
+    from_ccy = frappe.db.get_value("Account", paid_from, "account_currency")
+    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency")
+    if from_ccy != to_ccy:
+        frappe.throw(f"Currency mismatch: {paid_from} is in {from_ccy} but {paid_to} is in {to_ccy}.")
+
+    pe = frappe.get_doc({
+        "doctype": "Payment Entry",
+        "company": COMPANY,
+        "payment_type": "Pay",
+        "posting_date": nowdate(),
+        "party_type": "Supplier",
+        "party": t.transporter,
+        "mode_of_payment": mode_of_payment,
+        "paid_from": paid_from,
+        "paid_to": paid_to,
+        "paid_from_account_currency": from_ccy,
+        "paid_to_account_currency": to_ccy,
+        "paid_amount": amount,
+        "received_amount": amount,
+        "source_exchange_rate": 1,
+        "target_exchange_rate": 1,
+        # mandatory when the paid-from account is a Bank account
+        "reference_no": (reference_no or "").strip() or t.name,
+        "reference_date": reference_date or nowdate(),
+        "custom_buy_ticket": t.name,
+        "remarks": f"Transport payment for Buy Ticket {t.name}: haulage {haulage:,.0f} + cess {cess:,.0f}",
+    })
+    pe.insert()
+    pe.submit()
+
+    t.db_set("transport_paid", 1)
+    t.db_set("transport_payment_entry", pe.name)
+
+    return {"payment_entry": pe.name, "amount": amount, "transporter": t.transporter}
