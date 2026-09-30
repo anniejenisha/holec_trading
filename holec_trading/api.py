@@ -324,9 +324,18 @@ def im_bank_callback():
     return {"resultCode": 0, "resultDesc": "Received"}
 
 
+import json
+
+import frappe
+
+
 @frappe.whitelist(allow_guest=True)
 def validate_customer():
-    """Check whether a customer exists for a given customerRef (alias)."""
+    """Check whether a customer exists for a given customerRef (alias).
+
+    Expected request body:
+        {"customerRef": "C1012"}
+    """
     try:
         raw_body = frappe.request.get_data(as_text=True)
         try:
@@ -337,8 +346,8 @@ def validate_customer():
         if not isinstance(data, dict):
             return {"resultCode": 1, "resultDesc": "Request body must be a JSON object"}
 
-        additions = data.get("additions") or {}
-        customer_ref = data.get("customerRef") or additions.get("customerRef")
+        customer_ref = data.get("customerRef")
+        customer_ref = str(customer_ref).strip() if customer_ref is not None else ""
 
         if not customer_ref:
             return {"resultCode": 1, "resultDesc": "customerRef is required"}
