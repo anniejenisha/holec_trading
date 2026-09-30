@@ -848,7 +848,7 @@ function renderNewCustomer(container) {
             custom_aflatoxin_max: flt(afla),
             // Draft: not usable for invoicing until Finance approves -> Active
             custom_approval_status: 'Draft',
-            disabled: 1,
+            disabled: 0,
             holec_delivery_points: state.deliveryPoints.map(d => ({
                 delivery_point_name: str(d.name),
                 location: str(d.address)
