@@ -322,3 +322,45 @@ def im_bank_callback():
 
     frappe.db.commit()
     return {"resultCode": 0, "resultDesc": "Received"}
+
+
+@frappe.whitelist(allow_guest=True)
+def validate_customer():
+    """Check whether a customer exists for a given customerRef (alias)."""
+    try:
+        raw_body = frappe.request.get_data(as_text=True)
+        try:
+            data = json.loads(raw_body) if raw_body else dict(frappe.local.form_dict)
+        except (ValueError, TypeError):
+            return {"resultCode": 1, "resultDesc": "Request body is not valid JSON"}
+
+        if not isinstance(data, dict):
+            return {"resultCode": 1, "resultDesc": "Request body must be a JSON object"}
+
+        additions = data.get("additions") or {}
+        customer_ref = data.get("customerRef") or additions.get("customerRef")
+
+        if not customer_ref:
+            return {"resultCode": 1, "resultDesc": "customerRef is required"}
+
+        matches = frappe.get_all(
+            "Customer",
+            filters={"alias": customer_ref, "disabled": 0},
+            fields=["name", "customer_name"],
+            limit_page_length=2,
+        )
+
+        if not matches:
+            return {"resultCode": 1, "resultDesc": f"Customer not found for ref '{customer_ref}'"}
+        if len(matches) > 1:
+            return {"resultCode": 1, "resultDesc": f"Multiple customers share ref '{customer_ref}'"}
+
+        return {
+            "resultCode": 0,
+            "resultDesc": "Customer found",
+            "customerName": matches[0].customer_name,
+        }
+
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Treasury Customer Validation Error")
+        return {"resultCode": 1, "resultDesc": "Internal error"}
