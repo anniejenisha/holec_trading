@@ -356,6 +356,11 @@ function init_holec_trading_engine() {
 // Paste inside init_holec_trading_engine(), in place of the old function.
 // Uses existing helpers: showToast(), navigate(), loadMasterData(), flt(), cint()
 // =====================================================================
+// =====================================================================
+// Holec ERP - NEW CUSTOMER (full replacement for renderNewCustomer)
+// Paste inside init_holec_trading_engine(), in place of the old function.
+// Uses existing helpers: showToast(), navigate(), loadMasterData(), flt()
+// =====================================================================
 function renderNewCustomer(container) {
     // ---------- CONFIG ----------
     const KRA_LOOKUP_ENABLED = false;   // flip to true once GavaConnect API access exists (rule 4)
@@ -365,6 +370,7 @@ function renderNewCustomer(container) {
     const MAX_FILE_MB = 10;
     const DEFAULT_GROUP = 'Holec Trading';       // hidden backend default
     const DEFAULT_TERRITORY = 'All Territories'; // hidden backend default
+    const CUSTOMER_ID_FIELD = 'custom_customer_id'; // Data field on Customer (create it, mark Unique)
 
     const KRA_REGEX = /^[AP]\d{9}[A-Z]$/;        // rule 2: A or P + 9 digits + 1 letter
     const PHONE_REGEX = /^(?:\+?254|0)[17]\d{8}$/;
@@ -392,6 +398,7 @@ function renderNewCustomer(container) {
     const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
     const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
     const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const str = (v) => (v == null ? '' : String(v).trim());   // always a plain string
 
     const fld = ({ label, id, required, optional, type = 'text', value = '', placeholder = '', hint = '', step, readonly }) => `
         <div style="display:flex;flex-direction:column;gap:8px;">
@@ -449,8 +456,7 @@ function renderNewCustomer(container) {
         <!-- 2. CUSTOMER DETAILS -->
         <div style="${CARD}">
             <div style="${SECTION}margin-bottom:16px;">CUSTOMER DETAILS</div>
-            
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
                 ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Enter customer ID' })}
                 ${fld({ label: 'Customer Name', id: 'nc-name', required: true, placeholder: 'Enter customer name' })}
                 ${dropzone('nc-cr12', 'Business Registration / CR12', false)}
@@ -590,8 +596,8 @@ function renderNewCustomer(container) {
 
     // ---------- KRA CERTIFICATE UPLOAD -> OCR ----------
     function applyKraResult(r) {
-        const pin = String(r.pin || '').toUpperCase().trim();
-        const regName = String(r.name || '').trim();
+        const pin = str(r.pin).toUpperCase();
+        const regName = str(r.name);
         $('#nc-pin').val(pin);
         $('#nc-regname').val(regName);
         if (regName && !state.nameTouched) $('#nc-name').val(regName);   // prefill, still editable
@@ -616,14 +622,17 @@ function renderNewCustomer(container) {
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_details',
                 args: { filedata: ev.target.result, filename: file.name },
+                silent: true,
                 freeze: true,
                 freeze_message: 'Reading KRA certificate...',
                 callback: (r) => {
-                    if (r && r.message && (r.message.pin || r.message.name)) {
-                        applyKraResult(r.message);
+                    const m = r && r.message;
+                    if (m && (m.pin || m.name)) {
+                        applyKraResult(m);
                     } else {
                         setPinStatus('Manual');   // OCR failed -> manual entry
-                        showToast('Could not read the certificate. Enter the PIN and name manually.', 'orange');
+                        showToast(`Could not read the certificate${m && m.error ? ': ' + m.error : ''}. Enter the PIN and name manually.`, 'orange');
+                        console.error('KRA extract result:', m);
                     }
                 },
                 error: () => {
@@ -720,6 +729,22 @@ function renderNewCustomer(container) {
         return p;
     };
 
+    // Returns the names of any fields whose value is an object (not string/number).
+    // Frappe throws "dict can not be used as parameter" (HTTP 500) for those.
+    function findObjectFields(doc) {
+        const bad = [];
+        Object.entries(doc).forEach(([k, v]) => {
+            if (Array.isArray(v)) {
+                v.forEach((row, i) => Object.entries(row).forEach(([ck, cv]) => {
+                    if (cv && typeof cv === 'object') bad.push(`${k}[${i + 1}].${ck}`);
+                }));
+            } else if (v && typeof v === 'object') {
+                bad.push(k);
+            }
+        });
+        return bad;
+    }
+
     async function uploadToDoc(file, docname, fieldname) {
         const fd = new FormData();
         fd.append('file', file, file.name);
@@ -739,16 +764,15 @@ function renderNewCustomer(container) {
     // ---------- SAVE AS DRAFT ----------
     document.getElementById('nc-save-btn').addEventListener('click', async () => {
         const errors = [];
-        const id = ($('#nc-id').val() || '').trim();
-        const name = ($('#nc-name').val() || '').trim();
-        const pin = ($('#nc-pin').val() || '').toUpperCase().trim();
-        const regName = ($('#nc-regname').val() || '').trim();
-        const terms = $('#nc-terms').val();
-        const offload = $('#nc-offload').val();
-        const moist = $('#nc-moist').val();
-        const fm = $('#nc-fm').val();
-        const afla = $('#nc-afla').val();
-        const bussiness = state.crFile
+        const customerId = str($('#nc-id').val());
+        const name = str($('#nc-name').val());
+        const pin = str($('#nc-pin').val()).toUpperCase();
+        const regName = str($('#nc-regname').val());
+        const terms = str($('#nc-terms').val());
+        const offload = str($('#nc-offload').val());
+        const moist = str($('#nc-moist').val());
+        const fm = str($('#nc-fm').val());
+        const afla = str($('#nc-afla').val());
 
         // 1. KRA
         if (!state.kraFile) errors.push('KRA PIN Certificate is required.');
@@ -758,11 +782,18 @@ function renderNewCustomer(container) {
         if (!regName) errors.push('Registered Name (per KRA) is required.');
 
         // 2. Customer details
+        if (!customerId) errors.push('Customer ID is required.');
+        else {
+            try {
+                const dupId = await frappe.db.get_list('Customer', { filters: { [CUSTOMER_ID_FIELD]: customerId }, fields: ['name'], limit: 1 });
+                if (dupId && dupId.length) errors.push(`Customer ID ${customerId} already exists.`);
+            } catch (e) { console.warn('Customer ID duplicate check skipped (field missing?)', e); }
+        }
         if (!name) errors.push('Customer Name is required.');
-        if(!id) errors.push('Customer ID is Required')
+
         // 3. Delivery points
         state.deliveryPoints.forEach((d, i) => {
-            if (!d.name.trim() || !d.address.trim()) errors.push(`Delivery point ${i + 1}: name and location are required.`);
+            if (!str(d.name) || !str(d.address)) errors.push(`Delivery point ${i + 1}: name and location are required.`);
         });
 
         // 4. Contacts
@@ -770,14 +801,14 @@ function renderNewCustomer(container) {
         if (state.contacts.filter(c => c.is_primary).length !== 1) errors.push('Exactly one contact must be marked Primary.');
         state.contacts.forEach((c, i) => {
             const n = i + 1;
-            if (!c.name.trim()) errors.push(`Contact ${n}: Name is required.`);
-            if (!c.phone.trim()) errors.push(`Contact ${n}: Phone is required.`);
+            if (!str(c.name)) errors.push(`Contact ${n}: Name is required.`);
+            if (!str(c.phone)) errors.push(`Contact ${n}: Phone is required.`);
             else if (!PHONE_REGEX.test(cleanPhone(c.phone))) errors.push(`Contact ${n}: Phone must be a valid Kenyan number.`);
             if (!c.same_as_wa) {
-                if (!c.whatsapp.trim()) errors.push(`Contact ${n}: WhatsApp number is required when "Same as WA" is unticked.`);
+                if (!str(c.whatsapp)) errors.push(`Contact ${n}: WhatsApp number is required when "Same as WA" is unticked.`);
                 else if (!PHONE_REGEX.test(cleanPhone(c.whatsapp))) errors.push(`Contact ${n}: WhatsApp must be a valid Kenyan number.`);
             }
-            if (c.email.trim() && !EMAIL_REGEX.test(c.email.trim())) errors.push(`Contact ${n}: Email format is invalid.`);
+            if (str(c.email) && !EMAIL_REGEX.test(str(c.email))) errors.push(`Contact ${n}: Email format is invalid.`);
         });
 
         // 5. Commercial terms
@@ -794,47 +825,61 @@ function renderNewCustomer(container) {
             return;
         }
 
+        // ---- Build payload: every value is a plain string / number ----
+        const payload = {
+            doctype: 'Customer',
+            customer_name: name,
+            customer_type: 'Company',
+            [CUSTOMER_ID_FIELD]: customerId,
+            // hidden backend defaults
+            customer_group: DEFAULT_GROUP,
+            territory: DEFAULT_TERRITORY,
+            custom_vat_registered: 0,
+            // KRA
+            tax_id: pin,
+            custom_kra_registered_name: regName,
+            custom_kra_pin_status: str(state.pinStatus) || 'Manual',
+            // commercial terms
+            payment_terms: terms,
+            custom_offloading_borne_by: offload,
+            // quality spec (applies to future lots only)
+            custom_moisture_max: flt(moist),
+            custom_foreign_matter_max: flt(fm),
+            custom_aflatoxin_max: flt(afla),
+            // Draft: not usable for invoicing until Finance approves -> Active
+            custom_approval_status: 'Draft',
+            disabled: 1,
+            holec_delivery_points: state.deliveryPoints.map(d => ({
+                delivery_point_name: str(d.name),
+                location: str(d.address)
+            })),
+            holec_contacts: state.contacts.map(c => ({
+                contact_name: str(c.name),
+                role: str(c.role),
+                phone: toIntl(c.phone),
+                same_as_wa: c.same_as_wa ? 1 : 0,
+                whatsapp_number: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
+                email_id: str(c.email),
+                is_primary: c.is_primary ? 1 : 0
+            }))
+        };
+
+        // Safety net: stop and name the field instead of a blind 500 error
+        const badFields = findObjectFields(payload);
+        if (badFields.length) {
+            console.error('Object values found in payload:', badFields, payload);
+            frappe.msgprint({ title: __('Invalid value'), indicator: 'red', message: 'These fields contain an object instead of text/number: <b>' + badFields.map(esc).join(', ') + '</b>' });
+            return;
+        }
+        console.log('Customer payload:', JSON.stringify(payload, null, 2));
+
         const btn = $('#nc-save-btn').prop('disabled', true).text('Saving...');
         try {
-            const doc = await frappe.db.insert({
-                doctype: 'Customer',
-                alias:id,
-                customer_name: name,
-                customer_type: 'Company',
-                // hidden backend defaults
-                customer_group: DEFAULT_GROUP,
-                territory: DEFAULT_TERRITORY,
-                custom_vat_registered: 0,
-                // KRA
-                custom_kra_pin_certificate: state.kraFile,
-                custom_kra_pin: pin,
-                custom_registered_name_per_kra: regName,
-                custom_business_registration:bussiness,
-                // commercial terms
-                payment_terms: terms,
-                custom_offloading_borne_by: offload,
-                // quality spec (applies to future lots only)
-                custom_moisture_max: flt(moist),
-                custom_foreign_matter_max: flt(fm),
-                custom_aflatoxin_max: flt(afla),
-                // Draft: not usable for invoicing until Finance approves -> Active
-                custom_approval_status: 'Draft',
-                disabled: 0,
-                holec_delivery_points: state.deliveryPoints.map(d => ({ delivery_point_name: d.name.trim(), location: d.address.trim() })),
-                custom_holec_contacts: state.contacts.map(c => ({
-                    contact_name: c.name.trim(),
-                    role: c.role.trim(),
-                    phone: toIntl(c.phone),
-                    same_as_wa: c.same_as_wa ? 1 : 0,
-                    whatsapp_number: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
-                    email_id: c.email.trim(),
-                    is_primary: c.is_primary ? 1 : 0
-                }))
-            });
+            const doc = await frappe.db.insert(payload);
 
             if (doc) {
                 try {
-                    if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_pin_certificate');
+                    if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_certificate');
                     if (state.crFile) await uploadToDoc(state.crFile, doc.name, 'custom_business_registration');
                 } catch (upErr) {
                     console.error(upErr);
@@ -846,7 +891,7 @@ function renderNewCustomer(container) {
             }
         } catch (err) {
             console.error('Error creating customer document:', err);
-            showToast('Failed to create customer', 'red');
+            showToast('Failed to create customer. Check Error Log / browser console.', 'red');
             btn.prop('disabled', false).text('Save as Draft');
         }
     });
