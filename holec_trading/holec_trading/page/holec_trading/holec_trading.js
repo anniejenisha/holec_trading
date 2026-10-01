@@ -27,8 +27,14 @@ frappe.pages['holec_trading'].on_page_load = function (wrapper) {
 function init_holec_trading_engine() {
     const fmtKES = (n) => 'KES ' + Math.round(flt(n)).toLocaleString('en-KE');
     const fmtKg = (n) => Math.round(flt(n)).toLocaleString('en-KE') + ' kg';
+    const fmtKg1 = (n) => flt(n).toLocaleString('en-KE', { maximumFractionDigits: 1 }) + ' kg';
 
     const STAGE_ORDER = ['Ticket', 'Intake', 'Lot', 'Position', 'Invoiced', 'Settled'];
+    const COMPANY = 'Holec (E.A.) Limited';
+
+    const BTN_PRIMARY = 'background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
+    const BTN_GHOST = 'background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
+    const CARD_BOX = 'background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;';
 
     const LIVE_STORE = {
         suppliers: [],
@@ -43,53 +49,85 @@ function init_holec_trading_engine() {
         bank_branches: [],
         origin_area: [],
         origin_county: [],
-        branch:[]
+        branch: []
     };
 
     let route = { module: 'lots', params: {} };
 
-    function computePayable(lot) {
+    // =====================================================================
+    // BUSINESS RULES - change here, not in the screens
+    // =====================================================================
+    const PAYABLE_RULES = {
+        moistureStandard: 13.5,   // % moisture the price is based on
+        fmAllowance: 0.5,         // % foreign matter tolerated before any deduction
+        fmFactor: 1.5,            // each 1% FM above the allowance removes 1.5% of weight
+        defaultRate: 48           // KES/kg when the ticket has no negotiated price
+    };
+
+    // Supplier side: net weight x reference rate
+    function computePayable(lot, rateOverride) {
+        const R = PAYABLE_RULES;
         const grossKg = flt(lot.gross_weight_kg || lot.quantity_kg || 0);
         const tareKg = flt(lot.tare_weight_kg || 0);
         const netKg = Math.max(0, grossKg - tareKg);
         const moisture = flt(lot.moisture_ || 0);
         const fm = flt(lot.foreign_matter_ || 0);
-        const standardMoisture = 13.5;
-        let moisturePenaltyPct = 0;
 
-        if (moisture > 20) {
-            moisturePenaltyPct = (moisture - standardMoisture) * 1.6;
-        } else if (moisture > 14) {
-            moisturePenaltyPct = (moisture - standardMoisture) * 1.2;
-        } else if (moisture > standardMoisture) {
-            moisturePenaltyPct = (moisture - standardMoisture);
-        }
-
+        // Moisture: points over standard x a multiplier that grows with wetness
+        const moistureExcess = Math.max(0, moisture - R.moistureStandard);
+        let moistureMultiplier = 0;
+        if (moisture > 20) moistureMultiplier = 1.6;
+        else if (moisture > 14) moistureMultiplier = 1.2;
+        else if (moisture > R.moistureStandard) moistureMultiplier = 1.0;
+        const moisturePenaltyPct = moistureExcess * moistureMultiplier;
         const moistureDeductionKg = netKg * (moisturePenaltyPct / 100);
-        const fmDeductionKg = netKg * (Math.max(0, fm - 0.5) / 100) * 1.5;
+
+        // Foreign matter: only the part above the allowance counts, times the factor
+        const fmExcess = Math.max(0, fm - R.fmAllowance);
+        const fmPenaltyPct = fmExcess * R.fmFactor;
+        const fmDeductionKg = netKg * (fmPenaltyPct / 100);
+
+        // Stock quantity after deductions (does NOT change the amount paid)
         const acceptedNetKg = Math.max(0, netKg - moistureDeductionKg - fmDeductionKg);
 
-        const refRate = flt(lot.negotiated_price || 48);
-        const grossValue = acceptedNetKg * refRate;
+        const refRate = flt(rateOverride != null ? rateOverride : (lot.negotiated_price || R.defaultRate));
         const bags = cint(lot.bag_count || 0);
-        const baggingDeduction = bags * 25;
-        const aflatoxinTestFee = flt(lot.aflatoxin_ppb) > 0 ? 300 : 0;
-        
-        const haulage = flt(lot.haulage_kes || 0);
-        const cess = flt(lot.cess_kes || 0);
-        const offloading = flt(lot.offloading_kes || 0);
-        const totalTransport = haulage + cess + offloading;
 
-        const netPayable = Math.max(0, grossValue - baggingDeduction - aflatoxinTestFee);
-        const landedCostPerKg = acceptedNetKg > 0 ? Math.round((netPayable + totalTransport) / acceptedNetKg) : refRate;
+        // Net payable = net weight (gross - tare) x reference rate
+        const grossValue = netKg * refRate;
+        const netPayable = grossValue;
 
-        return { acceptedNetKg, netPayable, landedCostPerKg, totalTransport };
+        const totalTransport = flt(lot.haulage_kes) + flt(lot.cess_kes) + flt(lot.offloading_kes);
+        const landedCostPerKg = netKg > 0 ? Math.round((netPayable + totalTransport) / netKg) : refRate;
+
+        return {
+            grossKg, tareKg, netKg, moisture, fm, bags,
+            moistureExcess, moistureMultiplier, moisturePenaltyPct, moistureDeductionKg,
+            fmExcess, fmPenaltyPct, fmDeductionKg,
+            acceptedNetKg, refRate, grossValue,
+            netPayable, totalTransport, landedCostPerKg
+        };
     }
 
-    function showToast(msg, indicator = 'green') { 
-        frappe.show_alert({ message: msg, indicator: indicator }); 
+    // One place for revenue / landed cost / margin so every screen agrees
+    function computeMargin(lot, sellRateOverride) {
+        const p = computePayable(lot);
+        const buyKg = p.netKg;   // supplier weighbridge: gross - tare
+        // customer weighbridge: gross - tare (falls back to the saved delivered quantity)
+        const soldKg = Math.max(0, flt(lot.delivery_gross_kg) - flt(lot.delivery_tare_kg)) || flt(lot.delivered_quantity_kg);
+        const sellRate = flt(sellRateOverride != null ? sellRateOverride : lot.sell_rate);
+        const refRate = p.refRate;
+        const revenue = soldKg * sellRate;          // customer net weight x sell rate
+        const landedCost = buyKg * sellRate;         // supplier net weight x reference rate
+        const margin = revenue - landedCost;
+        const marginPerTonne = soldKg > 0 ? margin / (soldKg / 1000) : 0;
+        return { buyKg, soldKg, sellRate, refRate, revenue, landedCost, margin, marginPerTonne };
     }
-    
+
+    function showToast(msg, indicator = 'green') {
+        frappe.show_alert({ message: msg, indicator: indicator });
+    }
+
     function statusBadge(st) {
         const stateLower = (st || 'Ticket').toLowerCase();
         let bg = '#edf2f7';
@@ -98,9 +136,7 @@ function init_holec_trading_engine() {
 
         if (stateLower === 'intake') { bg = '#fffaf0'; color = '#9c4221'; dotColor = '#dd6b20'; }
         else if (stateLower === 'lot') { bg = '#ebf8ff'; color = '#2b6cb0'; dotColor = '#3182ce'; }
-        else if (stateLower === 'position') { bg = '#f0fff4'; color = '#276749'; dotColor = '#38a169'; }
-        else if (stateLower === 'invoiced') { bg = '#f0fff4'; color = '#276749'; dotColor = '#38a169'; }
-        else if (stateLower === 'settled') { bg = '#f0fff4'; color = '#276749'; dotColor = '#38a169'; }
+        else if (['position', 'invoiced', 'settled'].includes(stateLower)) { bg = '#f0fff4'; color = '#276749'; dotColor = '#38a169'; }
 
         return `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dotColor};border-radius:50%;"></span>${st || 'Ticket'}</span>`;
     }
@@ -110,7 +146,7 @@ function init_holec_trading_engine() {
         const reqMark = required ? '<span style="color:#e53e3e;margin-left:2px;">*</span>' : '';
         const cleanLabel = label.replace(/\s*\*$/, '');
         let input;
-        
+
         if (type === 'select') {
             const opts_html = (options || []).map(o => {
                 const val = typeof o === 'object' ? o.value : o;
@@ -128,21 +164,22 @@ function init_holec_trading_engine() {
 
     async function loadMasterData() {
         try {
-            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches,origin_area,origin_county,branch] = await Promise.all([
-                frappe.db.get_list('Supplier', { filters: { supplier_group: 'Holec Trading' }, fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'] }),
-                frappe.db.get_list('Customer', { filters: { customer_group: 'Holec Trading' }, 
-                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'], 
-                    limit: 100 
+            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
+                frappe.db.get_list('Supplier', { filters: { supplier_group: 'Holec Trading' }, fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'], limit: 500 }),
+                frappe.db.get_list('Customer', {
+                    filters: { customer_group: 'Holec Trading' },
+                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
+                    limit: 500
                 }),
-                frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc' }),
+                frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc', limit: 500 }),
                 frappe.db.get_list('Country', { fields: ['name', 'country_name'], limit: 250, order_by: 'name asc' }),
-                frappe.db.get_list('Item', { 
-                    filters: { item_group: 'Holec Trading' }, 
-                    fields: ['name', 'item_name', 'item_group'], 
-                    limit: 100, 
-                    order_by: 'item_name asc' 
+                frappe.db.get_list('Item', {
+                    filters: { item_group: 'Holec Trading' },
+                    fields: ['name', 'item_name', 'item_group'],
+                    limit: 500,
+                    order_by: 'item_name asc'
                 }),
-                frappe.db.get_list('Vehicle', { fields: ['name', 'license_plate'], order_by: 'name asc' }),
+                frappe.db.get_list('Vehicle', { fields: ['name', 'license_plate'], order_by: 'name asc', limit: 500 }),
                 frappe.db.get_list('Buy Ticket', {
                     fields: [
                         'name', 'status', 'supplier', 'customer', 'commodity', 'region',
@@ -152,7 +189,8 @@ function init_holec_trading_engine() {
                         'moisture_', 'foreign_matter_', 'aflatoxin_ppb',
                         'county', 'reason_code_if_foreign_matter_judgement_or_wet_buy',
                         'haulage_kes', 'cess_kes', 'offloading_kes', 'delivered_quantity_kg',
-                        'sell_rate', 'invoice_number'
+                        'sell_rate', 'invoice_number', 'delivery_gross_kg', 'delivery_tare_kg',
+                        'transport_paid'
                     ],
                     order_by: 'creation desc',
                     limit: 500
@@ -162,11 +200,11 @@ function init_holec_trading_engine() {
                     order_by: 'creation desc',
                     limit: 100
                 }).catch(() => []),
-                frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], order_by: 'name asc', limit: 500 }).catch(() => []),
                 frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => []),
-                frappe.db.get_list('Origin Area', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
-                frappe.db.get_list('Origin County', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
-                frappe.db.get_list('Bank Branch', { fields: ['name'], order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Origin Area', { fields: ['name'], order_by: 'name asc', limit: 500 }).catch(() => []),
+                frappe.db.get_list('Origin County', { fields: ['name'], order_by: 'name asc', limit: 500 }).catch(() => []),
+                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], order_by: 'name asc', limit: 500 }).catch(() => []),
             ]);
 
             LIVE_STORE.suppliers = suppliers || [];
@@ -187,12 +225,15 @@ function init_holec_trading_engine() {
         }
     }
 
-    window.navigate = function(moduleId, params = {}) {
+    window.navigate = function (moduleId, params = {}) {
         route = { module: moduleId, params };
         render();
         $('.holec-content').scrollTop(0);
-    }
+    };
 
+    // =====================================================================
+    // SUPPLIERS
+    // =====================================================================
     function renderSuppliers(container) {
         const searchTerm = container._searchQuery || '';
         const suppliers = (LIVE_STORE.suppliers || []).filter(s => {
@@ -232,7 +273,7 @@ function init_holec_trading_engine() {
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Parties</span> › <span style="color:#2d3748;font-weight:500;">Suppliers</span>
             </div>
-            
+
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Suppliers <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${suppliers.length}</span></h1>
                 <button class="h-btn primary" id="new-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New supplier</button>
@@ -249,7 +290,7 @@ function init_holec_trading_engine() {
                             <th style="padding:12px 20px;">ID ↕</th>
                             <th style="padding:12px 16px;">Name ↕</th>
                             <th style="padding:12px 16px;">Group ↕</th>
-                            <th style="padding:12px 16px;">County ↕</th>
+                            <th style="padding:12px 16px;">Country ↕</th>
                             <th style="padding:12px 16px;">KRA PIN</th>
                             <th style="padding:12px 20px;">Status</th>
                             <th style="padding:12px 20px;text-align:right;">Action</th>
@@ -274,6 +315,9 @@ function init_holec_trading_engine() {
         });
     }
 
+    // =====================================================================
+    // CUSTOMERS
+    // =====================================================================
     function renderCustomers(container) {
         const searchTerm = container._searchQuery || '';
         const customers = (LIVE_STORE.customers || []).filter(c => {
@@ -290,7 +334,7 @@ function init_holec_trading_engine() {
             const statusLabel = isDisabled ? 'Disabled' : 'Approved';
 
             const statusBadgeHtml = `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dotColor};border-radius:50%;"></span>${statusLabel}</span>`;
-            
+
             const creditLimitVal = (c.credit_limits && c.credit_limits.length > 0) ? c.credit_limits[0].credit_limit : 0;
             const creditLimitStr = creditLimitVal ? `KES ${flt(creditLimitVal).toLocaleString('en-KE')}` : '—';
 
@@ -312,7 +356,7 @@ function init_holec_trading_engine() {
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Parties</span> › <span style="color:#2d3748;font-weight:500;">Customers</span>
             </div>
-            
+
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Customers <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${customers.length}</span></h1>
                 <button class="h-btn primary" id="new-customer-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New customer</button>
@@ -343,7 +387,7 @@ function init_holec_trading_engine() {
         `;
 
         document.getElementById('new-customer-btn').addEventListener('click', () => navigate('new_customer'));
-        
+
         const searchInput = document.getElementById('customer-search-input');
         searchInput.addEventListener('input', (e) => {
             container._searchQuery = e.target.value;
@@ -355,550 +399,529 @@ function init_holec_trading_engine() {
     }
 
     // =====================================================================
-// Holec ERP - NEW CUSTOMER (replaces the existing renderNewCustomer)
-// Paste inside init_holec_trading_engine(), in place of the old function.
-// Uses existing helpers: showToast(), navigate(), loadMasterData(), flt(), cint()
-// =====================================================================
-// =====================================================================
-// Holec ERP - NEW CUSTOMER (full replacement for renderNewCustomer)
-// Paste inside init_holec_trading_engine(), in place of the old function.
-// Uses existing helpers: showToast(), navigate(), loadMasterData(), flt()
-// =====================================================================
-function renderNewCustomer(container) {
-    // ---------- CONFIG ----------
-    const KRA_LOOKUP_ENABLED = false;   // flip to true once GavaConnect API access exists (rule 4)
-    const MAX_DELIVERY_POINTS = 5;      // set to 1 if Holec wants strictly ONE delivery point
-    const MAX_CONTACTS = 3;
-    const OCR_MIN_CONFIDENCE = 0.8;     // below this -> PIN Status = Manual (rule 5)
-    const MAX_FILE_MB = 10;
-    const DEFAULT_GROUP = 'Holec Trading';       // hidden backend default
-    const DEFAULT_TERRITORY = 'All Territories'; // hidden backend default
-    const CUSTOMER_ID_FIELD = 'alias'; // Data field on Customer (create it, mark Unique)
+    // NEW CUSTOMER
+    // =====================================================================
+    function renderNewCustomer(container) {
+        // ---------- CONFIG ----------
+        const KRA_LOOKUP_ENABLED = false;   // flip to true once GavaConnect API access exists
+        const MAX_DELIVERY_POINTS = 5;      // set to 1 if Holec wants strictly ONE delivery point
+        const MAX_CONTACTS = 3;
+        const OCR_MIN_CONFIDENCE = 0.8;     // below this -> PIN Status = Manual
+        const MAX_FILE_MB = 10;
+        const DEFAULT_GROUP = 'Holec Trading';
+        const DEFAULT_TERRITORY = 'All Territories';
+        const CUSTOMER_ID_FIELD = 'alias';  // Data field on Customer (create it, mark Unique)
 
-    const KRA_REGEX = /^[AP]\d{9}[A-Z]$/;        // rule 2: A or P + 9 digits + 1 letter
-    const PHONE_REGEX = /^(?:\+?254|0)[17]\d{8}$/;
-    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const KRA_REGEX = /^[AP]\d{9}[A-Z]$/;
+        const PHONE_REGEX = /^(?:\+?254|0)[17]\d{8}$/;
+        const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    // ---------- STATE ----------
-    const state = {
-        kraFile: null,
-        crFile: null,
-        pinStatus: null,        // 'Verified' | 'Mismatch' | 'Manual' | null
-        nameTouched: false,     // true once user edits Customer Name manually
-        pinDuplicate: false,
-        deliveryPoints: [{ name: '', address: '' }],
-        contacts: [{ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: true }]
-    };
-
-    // ---------- STYLE HELPERS ----------
-    const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
-    const CELL_INPUT = 'width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;background:#fff;box-sizing:border-box;';
-    const CARD = 'background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;';
-    const SECTION = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;';
-    const HELP = 'font-size:12px;color:#718096;';
-    const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
-    const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
-    const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
-    const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
-    const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    const str = (v) => (v == null ? '' : String(v).trim());   // always a plain string
-
-    const fld = ({ label, id, required, optional, type = 'text', value = '', placeholder = '', hint = '', step, readonly }) => `
-        <div style="display:flex;flex-direction:column;gap:8px;">
-            <label for="${id}" style="${LABEL}">${label}${required ? req : ''}${optional ? opt : ''}</label>
-            <input type="${type}" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}"
-                ${step ? `step="${step}"` : ''} ${readonly ? 'readonly' : ''} style="${INPUT}${readonly ? 'background:#f7fafc;' : ''}">
-            ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
-        </div>`;
-
-    const selectFld = ({ label, id, required, options = [], hint = '' }) => `
-        <div style="display:flex;flex-direction:column;gap:8px;">
-            <label for="${id}" style="${LABEL}">${label}${required ? req : ''}</label>
-            <select id="${id}" style="${INPUT}">
-                <option value="">Select</option>
-                ${options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
-            </select>
-            ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
-        </div>`;
-
-    const dropzone = (id, label, required) => `
-        <div style="display:flex;flex-direction:column;gap:8px;">
-            <label style="${LABEL}">${label}${required ? req : opt}</label>
-            <div id="${id}-zone" style="display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid #a0b4c8;border-radius:8px;background:#f7fafc;cursor:pointer;">
-                <div style="width:32px;height:32px;border-radius:8px;background:#ebf8ff;color:#3182ce;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">↑</div>
-                <div style="flex:1;min-width:0;">
-                    <div id="${id}-title" style="font-weight:600;font-size:13px;color:#2d3748;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Choose a file to upload</div>
-                    <div style="font-size:11px;color:#718096;">PDF, JPG or PNG · up to ${MAX_FILE_MB} MB</div>
-                </div>
-                <span style="font-size:12px;color:#718096;">Browse</span>
-            </div>
-            <input type="file" id="${id}-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none;">
-        </div>`;
-
-    // ---------- LAYOUT ----------
-    container.innerHTML = `
-        <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-            <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">New customer</span>
-        </div>
-        <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New customer</h1>
-
-        <!-- 1. KRA VERIFICATION -->
-        <div style="${CARD}">
-            <div style="${SECTION}margin-bottom:16px;">KRA VERIFICATION</div>
-            <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', true)}</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true, hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
-                ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true })}
-                <div style="display:flex;flex-direction:column;gap:8px;">
-                    <label style="${LABEL}">PIN Status</label>
-                    <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 2. CUSTOMER DETAILS -->
-        <div style="${CARD}">
-            <div style="${SECTION}margin-bottom:16px;">CUSTOMER DETAILS</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Enter customer ID' })}
-                ${fld({ label: 'Customer Name', id: 'nc-name', required: true, placeholder: 'Enter customer name' })}
-                ${dropzone('nc-cr12', 'Business Registration / CR12', false)}
-            </div>
-        </div>
-
-        <!-- 3. DELIVERY POINTS -->
-        <div style="${CARD}">
-            <div style="${SECTION}margin-bottom:2px;">DELIVERY POINTS</div>
-            <div style="${HELP}margin-bottom:14px;" id="nc-dp-help"></div>
-            <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                        <th style="${TH}width:60px;">No.</th>
-                        <th style="${TH}">Delivery Point Name</th>
-                        <th style="${TH}">Location / Address</th>
-                        <th style="${TH}width:40px;"></th>
-                    </tr></thead>
-                    <tbody id="nc-dp-tbody"></tbody>
-                </table>
-            </div>
-            <button type="button" id="nc-dp-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
-        </div>
-
-        <!-- 4. CONTACT PERSONS -->
-        <div style="${CARD}">
-            <div style="${SECTION}margin-bottom:2px;">CONTACT PERSONS</div>
-            <div style="${HELP}margin-bottom:14px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
-            <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px;">
-                    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                        <th style="${TH}width:50px;">No.</th>
-                        <th style="${TH}">Name</th>
-                        <th style="${TH}">Role</th>
-                        <th style="${TH}">Phone</th>
-                        <th style="${TH}width:90px;text-align:center;">Same as WA</th>
-                        <th style="${TH}">WhatsApp</th>
-                        <th style="${TH}">Email</th>
-                        <th style="${TH}width:70px;text-align:center;">Primary</th>
-                        <th style="${TH}width:40px;"></th>
-                    </tr></thead>
-                    <tbody id="nc-ct-tbody"></tbody>
-                </table>
-            </div>
-            <button type="button" id="nc-ct-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
-        </div>
-
-        <!-- 5. COMMERCIAL TERMS -->
-        <div style="${CARD}">
-            <div style="${SECTION}margin-bottom:16px;">COMMERCIAL TERMS</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
-                ${selectFld({ label: 'Payment Terms', id: 'nc-terms', required: true, hint: 'Invoice due date = invoice date + payment terms.' })}
-                ${selectFld({ label: 'Offloading Borne By', id: 'nc-offload', required: true, options: [{ value: 'Holec', label: 'Holec' }, { value: 'Customer', label: 'Customer' }], hint: "Who pays the labour to unload at the customer's site." })}
-            </div>
-        </div>
-
-        <!-- 6. QUALITY SPEC -->
-        <div style="${CARD}">
-            <div style="${SECTION}margin-bottom:16px;">QUALITY SPEC</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                ${fld({ label: 'Moisture Max (%)', id: 'nc-moist', required: true, type: 'number', value: '13.5', step: '0.1' })}
-                ${fld({ label: 'Foreign Matter Max (%)', id: 'nc-fm', required: true, type: 'number', value: '2.0', step: '0.1' })}
-                ${fld({ label: 'Aflatoxin Max (ppb)', id: 'nc-afla', required: true, type: 'number', value: '10', step: '1' })}
-            </div>
-        </div>
-
-        <div style="display:flex;gap:12px;align-items:center;">
-            <button class="h-btn primary" id="nc-save-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Save as Draft</button>
-            <button class="h-btn ghost" id="nc-cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
-        </div>
-    `;
-
-    // ---------- NAV ----------
-    document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
-    document.getElementById('nc-cancel-btn').addEventListener('click', () => navigate('customers'));
-
-    // ---------- PAYMENT TERMS (ERPNext) ----------
-    // Customer.payment_terms links to "Payment Terms Template". Holec to confirm which list to expose.
-    frappe.db.get_list('Payment Terms Template', { fields: ['name'], order_by: 'name asc', limit: 100 })
-        .then(rows => {
-            $('#nc-terms').append((rows || []).map(r => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join(''));
-        })
-        .catch(() => showToast('Could not load Payment Terms', 'orange'));
-
-    // ---------- FILE PICKER ----------
-    function bindDropzone(id, onFile) {
-        const zone = document.getElementById(`${id}-zone`);
-        const input = document.getElementById(`${id}-input`);
-        zone.addEventListener('click', () => input.click());
-        input.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            if (!/\.(pdf|jpe?g|png)$/i.test(file.name)) { showToast('Only PDF, JPG or PNG files are allowed.', 'red'); input.value = ''; return; }
-            if (file.size > MAX_FILE_MB * 1024 * 1024) { showToast(`File must be ${MAX_FILE_MB} MB or less.`, 'red'); input.value = ''; return; }
-            $(`#${id}-title`).text(file.name).css('color', '#276749');
-            onFile(file);
-        });
-    }
-
-    // ---------- PIN STATUS ----------
-    function setPinStatus(status) {
-        state.pinStatus = status;
-        const map = {
-            Verified: ['#f0fff4', '#276749', '#38a169'],
-            Mismatch: ['#fff5f5', '#c53030', '#e53e3e'],
-            Manual:   ['#fffaf0', '#9c4221', '#dd6b20']
+        // ---------- STATE ----------
+        const state = {
+            kraFile: null,
+            crFile: null,
+            pinStatus: null,
+            nameTouched: false,
+            pinDuplicate: false,
+            deliveryPoints: [{ name: '', address: '' }],
+            contacts: [{ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: true }]
         };
-        const [bg, color, dot] = map[status] || ['#edf2f7', '#4a5568', '#a0aec0'];
-        $('#nc-pin-status').html(status
-            ? `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dot};border-radius:50%;"></span>${status}</span>`
-            : '<span style="color:#a0aec0;font-size:13px;">—</span>');
 
-        // KRA PIN (and name) editable only when Manual (rule 5)
-        const locked = status !== 'Manual';
-        $('#nc-pin, #nc-regname').prop('readonly', locked).css('background', locked ? '#f7fafc' : '#fff');
-    }
+        // ---------- STYLE HELPERS ----------
+        const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
+        const CELL_INPUT = 'width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;background:#fff;box-sizing:border-box;';
+        const CARD = CARD_BOX;
+        const SECTION = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;';
+        const HELP = 'font-size:12px;color:#718096;';
+        const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
+        const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
+        const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+        const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
+        const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const str = (v) => (v == null ? '' : String(v).trim());
 
-    // ---------- PIN VALIDATION (format + duplicate) ----------
-    async function validatePin(pin) {
-        $('#nc-pin-err').text('');
-        state.pinDuplicate = false;
-        if (!pin) return false;
-        if (!KRA_REGEX.test(pin)) {
-            $('#nc-pin-err').text('Invalid KRA PIN. Format: A or P, 9 digits, 1 letter (e.g. A123456789Z).');
-            return false;
+        const fld = ({ label, id, required, optional, type = 'text', value = '', placeholder = '', hint = '', step, readonly }) => `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label for="${id}" style="${LABEL}">${label}${required ? req : ''}${optional ? opt : ''}</label>
+                <input type="${type}" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}"
+                    ${step ? `step="${step}"` : ''} ${readonly ? 'readonly' : ''} style="${INPUT}${readonly ? 'background:#f7fafc;' : ''}">
+                ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
+            </div>`;
+
+        const selectFld = ({ label, id, required, options = [], hint = '' }) => `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label for="${id}" style="${LABEL}">${label}${required ? req : ''}</label>
+                <select id="${id}" style="${INPUT}">
+                    <option value="">Select</option>
+                    ${options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
+                </select>
+                ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
+            </div>`;
+
+        const dropzone = (id, label, required) => `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label style="${LABEL}">${label}${required ? req : opt}</label>
+                <div id="${id}-zone" style="display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid #a0b4c8;border-radius:8px;background:#f7fafc;cursor:pointer;">
+                    <div style="width:32px;height:32px;border-radius:8px;background:#ebf8ff;color:#3182ce;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">↑</div>
+                    <div style="flex:1;min-width:0;">
+                        <div id="${id}-title" style="font-weight:600;font-size:13px;color:#2d3748;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Choose a file to upload</div>
+                        <div style="font-size:11px;color:#718096;">PDF, JPG or PNG · up to ${MAX_FILE_MB} MB</div>
+                    </div>
+                    <span style="font-size:12px;color:#718096;">Browse</span>
+                </div>
+                <input type="file" id="${id}-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none;">
+            </div>`;
+
+        // ---------- LAYOUT ----------
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">New customer</span>
+            </div>
+            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New customer</h1>
+
+            <div style="${CARD}">
+                <div style="${SECTION}margin-bottom:16px;">KRA VERIFICATION</div>
+                <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', true)}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
+                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true, hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
+                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true })}
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="${LABEL}">PIN Status</label>
+                        <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="${CARD}">
+                <div style="${SECTION}margin-bottom:16px;">CUSTOMER DETAILS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
+                    ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Enter customer ID' })}
+                    ${fld({ label: 'Customer Name', id: 'nc-name', required: true, placeholder: 'Enter customer name' })}
+                    ${dropzone('nc-cr12', 'Business Registration / CR12', false)}
+                </div>
+            </div>
+
+            <div style="${CARD}">
+                <div style="${SECTION}margin-bottom:2px;">DELIVERY POINTS</div>
+                <div style="${HELP}margin-bottom:14px;" id="nc-dp-help"></div>
+                <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                            <th style="${TH}width:60px;">No.</th>
+                            <th style="${TH}">Delivery Point Name</th>
+                            <th style="${TH}">Location / Address</th>
+                            <th style="${TH}width:40px;"></th>
+                        </tr></thead>
+                        <tbody id="nc-dp-tbody"></tbody>
+                    </table>
+                </div>
+                <button type="button" id="nc-dp-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
+            </div>
+
+            <div style="${CARD}">
+                <div style="${SECTION}margin-bottom:2px;">CONTACT PERSONS</div>
+                <div style="${HELP}margin-bottom:14px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
+                <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px;">
+                        <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                            <th style="${TH}width:50px;">No.</th>
+                            <th style="${TH}">Name</th>
+                            <th style="${TH}">Role</th>
+                            <th style="${TH}">Phone</th>
+                            <th style="${TH}width:90px;text-align:center;">Same as WA</th>
+                            <th style="${TH}">WhatsApp</th>
+                            <th style="${TH}">Email</th>
+                            <th style="${TH}width:70px;text-align:center;">Primary</th>
+                            <th style="${TH}width:40px;"></th>
+                        </tr></thead>
+                        <tbody id="nc-ct-tbody"></tbody>
+                    </table>
+                </div>
+                <button type="button" id="nc-ct-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
+            </div>
+
+            <div style="${CARD}">
+                <div style="${SECTION}margin-bottom:16px;">COMMERCIAL TERMS</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
+                    ${selectFld({ label: 'Payment Terms', id: 'nc-terms', required: true, hint: 'Invoice due date = invoice date + payment terms.' })}
+                    ${selectFld({ label: 'Offloading Borne By', id: 'nc-offload', required: true, options: [{ value: 'Holec', label: 'Holec' }, { value: 'Customer', label: 'Customer' }], hint: "Who pays the labour to unload at the customer's site." })}
+                </div>
+            </div>
+
+            <div style="${CARD}">
+                <div style="${SECTION}margin-bottom:16px;">QUALITY SPEC</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                    ${fld({ label: 'Moisture Max (%)', id: 'nc-moist', required: true, type: 'number', value: '13.5', step: '0.1' })}
+                    ${fld({ label: 'Foreign Matter Max (%)', id: 'nc-fm', required: true, type: 'number', value: '2.0', step: '0.1' })}
+                    ${fld({ label: 'Aflatoxin Max (ppb)', id: 'nc-afla', required: true, type: 'number', value: '10', step: '1' })}
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:center;">
+                <button class="h-btn primary" id="nc-save-btn" style="${BTN_PRIMARY}">Save as Draft</button>
+                <button class="h-btn ghost" id="nc-cancel-btn" style="${BTN_GHOST}">Cancel</button>
+            </div>
+        `;
+
+        // ---------- NAV ----------
+        document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
+        document.getElementById('nc-cancel-btn').addEventListener('click', () => navigate('customers'));
+
+        // ---------- PAYMENT TERMS ----------
+        frappe.db.get_list('Payment Terms Template', { fields: ['name'], order_by: 'name asc', limit: 100 })
+            .then(rows => {
+                $('#nc-terms').append((rows || []).map(r => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join(''));
+            })
+            .catch(() => showToast('Could not load Payment Terms', 'orange'));
+
+        // ---------- FILE PICKER ----------
+        function bindDropzone(id, onFile) {
+            const zone = document.getElementById(`${id}-zone`);
+            const input = document.getElementById(`${id}-input`);
+            zone.addEventListener('click', () => input.click());
+            input.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                if (!/\.(pdf|jpe?g|png)$/i.test(file.name)) { showToast('Only PDF, JPG or PNG files are allowed.', 'red'); input.value = ''; return; }
+                if (file.size > MAX_FILE_MB * 1024 * 1024) { showToast(`File must be ${MAX_FILE_MB} MB or less.`, 'red'); input.value = ''; return; }
+                $(`#${id}-title`).text(file.name).css('color', '#276749');
+                onFile(file);
+            });
         }
-        try {
-            const dup = await frappe.db.get_list('Customer', { filters: { tax_id: pin }, fields: ['name', 'customer_name'], limit: 1 });
-            if (dup && dup.length) {
-                state.pinDuplicate = true;
-                $('#nc-pin-err').text(`This KRA PIN already exists on customer ${dup[0].customer_name || dup[0].name}.`);
+
+        // ---------- PIN STATUS ----------
+        function setPinStatus(status) {
+            state.pinStatus = status;
+            const map = {
+                Verified: ['#f0fff4', '#276749', '#38a169'],
+                Mismatch: ['#fff5f5', '#c53030', '#e53e3e'],
+                Manual: ['#fffaf0', '#9c4221', '#dd6b20']
+            };
+            const [bg, color, dot] = map[status] || ['#edf2f7', '#4a5568', '#a0aec0'];
+            $('#nc-pin-status').html(status
+                ? `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dot};border-radius:50%;"></span>${status}</span>`
+                : '<span style="color:#a0aec0;font-size:13px;">—</span>');
+
+            const locked = status !== 'Manual';
+            $('#nc-pin, #nc-regname').prop('readonly', locked).css('background', locked ? '#f7fafc' : '#fff');
+        }
+
+        // ---------- PIN VALIDATION ----------
+        async function validatePin(pin) {
+            $('#nc-pin-err').text('');
+            state.pinDuplicate = false;
+            if (!pin) return false;
+            if (!KRA_REGEX.test(pin)) {
+                $('#nc-pin-err').text('Invalid KRA PIN. Format: A or P, 9 digits, 1 letter (e.g. A123456789Z).');
                 return false;
             }
-        } catch (e) { console.error('Duplicate PIN check failed', e); }
-        return true;
-    }
-
-    // ---------- KRA CERTIFICATE UPLOAD -> OCR ----------
-    function applyKraResult(r) {
-        const pin = str(r.pin).toUpperCase();
-        const regName = str(r.name);
-        $('#nc-pin').val(pin);
-        $('#nc-regname').val(regName);
-        if (regName && !state.nameTouched) $('#nc-name').val(regName);   // prefill, still editable
-
-        const lowConfidence = !pin || !regName || flt(r.confidence) < OCR_MIN_CONFIDENCE || !KRA_REGEX.test(pin);
-        let status = 'Manual';                                              // rule 5 (default)
-        if (!lowConfidence && KRA_LOOKUP_ENABLED && r.lookup && r.lookup !== 'unavailable') {
-            status = r.lookup === 'match' ? 'Verified' : 'Mismatch';        // rule 4
+            try {
+                const dup = await frappe.db.get_list('Customer', { filters: { tax_id: pin }, fields: ['name', 'customer_name'], limit: 1 });
+                if (dup && dup.length) {
+                    state.pinDuplicate = true;
+                    $('#nc-pin-err').text(`This KRA PIN already exists on customer ${dup[0].customer_name || dup[0].name}.`);
+                    return false;
+                }
+            } catch (e) { console.error('Duplicate PIN check failed', e); }
+            return true;
         }
-        setPinStatus(status);
-        validatePin(pin);
-        if (status === 'Manual') showToast('Please confirm the KRA PIN and name manually. Finance will verify.', 'orange');
-        else if (status === 'Mismatch') showToast('Name on certificate differs from KRA records. Finance will decide.', 'orange');
-        else showToast(`KRA PIN ${pin} verified`);
-    }
 
-    bindDropzone('nc-kra', (file) => {
-        state.kraFile = file;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            showToast('Reading KRA certificate...', 'orange');
-            frappe.call({
-                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_details',
-                args: { filedata: ev.target.result, filename: file.name },
-                silent: true,
-                freeze: true,
-                freeze_message: 'Reading KRA certificate...',
-                callback: (r) => {
-                    const m = r && r.message;
-                    if (m && (m.pin || m.name)) {
-                        applyKraResult(m);
-                    } else {
-                        setPinStatus('Manual');   // OCR failed -> manual entry
-                        showToast(`Could not read the certificate${m && m.error ? ': ' + m.error : ''}. Enter the PIN and name manually.`, 'orange');
-                        console.error('KRA extract result:', m);
+        // ---------- KRA CERTIFICATE -> OCR ----------
+        function applyKraResult(r) {
+            const pin = str(r.pin).toUpperCase();
+            const regName = str(r.name);
+            $('#nc-pin').val(pin);
+            $('#nc-regname').val(regName);
+            if (regName && !state.nameTouched) $('#nc-name').val(regName);
+
+            const lowConfidence = !pin || !regName || flt(r.confidence) < OCR_MIN_CONFIDENCE || !KRA_REGEX.test(pin);
+            let status = 'Manual';
+            if (!lowConfidence && KRA_LOOKUP_ENABLED && r.lookup && r.lookup !== 'unavailable') {
+                status = r.lookup === 'match' ? 'Verified' : 'Mismatch';
+            }
+            setPinStatus(status);
+            validatePin(pin);
+            if (status === 'Manual') showToast('Please confirm the KRA PIN and name manually. Finance will verify.', 'orange');
+            else if (status === 'Mismatch') showToast('Name on certificate differs from KRA records. Finance will decide.', 'orange');
+            else showToast(`KRA PIN ${pin} verified`);
+        }
+
+        bindDropzone('nc-kra', (file) => {
+            state.kraFile = file;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                showToast('Reading KRA certificate...', 'orange');
+                frappe.call({
+                    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_details',
+                    args: { filedata: ev.target.result, filename: file.name },
+                    silent: true,
+                    freeze: true,
+                    freeze_message: 'Reading KRA certificate...',
+                    callback: (r) => {
+                        const m = r && r.message;
+                        if (m && (m.pin || m.name)) {
+                            applyKraResult(m);
+                        } else {
+                            setPinStatus('Manual');
+                            showToast(`Could not read the certificate${m && m.error ? ': ' + m.error : ''}. Enter the PIN and name manually.`, 'orange');
+                            console.error('KRA extract result:', m);
+                        }
+                    },
+                    error: () => {
+                        setPinStatus('Manual');
+                        showToast('Certificate reading failed. Enter the PIN and name manually.', 'orange');
                     }
-                },
-                error: () => {
-                    setPinStatus('Manual');
-                    showToast('Certificate reading failed. Enter the PIN and name manually.', 'orange');
+                });
+            };
+            reader.readAsDataURL(file);
+        });
+
+        bindDropzone('nc-cr12', (file) => { state.crFile = file; });
+
+        $('#nc-name').on('input', () => { state.nameTouched = true; });
+        $('#nc-pin').on('input', function () {
+            this.value = this.value.toUpperCase().replace(/\s/g, '');
+            validatePin(this.value);
+        });
+
+        // ---------- DELIVERY POINTS TABLE ----------
+        function renderDeliveryPoints() {
+            $('#nc-dp-help').text(MAX_DELIVERY_POINTS === 1 ? 'One delivery point only.' : `At least 1, at most ${MAX_DELIVERY_POINTS}.`);
+            $('#nc-dp-add').toggle(MAX_DELIVERY_POINTS > 1);
+            $('#nc-dp-tbody').html(state.deliveryPoints.map((d, i) => `
+                <tr style="border-bottom:1px solid #edf2f7;">
+                    <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
+                    <td style="padding:8px 12px;"><input class="dp" data-k="name" data-i="${i}" value="${esc(d.name)}" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;"><input class="dp" data-k="address" data-i="${i}" value="${esc(d.address)}" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="dp-del" data-i="${i}">${state.deliveryPoints.length > 1 ? '🗑' : ''}</td>
+                </tr>`).join(''));
+        }
+        $('#nc-dp-tbody').on('input', '.dp', function () {
+            state.deliveryPoints[this.dataset.i][this.dataset.k] = this.value;
+        });
+        $('#nc-dp-tbody').on('click', '.dp-del', function () {
+            if (state.deliveryPoints.length > 1) { state.deliveryPoints.splice(this.dataset.i, 1); renderDeliveryPoints(); }
+        });
+        $('#nc-dp-add').on('click', () => {
+            if (state.deliveryPoints.length >= MAX_DELIVERY_POINTS) return showToast(`Maximum ${MAX_DELIVERY_POINTS} delivery points allowed.`, 'orange');
+            state.deliveryPoints.push({ name: '', address: '' });
+            renderDeliveryPoints();
+        });
+
+        // ---------- CONTACT PERSONS TABLE ----------
+        function renderContacts() {
+            $('#nc-ct-tbody').html(state.contacts.map((c, i) => `
+                <tr style="border-bottom:1px solid #edf2f7;">
+                    <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
+                    <td style="padding:8px 12px;"><input class="ct" data-k="name" data-i="${i}" value="${esc(c.name)}" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;"><input class="ct" data-k="role" data-i="${i}" value="${esc(c.role)}" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;"><input class="ct" data-k="phone" data-i="${i}" value="${esc(c.phone)}" placeholder="07XX XXX XXX" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;text-align:center;"><input type="checkbox" class="ct-wa" data-i="${i}" ${c.same_as_wa ? 'checked' : ''}></td>
+                    <td style="padding:8px 12px;">${c.same_as_wa
+                        ? '<span style="color:#a0aec0;font-size:12px;">— same as phone</span>'
+                        : `<input class="ct" data-k="whatsapp" data-i="${i}" value="${esc(c.whatsapp)}" style="${CELL_INPUT}">`}</td>
+                    <td style="padding:8px 12px;"><input class="ct" data-k="email" data-i="${i}" value="${esc(c.email)}" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;text-align:center;"><input type="radio" name="nc-primary" class="ct-primary" data-i="${i}" ${c.is_primary ? 'checked' : ''}></td>
+                    <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="ct-del" data-i="${i}">${state.contacts.length > 1 ? '🗑' : ''}</td>
+                </tr>`).join(''));
+        }
+        $('#nc-ct-tbody').on('input', '.ct', function () { state.contacts[this.dataset.i][this.dataset.k] = this.value; });
+        $('#nc-ct-tbody').on('change', '.ct-wa', function () {
+            state.contacts[this.dataset.i].same_as_wa = this.checked;
+            renderContacts();
+        });
+        $('#nc-ct-tbody').on('change', '.ct-primary', function () {
+            state.contacts.forEach((c, i) => c.is_primary = (i == this.dataset.i));
+        });
+        $('#nc-ct-tbody').on('click', '.ct-del', function () {
+            if (state.contacts.length > 1) {
+                const wasPrimary = state.contacts[this.dataset.i].is_primary;
+                state.contacts.splice(this.dataset.i, 1);
+                if (wasPrimary) state.contacts[0].is_primary = true;
+                renderContacts();
+            }
+        });
+        $('#nc-ct-add').on('click', () => {
+            if (state.contacts.length >= MAX_CONTACTS) return showToast(`Maximum ${MAX_CONTACTS} contact persons allowed.`, 'orange');
+            state.contacts.push({ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: false });
+            renderContacts();
+        });
+
+        renderDeliveryPoints();
+        renderContacts();
+        setPinStatus(null);
+
+        // ---------- HELPERS ----------
+        const cleanPhone = (p) => String(p || '').replace(/[\s\-()]/g, '');
+        const toIntl = (p) => {
+            p = cleanPhone(p);
+            if (p.startsWith('+254')) return p;
+            if (p.startsWith('254')) return '+' + p;
+            if (p.startsWith('0')) return '+254' + p.slice(1);
+            return p;
+        };
+
+        // Frappe throws "dict can not be used as parameter" for object values; name the field instead
+        function findObjectFields(doc) {
+            const bad = [];
+            Object.entries(doc).forEach(([k, v]) => {
+                if (Array.isArray(v)) {
+                    v.forEach((row, i) => Object.entries(row).forEach(([ck, cv]) => {
+                        if (cv && typeof cv === 'object') bad.push(`${k}[${i + 1}].${ck}`);
+                    }));
+                } else if (v && typeof v === 'object') {
+                    bad.push(k);
                 }
             });
-        };
-        reader.readAsDataURL(file);
-    });
-
-    bindDropzone('nc-cr12', (file) => { state.crFile = file; });   // attachment only, no OCR
-
-    $('#nc-name').on('input', () => { state.nameTouched = true; });
-    $('#nc-pin').on('input', function () {
-        this.value = this.value.toUpperCase().replace(/\s/g, '');
-        validatePin(this.value);
-    });
-
-    // ---------- DELIVERY POINTS TABLE ----------
-    function renderDeliveryPoints() {
-        $('#nc-dp-help').text(MAX_DELIVERY_POINTS === 1 ? 'One delivery point only.' : `At least 1, at most ${MAX_DELIVERY_POINTS}.`);
-        $('#nc-dp-add').toggle(MAX_DELIVERY_POINTS > 1);
-        $('#nc-dp-tbody').html(state.deliveryPoints.map((d, i) => `
-            <tr style="border-bottom:1px solid #edf2f7;">
-                <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
-                <td style="padding:8px 12px;"><input class="dp" data-k="name" data-i="${i}" value="${esc(d.name)}" style="${CELL_INPUT}"></td>
-                <td style="padding:8px 12px;"><input class="dp" data-k="address" data-i="${i}" value="${esc(d.address)}" style="${CELL_INPUT}"></td>
-                <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="dp-del" data-i="${i}">${state.deliveryPoints.length > 1 ? '🗑' : ''}</td>
-            </tr>`).join(''));
-    }
-    $('#nc-dp-tbody').on('input', '.dp', function () {
-        state.deliveryPoints[this.dataset.i][this.dataset.k] = this.value;
-    });
-    $('#nc-dp-tbody').on('click', '.dp-del', function () {
-        if (state.deliveryPoints.length > 1) { state.deliveryPoints.splice(this.dataset.i, 1); renderDeliveryPoints(); }
-    });
-    $('#nc-dp-add').on('click', () => {
-        if (state.deliveryPoints.length >= MAX_DELIVERY_POINTS) return showToast(`Maximum ${MAX_DELIVERY_POINTS} delivery points allowed.`, 'orange');
-        state.deliveryPoints.push({ name: '', address: '' });
-        renderDeliveryPoints();
-    });
-
-    // ---------- CONTACT PERSONS TABLE ----------
-    function renderContacts() {
-        $('#nc-ct-tbody').html(state.contacts.map((c, i) => `
-            <tr style="border-bottom:1px solid #edf2f7;">
-                <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
-                <td style="padding:8px 12px;"><input class="ct" data-k="name" data-i="${i}" value="${esc(c.name)}" style="${CELL_INPUT}"></td>
-                <td style="padding:8px 12px;"><input class="ct" data-k="role" data-i="${i}" value="${esc(c.role)}" style="${CELL_INPUT}"></td>
-                <td style="padding:8px 12px;"><input class="ct" data-k="phone" data-i="${i}" value="${esc(c.phone)}" placeholder="07XX XXX XXX" style="${CELL_INPUT}"></td>
-                <td style="padding:8px 12px;text-align:center;"><input type="checkbox" class="ct-wa" data-i="${i}" ${c.same_as_wa ? 'checked' : ''}></td>
-                <td style="padding:8px 12px;">${c.same_as_wa
-                    ? '<span style="color:#a0aec0;font-size:12px;">— same as phone</span>'
-                    : `<input class="ct" data-k="whatsapp" data-i="${i}" value="${esc(c.whatsapp)}" style="${CELL_INPUT}">`}</td>
-                <td style="padding:8px 12px;"><input class="ct" data-k="email" data-i="${i}" value="${esc(c.email)}" style="${CELL_INPUT}"></td>
-                <td style="padding:8px 12px;text-align:center;"><input type="radio" name="nc-primary" class="ct-primary" data-i="${i}" ${c.is_primary ? 'checked' : ''}></td>
-                <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="ct-del" data-i="${i}">${state.contacts.length > 1 ? '🗑' : ''}</td>
-            </tr>`).join(''));
-    }
-    $('#nc-ct-tbody').on('input', '.ct', function () { state.contacts[this.dataset.i][this.dataset.k] = this.value; });
-    $('#nc-ct-tbody').on('change', '.ct-wa', function () {
-        state.contacts[this.dataset.i].same_as_wa = this.checked;   // ticked by default
-        renderContacts();
-    });
-    $('#nc-ct-tbody').on('change', '.ct-primary', function () {
-        state.contacts.forEach((c, i) => c.is_primary = (i == this.dataset.i));
-    });
-    $('#nc-ct-tbody').on('click', '.ct-del', function () {
-        if (state.contacts.length > 1) {
-            const wasPrimary = state.contacts[this.dataset.i].is_primary;
-            state.contacts.splice(this.dataset.i, 1);
-            if (wasPrimary) state.contacts[0].is_primary = true;
-            renderContacts();
-        }
-    });
-    $('#nc-ct-add').on('click', () => {
-        if (state.contacts.length >= MAX_CONTACTS) return showToast(`Maximum ${MAX_CONTACTS} contact persons allowed.`, 'orange');
-        state.contacts.push({ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: false });
-        renderContacts();
-    });
-
-    renderDeliveryPoints();
-    renderContacts();
-    setPinStatus(null);
-
-    // ---------- HELPERS ----------
-    const cleanPhone = (p) => String(p || '').replace(/[\s\-()]/g, '');
-    const toIntl = (p) => {
-        p = cleanPhone(p);
-        if (p.startsWith('+254')) return p;
-        if (p.startsWith('254')) return '+' + p;
-        if (p.startsWith('0')) return '+254' + p.slice(1);
-        return p;
-    };
-
-    // Returns the names of any fields whose value is an object (not string/number).
-    // Frappe throws "dict can not be used as parameter" (HTTP 500) for those.
-    function findObjectFields(doc) {
-        const bad = [];
-        Object.entries(doc).forEach(([k, v]) => {
-            if (Array.isArray(v)) {
-                v.forEach((row, i) => Object.entries(row).forEach(([ck, cv]) => {
-                    if (cv && typeof cv === 'object') bad.push(`${k}[${i + 1}].${ck}`);
-                }));
-            } else if (v && typeof v === 'object') {
-                bad.push(k);
-            }
-        });
-        return bad;
-    }
-
-    async function uploadToDoc(file, docname, fieldname) {
-        const fd = new FormData();
-        fd.append('file', file, file.name);
-        fd.append('is_private', 1);
-        fd.append('doctype', 'Customer');
-        fd.append('docname', docname);
-        fd.append('fieldname', fieldname);
-        const res = await fetch('/api/method/upload_file', {
-            method: 'POST',
-            headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
-            body: fd
-        });
-        if (!res.ok) throw new Error('Upload failed: ' + file.name);
-        return res.json();
-    }
-
-    // ---------- SAVE AS DRAFT ----------
-    document.getElementById('nc-save-btn').addEventListener('click', async () => {
-        const errors = [];
-        const customerId = str($('#nc-id').val());
-        const name = str($('#nc-name').val());
-        const pin = str($('#nc-pin').val()).toUpperCase();
-        const regName = str($('#nc-regname').val());
-        const terms = str($('#nc-terms').val());
-        const offload = str($('#nc-offload').val());
-        const moist = str($('#nc-moist').val());
-        const fm = str($('#nc-fm').val());
-        const afla = str($('#nc-afla').val());
-
-        // 1. KRA
-        if (!state.kraFile) errors.push('KRA PIN Certificate is required.');
-        if (!pin) errors.push('KRA PIN is required.');
-        else if (!KRA_REGEX.test(pin)) errors.push('KRA PIN format is invalid (A or P, 9 digits, 1 letter).');
-        else if (!(await validatePin(pin))) errors.push('This KRA PIN already exists on another customer.');   // rule 3
-        if (!regName) errors.push('Registered Name (per KRA) is required.');
-
-        // 2. Customer details
-        if (!customerId) errors.push('Customer ID is required.');
-        else {
-            try {
-                const dupId = await frappe.db.get_list('Customer', { filters: { [CUSTOMER_ID_FIELD]: customerId }, fields: ['name'], limit: 1 });
-                if (dupId && dupId.length) errors.push(`Customer ID ${customerId} already exists.`);
-            } catch (e) { console.warn('Customer ID duplicate check skipped (field missing?)', e); }
-        }
-        if (!name) errors.push('Customer Name is required.');
-
-        // 3. Delivery points
-        state.deliveryPoints.forEach((d, i) => {
-            if (!str(d.name) || !str(d.address)) errors.push(`Delivery point ${i + 1}: name and location are required.`);
-        });
-
-        // 4. Contacts
-        if (state.contacts.length < 1 || state.contacts.length > MAX_CONTACTS) errors.push(`Add between 1 and ${MAX_CONTACTS} contact persons.`);
-        if (state.contacts.filter(c => c.is_primary).length !== 1) errors.push('Exactly one contact must be marked Primary.');
-        state.contacts.forEach((c, i) => {
-            const n = i + 1;
-            if (!str(c.name)) errors.push(`Contact ${n}: Name is required.`);
-            if (!str(c.phone)) errors.push(`Contact ${n}: Phone is required.`);
-            else if (!PHONE_REGEX.test(cleanPhone(c.phone))) errors.push(`Contact ${n}: Phone must be a valid Kenyan number.`);
-            if (!c.same_as_wa) {
-                if (!str(c.whatsapp)) errors.push(`Contact ${n}: WhatsApp number is required when "Same as WA" is unticked.`);
-                else if (!PHONE_REGEX.test(cleanPhone(c.whatsapp))) errors.push(`Contact ${n}: WhatsApp must be a valid Kenyan number.`);
-            }
-            if (str(c.email) && !EMAIL_REGEX.test(str(c.email))) errors.push(`Contact ${n}: Email format is invalid.`);
-        });
-
-        // 5. Commercial terms
-        if (!terms) errors.push('Payment Terms is required.');
-        if (!offload) errors.push('Offloading Borne By is required.');
-
-        // 6. Quality spec
-        [['Moisture Max', moist], ['Foreign Matter Max', fm], ['Aflatoxin Max', afla]].forEach(([l, v]) => {
-            if (v === '' || isNaN(flt(v)) || flt(v) < 0) errors.push(`${l} is required and must be a valid number.`);
-        });
-
-        if (errors.length) {
-            frappe.msgprint({ title: __('Please fix the following'), indicator: 'red', message: '<ul style="padding-left:18px;margin:0;">' + errors.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>' });
-            return;
+            return bad;
         }
 
-        // ---- Build payload: every value is a plain string / number ----
-        const payload = {
-            doctype: 'Customer',
-            customer_name: name,
-            customer_type: 'Company',
-            [CUSTOMER_ID_FIELD]: customerId,
-            // hidden backend defaults
-            customer_group: DEFAULT_GROUP,
-            territory: DEFAULT_TERRITORY,
-            custom_vat_registered: 0,
-            // KRA
-            custom_kra_pin: pin,
-            custom_registered_name_per_kra: regName,
-            // commercial terms
-            payment_terms: terms,
-            custom_offloading_borne_by: offload,
-            // quality spec (applies to future lots only)
-            custom_moisture_max: flt(moist),
-            custom_foreign_matter_max: flt(fm),
-            custom_aflatoxin_max: flt(afla),
-            // Draft: not usable for invoicing until Finance approves -> Active
-            custom_approval_status: 'Draft',
-            disabled: 0,
-            custom_holec_delivery_points: state.deliveryPoints.map(d => ({
-                delivery_point_name: str(d.name),
-                location: str(d.address)
-            })),
-            custom_holec_contacts: state.contacts.map(c => ({
-                contact_name: str(c.name),
-                role: str(c.role),
-                phone: toIntl(c.phone),
-                same_as_phone: c.same_as_wa ? 1 : 0,
-                whatsapp: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
-                email: str(c.email),
-                is_primary: c.is_primary ? 1 : 0
-            }))
-        };
-
-        // Safety net: stop and name the field instead of a blind 500 error
-        const badFields = findObjectFields(payload);
-        if (badFields.length) {
-            console.error('Object values found in payload:', badFields, payload);
-            frappe.msgprint({ title: __('Invalid value'), indicator: 'red', message: 'These fields contain an object instead of text/number: <b>' + badFields.map(esc).join(', ') + '</b>' });
-            return;
+        async function uploadToDoc(file, docname, fieldname) {
+            const fd = new FormData();
+            fd.append('file', file, file.name);
+            fd.append('is_private', 1);
+            fd.append('doctype', 'Customer');
+            fd.append('docname', docname);
+            fd.append('fieldname', fieldname);
+            const res = await fetch('/api/method/upload_file', {
+                method: 'POST',
+                headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
+                body: fd
+            });
+            if (!res.ok) throw new Error('Upload failed: ' + file.name);
+            return res.json();
         }
-        console.log('Customer payload:', JSON.stringify(payload, null, 2));
 
-        const btn = $('#nc-save-btn').prop('disabled', true).text('Saving...');
-        try {
-            const doc = await frappe.db.insert(payload);
+        // ---------- SAVE AS DRAFT ----------
+        document.getElementById('nc-save-btn').addEventListener('click', async () => {
+            const errors = [];
+            const customerId = str($('#nc-id').val());
+            const name = str($('#nc-name').val());
+            const pin = str($('#nc-pin').val()).toUpperCase();
+            const regName = str($('#nc-regname').val());
+            const terms = str($('#nc-terms').val());
+            const offload = str($('#nc-offload').val());
+            const moist = str($('#nc-moist').val());
+            const fm = str($('#nc-fm').val());
+            const afla = str($('#nc-afla').val());
 
-            if (doc) {
+            // 1. KRA
+            if (!state.kraFile) errors.push('KRA PIN Certificate is required.');
+            if (!pin) errors.push('KRA PIN is required.');
+            else if (!KRA_REGEX.test(pin)) errors.push('KRA PIN format is invalid (A or P, 9 digits, 1 letter).');
+            else if (!(await validatePin(pin))) errors.push('This KRA PIN already exists on another customer.');
+            if (!regName) errors.push('Registered Name (per KRA) is required.');
+
+            // 2. Customer details
+            if (!customerId) errors.push('Customer ID is required.');
+            else {
                 try {
-                    if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_certificate');
-                    if (state.crFile) await uploadToDoc(state.crFile, doc.name, 'custom_business_registration');
-                } catch (upErr) {
-                    console.error(upErr);
-                    showToast('Customer saved, but a file upload failed. Re-attach it from the Customer record.', 'orange');
-                }
-                showToast(`Customer ${doc.name} saved as Draft. Awaiting Finance approval.`);
-                await loadMasterData();
-                navigate('customers');
+                    const dupId = await frappe.db.get_list('Customer', { filters: { [CUSTOMER_ID_FIELD]: customerId }, fields: ['name'], limit: 1 });
+                    if (dupId && dupId.length) errors.push(`Customer ID ${customerId} already exists.`);
+                } catch (e) { console.warn('Customer ID duplicate check skipped (field missing?)', e); }
             }
-        } catch (err) {
-            console.error('Error creating customer document:', err);
-            showToast('Failed to create customer. Check Error Log / browser console.', 'red');
-            btn.prop('disabled', false).text('Save as Draft');
-        }
-    });
-}
+            if (!name) errors.push('Customer Name is required.');
 
+            // 3. Delivery points
+            state.deliveryPoints.forEach((d, i) => {
+                if (!str(d.name) || !str(d.address)) errors.push(`Delivery point ${i + 1}: name and location are required.`);
+            });
+
+            // 4. Contacts
+            if (state.contacts.length < 1 || state.contacts.length > MAX_CONTACTS) errors.push(`Add between 1 and ${MAX_CONTACTS} contact persons.`);
+            if (state.contacts.filter(c => c.is_primary).length !== 1) errors.push('Exactly one contact must be marked Primary.');
+            state.contacts.forEach((c, i) => {
+                const n = i + 1;
+                if (!str(c.name)) errors.push(`Contact ${n}: Name is required.`);
+                if (!str(c.phone)) errors.push(`Contact ${n}: Phone is required.`);
+                else if (!PHONE_REGEX.test(cleanPhone(c.phone))) errors.push(`Contact ${n}: Phone must be a valid Kenyan number.`);
+                if (!c.same_as_wa) {
+                    if (!str(c.whatsapp)) errors.push(`Contact ${n}: WhatsApp number is required when "Same as WA" is unticked.`);
+                    else if (!PHONE_REGEX.test(cleanPhone(c.whatsapp))) errors.push(`Contact ${n}: WhatsApp must be a valid Kenyan number.`);
+                }
+                if (str(c.email) && !EMAIL_REGEX.test(str(c.email))) errors.push(`Contact ${n}: Email format is invalid.`);
+            });
+
+            // 5. Commercial terms
+            if (!terms) errors.push('Payment Terms is required.');
+            if (!offload) errors.push('Offloading Borne By is required.');
+
+            // 6. Quality spec
+            [['Moisture Max', moist], ['Foreign Matter Max', fm], ['Aflatoxin Max', afla]].forEach(([l, v]) => {
+                if (v === '' || isNaN(flt(v)) || flt(v) < 0) errors.push(`${l} is required and must be a valid number.`);
+            });
+
+            if (errors.length) {
+                frappe.msgprint({ title: __('Please fix the following'), indicator: 'red', message: '<ul style="padding-left:18px;margin:0;">' + errors.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>' });
+                return;
+            }
+
+            const payload = {
+                doctype: 'Customer',
+                customer_name: name,
+                customer_type: 'Company',
+                [CUSTOMER_ID_FIELD]: customerId,
+                customer_group: DEFAULT_GROUP,
+                territory: DEFAULT_TERRITORY,
+                custom_vat_registered: 0,
+                custom_kra_pin: pin,
+                custom_registered_name_per_kra: regName,
+                payment_terms: terms,
+                custom_offloading_borne_by: offload,
+                custom_moisture_max: flt(moist),
+                custom_foreign_matter_max: flt(fm),
+                custom_aflatoxin_max: flt(afla),
+                custom_approval_status: 'Draft',
+                disabled: 0,
+                custom_holec_delivery_points: state.deliveryPoints.map(d => ({
+                    delivery_point_name: str(d.name),
+                    location: str(d.address)
+                })),
+                custom_holec_contacts: state.contacts.map(c => ({
+                    contact_name: str(c.name),
+                    role: str(c.role),
+                    phone: toIntl(c.phone),
+                    same_as_phone: c.same_as_wa ? 1 : 0,
+                    whatsapp: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
+                    email: str(c.email),
+                    is_primary: c.is_primary ? 1 : 0
+                }))
+            };
+
+            const badFields = findObjectFields(payload);
+            if (badFields.length) {
+                console.error('Object values found in payload:', badFields, payload);
+                frappe.msgprint({ title: __('Invalid value'), indicator: 'red', message: 'These fields contain an object instead of text/number: <b>' + badFields.map(esc).join(', ') + '</b>' });
+                return;
+            }
+
+            const btn = $('#nc-save-btn').prop('disabled', true).text('Saving...');
+            try {
+                const doc = await frappe.db.insert(payload);
+
+                if (doc) {
+                    try {
+                        if (state.kraFile) await uploadToDoc(state.kraFile, doc.name, 'custom_kra_certificate');
+                        if (state.crFile) await uploadToDoc(state.crFile, doc.name, 'custom_business_registration');
+                    } catch (upErr) {
+                        console.error(upErr);
+                        showToast('Customer saved, but a file upload failed. Re-attach it from the Customer record.', 'orange');
+                    }
+                    showToast(`Customer ${doc.name} saved as Draft. Awaiting Finance approval.`);
+                    await loadMasterData();
+                    navigate('customers');
+                }
+            } catch (err) {
+                console.error('Error creating customer document:', err);
+                showToast('Failed to create customer. Check Error Log / browser console.', 'red');
+                btn.prop('disabled', false).text('Save as Draft');
+            }
+        });
+    }
+
+    // =====================================================================
+    // NEW SUPPLIER
+    // =====================================================================
     function renderNewSupplier(container) {
         const countyOptions = (LIVE_STORE?.countries || []).map(c => ({ value: c.name, label: c.country_name || c.name }));
         const areaOptions = (LIVE_STORE?.origin_area || []).map(d => ({ value: d.name, label: d.area_name || d.name }));
@@ -915,6 +938,8 @@ function renderNewCustomer(container) {
             { name: '', role: '', phone: '', wa_same: true, whatsapp: '', email: '', is_primary: true }
         ];
 
+        const CP_INPUT = 'width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;';
+
         const renderContactsTable = () => {
             const tbody = document.getElementById('contacts-tbody');
             if (!tbody) return;
@@ -922,12 +947,12 @@ function renderNewCustomer(container) {
             tbody.innerHTML = contactRows.map((row, idx) => `
                 <tr style="border-bottom:1px solid #edf2f7;">
                     <td style="padding:10px 12px;color:#4a5568;">${idx + 1}</td>
-                    <td style="padding:10px 12px;"><input type="text" class="cp-name" data-idx="${idx}" value="${row.name}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:10px 12px;"><input type="text" class="cp-role" data-idx="${idx}" value="${row.role}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
-                    <td style="padding:10px 12px;"><input type="text" class="cp-phone" data-idx="${idx}" value="${row.phone}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-name" data-idx="${idx}" value="${row.name}" style="${CP_INPUT}"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-role" data-idx="${idx}" value="${row.role}" style="${CP_INPUT}"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-phone" data-idx="${idx}" value="${row.phone}" style="${CP_INPUT}"></td>
                     <td style="padding:10px 12px;text-align:center;"><input type="checkbox" class="cp-same" data-idx="${idx}" ${row.wa_same ? 'checked' : ''}></td>
-                    <td style="padding:10px 12px;"><input type="text" class="cp-wa" data-idx="${idx}" value="${row.wa_same ? row.phone : row.whatsapp}" ${row.wa_same ? 'disabled' : ''} style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;${row.wa_same ? 'background:#f7fafc;color:#a0aec0;' : ''}"></td>
-                    <td style="padding:10px 12px;"><input type="text" class="cp-email" data-idx="${idx}" value="${row.email}" style="width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-wa" data-idx="${idx}" value="${row.wa_same ? row.phone : row.whatsapp}" ${row.wa_same ? 'disabled' : ''} style="${CP_INPUT}${row.wa_same ? 'background:#f7fafc;color:#a0aec0;' : ''}"></td>
+                    <td style="padding:10px 12px;"><input type="text" class="cp-email" data-idx="${idx}" value="${row.email}" style="${CP_INPUT}"></td>
                     <td style="padding:10px 12px;text-align:center;"><input type="radio" name="primary-contact" class="cp-primary" data-idx="${idx}" ${row.is_primary ? 'checked' : ''}></td>
                     <td style="padding:10px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="delete-contact" data-idx="${idx}">${contactRows.length > 1 ? '🗑' : ''}</td>
                 </tr>
@@ -941,7 +966,6 @@ function renderNewCustomer(container) {
                     if (e.target.classList.contains('cp-phone')) {
                         contactRows[i].phone = e.target.value;
                         if (contactRows[i].wa_same) {
-                            // mirror phone into the WhatsApp field live
                             const wa = tbody.querySelector(`.cp-wa[data-idx="${i}"]`);
                             if (wa) wa.value = e.target.value;
                         }
@@ -956,7 +980,7 @@ function renderNewCustomer(container) {
                     const i = e.target.dataset.idx;
                     contactRows[i].wa_same = e.target.checked;
                     if (!e.target.checked && !contactRows[i].whatsapp) {
-                        contactRows[i].whatsapp = contactRows[i].phone; // start from phone, then editable
+                        contactRows[i].whatsapp = contactRows[i].phone;
                     }
                     renderContactsTable();
                 });
@@ -973,33 +997,34 @@ function renderNewCustomer(container) {
                 btn.addEventListener('click', (e) => {
                     const i = e.target.dataset.idx;
                     contactRows.splice(i, 1);
-                    // keep exactly one primary contact
                     if (!contactRows.some(r => r.is_primary) && contactRows.length) contactRows[0].is_primary = true;
                     renderContactsTable();
                 });
             });
         };
 
+        const SEC = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;';
+
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <a href="#" id="back-suppliers-link" style="color:#3182ce;text-decoration:none;">Suppliers</a> › <span style="color:#2d3748;font-weight:500;">New supplier</span>
             </div>
-            
+
             <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">New supplier</h1>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BASIC DETAILS</div>
+            <div style="${CARD_BOX}">
+                <div style="${SEC}margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${field({ label: 'Supplier Name *', id: 'ns-name', required: true, placeholder: '' })}
+                    ${field({ label: 'Supplier Name *', id: 'ns-name', required: true })}
                     ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Holec Trading'] })}
                     ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">CONTACT PERSONS</div>
+            <div style="${CARD_BOX}">
+                <div style="${SEC}margin-bottom:6px;">CONTACT PERSONS</div>
                 <div style="font-size:12px;color:#718096;margin-bottom:16px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
-                
+
                 <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;">
                     <thead>
                         <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
@@ -1019,8 +1044,8 @@ function renderNewCustomer(container) {
                 <button type="button" class="h-btn sm" id="add-contact-row-btn" style="padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;">Add row</button>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">ADDITIONAL DETAILS</div>
+            <div style="${CARD_BOX}">
+                <div style="${SEC}margin-bottom:16px;">ADDITIONAL DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Country', id: 'ns-county', type: 'select', options: countyOptions })}
                     ${field({ label: 'Area', id: 'ns-area', type: 'select', options: areaOptions })}
@@ -1029,8 +1054,8 @@ function renderNewCustomer(container) {
                 ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true })}
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">COMPLIANCE</div>
+            <div style="${CARD_BOX}">
+                <div style="${SEC}margin-bottom:16px;">COMPLIANCE</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="font-size:13px;font-weight:500;color:#4a5568;">KRA PIN Certificate</label>
@@ -1047,16 +1072,16 @@ function renderNewCustomer(container) {
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
-                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;">BANKING</div>
+            <div style="${CARD_BOX}margin-bottom:28px;">
+                <div style="${SEC}margin-bottom:16px;">BANKING</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Bank *', id: 'ns-bank', type: 'select', required: true, options: bankOptions })}
-                    ${field({ label: 'Bank Code *', id: 'ns-bank-code', type: 'text', required: true })}
-                    ${field({ label: 'Swift Code *', id: 'ns-swift-code', type: 'text', required: true })}
+                    ${field({ label: 'Bank Code *', id: 'ns-bank-code', required: true })}
+                    ${field({ label: 'Swift Code *', id: 'ns-swift-code', required: true })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Branch *', id: 'ns-branch', type: 'select', required: true, options: branchOptions })}
-                    ${field({ label: 'Branch Code *', id: 'ns-branch-code', type: 'text', required: true })}
+                    ${field({ label: 'Branch Code *', id: 'ns-branch-code', required: true })}
                     ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: ['Pesalink', 'RTGS'] })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
@@ -1065,17 +1090,16 @@ function renderNewCustomer(container) {
                 </div>
             </div>
 
-            
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-draft-supplier-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit as Draft</button>
-                <button class="h-btn ghost" id="cancel-supplier-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="submit-draft-supplier-btn" style="${BTN_PRIMARY}">Submit as Draft</button>
+                <button class="h-btn ghost" id="cancel-supplier-btn" style="${BTN_GHOST}">Cancel</button>
             </div>
         `;
 
         renderContactsTable();
 
         // Narrow the branch list to the selected bank (falls back to all branches if none match)
-        $('#ns-bank').on('change', function() {
+        $('#ns-bank').on('change', function () {
             const selectedBank = $(this).val();
             const branchSelect = $('#ns-branch');
             branchSelect.empty().append('<option value="">Select...</option>');
@@ -1098,17 +1122,14 @@ function renderNewCustomer(container) {
                 const file = e.target.files[0];
                 if (file) {
                     const reader = new FileReader();
-                    reader.onload = async function(uploadEvent) {
+                    reader.onload = function (uploadEvent) {
                         const base64Data = uploadEvent.target.result;
                         showToast('Extracting KRA PIN automatically...', 'orange');
 
                         frappe.call({
                             method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_pin',
-                            args: {
-                                filedata: base64Data,
-                                filename: file.name
-                            },
-                            callback: function(r) {
+                            args: { filedata: base64Data, filename: file.name },
+                            callback: function (r) {
                                 if (r && r.message) {
                                     const extractedPin = r.message;
                                     $('#ns-krapin').val(extractedPin);
@@ -1138,7 +1159,7 @@ function renderNewCustomer(container) {
 
         document.getElementById('back-suppliers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('suppliers'); });
         document.getElementById('cancel-supplier-btn').addEventListener('click', () => navigate('suppliers'));
-        
+
         document.getElementById('submit-draft-supplier-btn').addEventListener('click', async () => {
             const supplierName = $('#ns-name').val();
             const supplierGroup = $('#ns-group').val();
@@ -1156,7 +1177,6 @@ function renderNewCustomer(container) {
             const swiftCode = $('#ns-swift-code').val();
             const accountNo = $('#ns-accno').val();
             const accountName = $('#ns-accname').val();
-            const paymentRail = $('#ns-rail').val();
 
             if (!supplierName || !supplierGroup || !taxId || !bank || !bankCode || !branch || !branchCode || !swiftCode || !accountNo || !accountName) {
                 frappe.msgprint(__('Please fill out all mandatory fields (Supplier Name, Group, KRA PIN, Bank, Bank Code, Branch, Branch Code, Swift Code, Account Number and Account Name).'));
@@ -1232,15 +1252,13 @@ function renderNewCustomer(container) {
         });
     }
 
+    // =====================================================================
+    // LOTS LIST + SHARED DETAIL VIEW
+    // =====================================================================
+    const lotCode = (l) => 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
+
     function renderLots(container, params) {
         if (params.id) {
-            const l = LIVE_STORE.lots.find(x => x.name === params.id);
-            if (l && l.status === 'Ticket') return renderTicketDetail(container, params.id);
-            if (l && l.status === 'Intake') return renderIntakeDetail(container, params.id);
-            if (l && l.status === 'Lot') return renderLotDetail(container, params.id);
-            if (l && l.status === 'Position') return renderPositionDetail(container, params.id);
-            if (l && l.status === 'Invoiced') return renderInvoicedDetail(container, params.id);
-            if (l && l.status === 'Settled') return renderSettledDetail(container, params.id);
             return renderLotDetail(container, params.id);
         }
         const stateFilter = container._filter || 'ALL';
@@ -1248,14 +1266,13 @@ function renderNewCustomer(container) {
 
         const rows = lots.map(l => {
             const p = computePayable(l);
-            const displayQty = l.status === 'Ticket' ? (l.quantity_kg || 0) : p.acceptedNetKg;
+            const displayQty = (l.status || 'Ticket') === 'Ticket' ? (l.quantity_kg || 0) : p.acceptedNetKg;
             const origin = l.region || '—';
-            const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
 
             return `
             <tr class="clickable" data-id="${l.name}" style="border-bottom:1px solid #edf2f7;cursor:pointer;transition:background 0.1s;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
                 <td style="padding:14px 20px;font-family:monospace;font-weight:600;color:#2d3748;">${l.name}</td>
-                <td style="padding:14px 16px;font-family:monospace;color:#718096;">${lotId}</td>
+                <td style="padding:14px 16px;font-family:monospace;color:#718096;">${lotCode(l)}</td>
                 <td style="padding:14px 16px;color:#2d3748;">${l.supplier || '—'}</td>
                 <td style="padding:14px 16px;color:#718096;">${origin}</td>
                 <td style="padding:14px 16px;text-align:right;color:#2d3748;font-weight:500;">${fmtKg(displayQty)}</td>
@@ -1268,18 +1285,17 @@ function renderNewCustomer(container) {
             return acc;
         }, {});
 
+        const filterBtn = (key, label) => `
+            <button class="h-btn sm" data-filter="${key}" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${stateFilter === key ? '#1a202c' : '#fff'};color:${stateFilter === key ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">${label}</button>`;
+
         container.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
                 <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Lots <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${LIVE_STORE.lots.length}</span></h1>
                 <button class="h-btn primary" id="new-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">+ New Ticket</button>
             </div>
             <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
-                <button class="h-btn sm ${stateFilter === 'ALL' ? 'primary' : ''}" data-filter="ALL" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${stateFilter === 'ALL' ? '#1a202c' : '#fff'};color:${stateFilter === 'ALL' ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">All</button>
-                ${STAGE_ORDER.map(s => `
-                    <button class="h-btn sm ${stateFilter === s ? 'primary' : ''}" data-filter="${s}" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${stateFilter === s ? '#1a202c' : '#fff'};color:${stateFilter === s ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">
-                        ${s} (${stateCounts[s] || 0})
-                    </button>
-                `).join('')}
+                ${filterBtn('ALL', 'All')}
+                ${STAGE_ORDER.map(s => filterBtn(s, `${s} (${stateCounts[s] || 0})`)).join('')}
             </div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -1310,308 +1326,138 @@ function renderNewCustomer(container) {
         if (newTicketBtn) newTicketBtn.addEventListener('click', () => navigate('tickets'));
     }
 
-    function renderInvoicedDetail(container, id) {
+    // One detail screen for every stage (Ticket, Intake, Lot, Position, Invoiced, Settled)
+    function renderLotDetail(container, id) {
         const l = LIVE_STORE.lots.find(x => x.name === id);
         if (!l) return navigate('lots');
+        const status = l.status || 'Ticket';
         const p = computePayable(l);
-        const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
+        const m = computeMargin(l);
         const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
+        const isTicket = status === 'Ticket';
+        const showMargin = ['Invoiced', 'Settled'].includes(status);
+        const customerKnown = ['Invoiced', 'Settled'].includes(status);
+
+        const PASSED = { Ticket: 0, Intake: 1, Lot: 2, Position: 3, Invoiced: 4, Settled: 5 };
+        const passed = PASSED[status] != null ? PASSED[status] : 2;
+
+        const events = {
+            Intake: [['Lot lifecycle seeded to INTAKE', 'Weighbridge capture and quality inspection completed successfully.']],
+            Lot: [['Lot created, net invoice posted', `Invoiced to ${l.supplier || '—'}`]],
+            Position: [['Transport capitalised, moved to Position', `Haulage KES ${flt(l.haulage_kes)}, cess KES ${flt(l.cess_kes)}, offloading KES ${flt(l.offloading_kes)}`]],
+            Invoiced: [['Lot lifecycle seeded to INVOICED', `Sales invoice ${l.invoice_number || ''} transmitted via eTIMS.`]],
+            Settled: [
+                ['Payment received, lot settled', `${fmtKES(m.revenue)} received from ${l.customer || '—'}. Margin per tonne: ${fmtKES(m.marginPerTonne)}`],
+                ['Lot lifecycle seeded to INVOICED', `Sales invoice ${l.invoice_number || ''} transmitted via eTIMS.`]
+            ]
+        }[status] || [];
+
+        const actions = {
+            Ticket: { label: 'Continue to Intake →', run: () => navigate('intake', { id: l.name }) },
+            Intake: {
+                label: 'Continue to Lot →', run: async () => {
+                    await frappe.db.set_value('Buy Ticket', l.name, { status: 'Lot' });
+                    showToast(`Moved ${l.name} to Lot status`);
+                    await loadMasterData();
+                    navigate('lots', { id: l.name });
+                }
+            },
+            Lot: { label: 'Continue to Position →', run: () => navigate('transport', { id: l.name }) },
+            Position: { label: 'Continue to Sale & Invoicing →', run: () => navigate('sale_invoicing', { id: l.name }) },
+            Invoiced: { label: 'Continue to Settled →', run: () => navigate('payments', { id: l.name }) }
+            
+        }[status];
         
-        const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-        const sellRate = flt(l.sell_rate || 48);
-        const revenue = qty * sellRate;
-        const totalCost = p.netPayable + p.totalTransport;
-        const totalMargin = revenue - totalCost;
-        const marginPerTonne = qty > 0 ? Math.round(totalMargin / (qty / 1000)) : 0;
+        const dash = '—';
+        const stat = (label, value, muted) => `
+            <div>
+                <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
+                ${muted ? `<span style="font-size:14px;color:#718096;">${value}</span>` : `<strong style="font-size:14px;color:#2d3748;">${value}</strong>`}
+            </div>`;
+        const costRow = (label, value, border, extra) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;${border ? 'border-bottom:1px solid #edf2f7;' : ''}font-size:14px;${extra || ''}">
+                <span style="color:#4a5568;">${label}</span><strong style="color:#2d3748;">${value}</strong>
+            </div>`;
+
+        const tracker = STAGE_ORDER.map((s, i) => {
+            const isPassed = i < passed;
+            const isCurrent = s === status;
+            const bg = isCurrent ? '#1a202c' : (isPassed ? '#38a169' : '#edf2f7');
+            const color = (isCurrent || isPassed) ? '#fff' : '#718096';
+            return `
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:${isCurrent ? '#1a202c' : '#a0aec0'};font-weight:${isCurrent ? '600' : '400'};">
+                    <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:12px;">${isPassed ? '✓' : i + 1}</span>
+                    <span>${s}</span>
+                </div>
+                ${i < STAGE_ORDER.length - 1 ? '<span style="color:#cbd5e0;margin:0 4px;">›</span>' : ''}`;
+        }).join('');
+
+        const eventsHtml = events.length ? events.map(ev => `
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">${ev[0]}</strong>
+                    <span style="font-size:13px;color:#718096;">${ev[1]}</span>
+                </div>
+                <div style="text-align:right;font-size:12px;color:#a0aec0;">
+                    <div>${frappe.session.user_fullname || frappe.session.user}</div>
+                    <div>${modifiedTime}</div>
+                </div>
+            </div>`).join('')
+            : `<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:30px;text-align:center;color:#718096;font-size:13px;">No events logged for this lot.</div>`;
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
             </div>
-            
+
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
-                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
-                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Uasin Gishu, Ziwa'}</span>
+                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotCode(l)}</h1>
+                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${isTicket ? 'origin not yet captured' : (l.region || 'origin not captured')}</span>
                 </div>
-                ${statusBadge(l.status || 'Invoiced')}
+                ${statusBadge(status)}
             </div>
 
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">
-                ${STAGE_ORDER.map((s, i) => {
-                    const isPassed = i < 4;
-                    const isCurrent = s === (l.status || 'Invoiced');
-                    const bg = isPassed || isCurrent ? (isCurrent ? '#1a202c' : '#38a169') : '#edf2f7';
-                    const color = isPassed || isCurrent ? '#fff' : '#718096';
-                    return `
-                        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:${isCurrent ? '#1a202c' : '#a0aec0'};font-weight:${isCurrent ? '600' : '400'};">
-                            <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:12px;">${isPassed ? '✓' : i + 1}</span>
-                            <span>${s}</span>
-                        </div>
-                        ${i < STAGE_ORDER.length - 1 ? '<span style="color:#cbd5e0;margin:0 4px;">›</span>' : ''}
-                    `;
-                }).join('')}
-            </div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">${tracker}</div>
 
             <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Customer</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.customer || 'Unga Group Kenya'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Gross weight</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(l.gross_weight_kg || 5400)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Accepted (payable) qty</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(p.acceptedNetKg)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Moisture</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.moisture_ ? l.moisture_ + '%' : '13.2%'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Aflatoxin</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.aflatoxin_ppb ? l.aflatoxin_ppb + ' ppb' : '2 ppb'}</strong>
-                </div>
+                ${stat('Supplier', l.supplier || dash)}
+                ${customerKnown ? stat('Customer', l.customer || dash) : stat('Customer', l.customer || 'Not yet matched', true)}
+                ${stat('Gross weight', isTicket ? dash : fmtKg(l.gross_weight_kg || 0))}
+                ${stat('Accepted (stock) qty', isTicket ? dash : fmtKg(p.acceptedNetKg))}
+                ${stat('Moisture', (!isTicket && l.moisture_) ? l.moisture_ + '%' : dash)}
+                ${stat('Aflatoxin', (!isTicket && l.aflatoxin_ppb) ? l.aflatoxin_ppb + ' ppb' : dash)}
             </div>
 
+            ${isTicket ? '' : `
             <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net Payable to Supplier</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Transport & handling</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.totalTransport)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:15px;font-weight:700;">
-                    <span style="color:#1a202c;">Landed cost per kg</span>
-                    <span style="color:#1a202c;">${p.landedCostPerKg} /kg</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0 0;font-size:14px;">
-                    <span style="color:#4a5568;">Margin per tonne</span>
-                    <strong style="color:#2d3748;">KES ${marginPerTonne.toLocaleString('en-KE')}</strong>
-                </div>
-            </div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 20px;margin-bottom:24px;">
+                ${costRow('Net Payable to Supplier', fmtKES(p.netPayable), true)}
+                ${costRow('Transport & handling', fmtKES(p.totalTransport), true)}
+                ${costRow('Landed cost per kg', p.landedCostPerKg + ' /kg', showMargin, 'font-weight:700;')}
+                ${showMargin ? costRow('Revenue (customer net × sell rate)', fmtKES(m.revenue), true) : ''}
+                ${showMargin ? costRow('Margin', fmtKES(m.margin), true) : ''}
+                ${showMargin ? costRow('Margin per tonne', fmtKES(m.marginPerTonne), false) : ''}
+            </div>`}
 
             <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot lifecycle seeded to INVOICED</strong>
-                    <span style="font-size:13px;color:#718096;">Sales invoice transmitted successfully via eTIMS.</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#a0aec0;">
-                    <div>You (Purchase User)</div>
-                    <div>${modifiedTime}</div>
-                </div>
-            </div>
+            <div style="margin-bottom:12px;">${eventsHtml}</div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-settled-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Settled →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                ${actions ? `<button class="h-btn primary" id="advance-btn" style="${BTN_PRIMARY}">${actions.label}</button>` : ''}
+                <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to lots</button>
             </div>
         `;
 
         document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
-        document.getElementById('advance-settled-btn').addEventListener('click', () => {
-            navigate('payments', { id: l.name });
-        });
+        if (actions) document.getElementById('advance-btn').addEventListener('click', actions.run);
     }
 
-    function renderSettledDetail(container, id) {
-        const l = LIVE_STORE.lots.find(x => x.name === id);
-        if (!l) return navigate('lots');
-        const p = computePayable(l);
-        const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
-        const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
-        
-        const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-        const sellRate = flt(l.sell_rate || 48);
-        const revenue = qty * sellRate;
-        const totalCost = p.netPayable + p.totalTransport;
-        const totalMargin = revenue - totalCost;
-        const marginPerTonne = qty > 0 ? Math.round(totalMargin / (qty / 1000)) : 0;
-        const amountDue = Math.round(qty * sellRate);
-
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
-            </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-                <div>
-                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
-                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Uasin Gishu, Ziwa'}</span>
-                </div>
-                ${statusBadge(l.status || 'Settled')}
-            </div>
-
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">
-                ${STAGE_ORDER.map((s, i) => {
-                    const isPassed = i < 5;
-                    const isCurrent = s === (l.status || 'Settled');
-                    const bg = isPassed || isCurrent ? (isCurrent ? '#1a202c' : '#38a169') : '#edf2f7';
-                    const color = isPassed || isCurrent ? '#fff' : '#718096';
-                    return `
-                        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:${isCurrent ? '#1a202c' : '#a0aec0'};font-weight:${isCurrent ? '600' : '400'};">
-                            <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:12px;">${isPassed ? '✓' : i + 1}</span>
-                            <span>${s}</span>
-                        </div>
-                        ${i < STAGE_ORDER.length - 1 ? '<span style="color:#cbd5e0;margin:0 4px;">›</span>' : ''}
-                    `;
-                }).join('')}
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Customer</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.customer || 'Unga Group Kenya'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Gross weight</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(l.gross_weight_kg || 5400)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Accepted (payable) qty</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(p.acceptedNetKg)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Moisture</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.moisture_ ? l.moisture_ + '%' : '13.2%'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Aflatoxin</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.aflatoxin_ppb ? l.aflatoxin_ppb + ' ppb' : '2 ppb'}</strong>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net Payable to Supplier</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Transport & handling</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.totalTransport)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:15px;font-weight:700;">
-                    <span style="color:#1a202c;">Landed cost per kg</span>
-                    <span style="color:#1a202c;">${p.landedCostPerKg} /kg</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0 0;font-size:14px;">
-                    <span style="color:#4a5568;">Margin per tonne</span>
-                    <strong style="color:#2d3748;">KES ${marginPerTonne.toLocaleString('en-KE')}</strong>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Payment received, lot settled</strong>
-                    <span style="font-size:13px;color:#718096;">KES ${amountDue.toLocaleString('en-KE')} via Bank Transfer from ${l.customer || 'Unga Group Kenya'}. Margin per tonne: KES ${marginPerTonne}</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#a0aec0;">
-                    <div>You (Purchase User)</div>
-                    <div>${modifiedTime}</div>
-                </div>
-            </div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot lifecycle seeded to INVOICED</strong>
-                    <span style="font-size:13px;color:#718096;">Initial demo data</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#a0aec0;">
-                    <div>You (Purchase User)</div>
-                    <div>${modifiedTime}</div>
-                </div>
-            </div>
-
-            <div>
-                <a href="#" id="back-to-lots-link" style="color:#3182ce;text-decoration:none;font-weight:600;font-size:13px;">Back to lots</a>
-            </div>
-        `;
-
-        document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
-        document.getElementById('back-to-lots-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
-    }
-
-    async function renderPayments(container, params) {
-        const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots[0];
-        if (!l) return navigate('lots');
-        const p = computePayable(l);
-        const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-        const sellRate = flt(l.sell_rate || 48);
-        const amountDue = Math.round(qty * sellRate);
-
-        // Only Bank-type Mode of Payment records should appear here (customer bank receipt)
-        let modeOfPayments = ['Bank Draft', 'Wire Transfer', 'RTGS', 'Pesalink'];
-        try {
-            const mopList = await frappe.db.get_list('Mode of Payment', {
-                filters: { type: 'Bank' },
-                fields: ['name'],
-                order_by: 'name asc'
-            });
-            if (mopList && mopList.length > 0) {
-                modeOfPayments = mopList.map(m => m.name);
-            }
-        } catch (e) {
-            console.error('Error fetching Mode of Payment:', e);
-        }
-
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
-            </div>
-            
-            <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Record customer payment</h1>
-                <span style="font-size:13px;color:#718096;">${l.name} · ${l.customer || 'Unga Group Kenya'} · ${l.invoice_number || 'INV-5502'}</span>
-            </div>
-
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Payment</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Amount Due</label>
-                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">KES ${amountDue.toLocaleString('en-KE')}</div>
-                    </div>
-                    ${field({ label: 'Mode of Payment', id: 'f-payment-rail', type: 'select', value: modeOfPayments.includes('Bank Draft') ? 'Bank Draft' : (modeOfPayments[0] || ''), options: modeOfPayments })}
-                </div>
-            </div>
-
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Bank reconciliation</h3>
-                <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#4a5568;display:flex;align-items:center;gap:12px;">
-                    <span>ℹ</span>
-                    <span>On confirmation, this receipt is matched to ${l.invoice_number || 'INV-5502'} and the lot moves to Settled.</span>
-                </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="confirm-settle-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Confirm receipt & settle lot</button>
-                <button class="h-btn ghost" id="cancel-payment-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
-            </div>
-        `;
-
-        document.getElementById('cancel-payment-btn').addEventListener('click', () => navigate('lots', { id: l.name }));
-        // ============================================================
-    // NEW HELPERS — account lookups + generic submit
-    // ============================================================
-
+    // =====================================================================
+    // PAYMENTS (customer receipt)
+    // =====================================================================
     async function getModeOfPaymentAccount(modeOfPayment, company) {
         try {
             const mop = await frappe.db.get_doc('Mode of Payment', modeOfPayment);
@@ -1623,151 +1469,162 @@ function renderNewCustomer(container) {
         }
     }
 
-    async function getCustomerReceivableAccount(customer, company) {
-        try {
-            const cust = await frappe.db.get_doc('Customer', customer);
-            const acc = (cust.accounts || []).find(a => a.company === company);
-            if (acc && acc.account) return acc.account;
-        } catch (e) {
-            console.error('Error fetching customer default account:', e);
-        }
-        // Fallback: company's default receivable account
-        try {
-            const comp = await frappe.db.get_doc('Company', company);
-            return comp.default_receivable_account || null;
-        } catch (e) {
-            console.error('Error fetching company default receivable account:', e);
-            return null;
-        }
+    async function submitFrappeDoc(doc) {
+        return frappe.call({ method: 'frappe.client.submit', args: { doc: doc } });
     }
 
-    async function submitFrappeDoc(doc) {
-        return frappe.call({
-            method: 'frappe.client.submit',
-            args: { doc: doc }
+    async function renderPayments(container, params) {
+        const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots[0];
+        if (!l) return navigate('lots');
+        const m = computeMargin(l);
+        const amountDue = Math.round(m.revenue);
+
+        // Only Bank-type Mode of Payment records (customer bank receipt)
+        let modeOfPayments = ['Bank Draft', 'Wire Transfer', 'RTGS', 'Pesalink'];
+        try {
+            const mopList = await frappe.db.get_list('Mode of Payment', {
+                filters: { type: 'Bank' },
+                fields: ['name'],
+                order_by: 'name asc'
+            });
+            if (mopList && mopList.length > 0) modeOfPayments = mopList.map(x => x.name);
+        } catch (e) {
+            console.error('Error fetching Mode of Payment:', e);
+        }
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Record customer payment</h1>
+                <span style="font-size:13px;color:#718096;">${l.name} · ${l.customer || '—'} · ${l.invoice_number || '—'}</span>
+            </div>
+
+            <div style="${CARD_BOX}">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Payment</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Amount Due</label>
+                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">KES ${amountDue.toLocaleString('en-KE')}</div>
+                    </div>
+                    ${field({ label: 'Mode of Payment', id: 'f-payment-rail', type: 'select', value: modeOfPayments.includes('Bank Draft') ? 'Bank Draft' : (modeOfPayments[0] || ''), options: modeOfPayments })}
+                </div>
+            </div>
+
+            <div style="${CARD_BOX}margin-bottom:28px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Bank reconciliation</h3>
+                <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#4a5568;display:flex;align-items:center;gap:12px;">
+                    <span>ℹ</span>
+                    <span>On confirmation, this receipt is matched to ${l.invoice_number || 'the sales invoice'} and the lot moves to Settled.</span>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:center;">
+                <button class="h-btn primary" id="confirm-settle-btn" style="${BTN_PRIMARY}">Confirm receipt & settle lot</button>
+                <button class="h-btn ghost" id="cancel-payment-btn" style="${BTN_GHOST}">Cancel</button>
+            </div>
+        `;
+
+        document.getElementById('cancel-payment-btn').addEventListener('click', () => navigate('lots', { id: l.name }));
+
+        document.getElementById('confirm-settle-btn').addEventListener('click', async () => {
+            const rail = $('#f-payment-rail').val();
+
+            if (!rail) {
+                frappe.msgprint(__('Please select a payment rail.'));
+                return;
+            }
+
+            try {
+                // 1. Submit the Sales Invoice first (if still draft)
+                let siDoc = null;
+                if (l.invoice_number) {
+                    siDoc = await frappe.db.get_doc('Sales Invoice', l.invoice_number);
+                    if (siDoc.docstatus === 0) {
+                        await submitFrappeDoc(siDoc);
+                        siDoc = await frappe.db.get_doc('Sales Invoice', l.invoice_number);
+                    }
+                }
+
+                if (!siDoc) {
+                    frappe.msgprint(__('No Sales Invoice found for this ticket. Cannot record payment.'));
+                    return;
+                }
+
+                // 2. Account the money lands in (from the Mode of Payment)
+                const paidTo = await getModeOfPaymentAccount(rail, COMPANY);
+                if (!paidTo) {
+                    frappe.msgprint(__('Could not determine the Paid To account. Check that "{0}" has a default account set for {1}.', [rail, COMPANY]));
+                    return;
+                }
+
+                // 3. Let ERPNext build a fully populated Payment Entry from the Sales Invoice
+                const res = await frappe.call({
+                    method: 'erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry',
+                    args: { dt: 'Sales Invoice', dn: siDoc.name }
+                });
+                const peDoc = res.message;
+                if (!peDoc) {
+                    frappe.msgprint(__('Could not build a Payment Entry from Sales Invoice {0}.', [siDoc.name]));
+                    return;
+                }
+
+                // 4. Currency safety check
+                const paidToCurrency = (await frappe.db.get_value('Account', paidTo, 'account_currency')).message.account_currency;
+                if (paidToCurrency !== peDoc.paid_from_account_currency) {
+                    frappe.msgprint(__('Currency mismatch: the invoice account is in {0} but the "{1}" account is in {2}.', [peDoc.paid_from_account_currency, rail, paidToCurrency]));
+                    return;
+                }
+
+                // 5. Reference No / Date (mandatory for bank accounts)
+                const refNo = ($('#f-payment-ref').val() || '').trim() || siDoc.name;
+                const refDate = $('#f-payment-date').val() || frappe.datetime.get_today();
+
+                Object.assign(peDoc, {
+                    posting_date: frappe.datetime.get_today(),
+                    mode_of_payment: rail,
+                    paid_to: paidTo,
+                    paid_to_account_currency: paidToCurrency,
+                    target_exchange_rate: 1,
+                    received_amount: peDoc.paid_amount,
+                    reference_no: refNo,
+                    reference_date: refDate,
+                    custom_buy_ticket: l.name,
+                    remarks: `Payment received via ${rail} for Sales Invoice ${siDoc.name} (Buy Ticket ${l.name}). Ref: ${refNo}`
+                });
+
+                // 6. Save as draft, then submit so it reconciles against the invoice
+                const pe = await frappe.db.insert(peDoc);
+                await submitFrappeDoc(pe);
+            } catch (err) {
+                console.error('Error submitting invoice or creating payment entry:', err);
+                frappe.msgprint(__('Failed to record payment: ') + (err.message || err));
+                return;
+            }
+
+            await frappe.db.set_value('Buy Ticket', l.name, { status: 'Settled' });
+            showToast(`Payment received via ${rail} and lot settled`);
+            await loadMasterData();
+            navigate('lots', { id: l.name });
         });
     }
 
-    // ============================================================
-    // renderPayments — updated confirm-settle-btn handler
-    // Replace the existing handler in renderPayments() with this.
-    // ============================================================
-
-   document.getElementById('confirm-settle-btn').addEventListener('click', async () => {
-        const rail = $('#f-payment-rail').val();
-        const company = 'Holec (E.A.) Limited';
-
-        if (!rail) {
-            frappe.msgprint(__('Please select a payment rail.'));
-            return;
-        }
-
-        try {
-            // 1. Submit the Sales Invoice first (if still draft)
-            let siDoc = null;
-            if (l.invoice_number) {
-                siDoc = await frappe.db.get_doc('Sales Invoice', l.invoice_number);
-                if (siDoc.docstatus === 0) {
-                    await submitFrappeDoc(siDoc);
-                    siDoc = await frappe.db.get_doc('Sales Invoice', l.invoice_number); // re-fetch post-submit values
-                }
-            }
-
-            if (!siDoc) {
-                frappe.msgprint(__('No Sales Invoice found for this ticket. Cannot record payment.'));
-                return;
-            }
-
-            // 2. Resolve the account the money lands in (from the Mode of Payment)
-            const paidTo = await getModeOfPaymentAccount(rail, company);
-            if (!paidTo) {
-                frappe.msgprint(__(
-                    'Could not determine the Paid To account. Check that "{0}" has a default account set for {1}.',
-                    [rail, company]
-                ));
-                return;
-            }
-
-            // 3. Let ERPNext build a fully populated Payment Entry from the Sales Invoice.
-            //    It fills every mandatory field: payment_type, party_type, party, party_name,
-            //    company, posting_date, paid_from (the invoice's receivable account),
-            //    account types/currencies, paid_amount, received_amount, exchange rates,
-            //    base amounts, cost_center and the references table.
-            const res = await frappe.call({
-                method: 'erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry',
-                args: { dt: 'Sales Invoice', dn: siDoc.name }
-            });
-            const peDoc = res.message;
-            if (!peDoc) {
-                frappe.msgprint(__('Could not build a Payment Entry from Sales Invoice {0}.', [siDoc.name]));
-                return;
-            }
-
-            // 4. Currency safety check (Paid To account must be in the same currency as the invoice account)
-            const paidToCurrency = (await frappe.db.get_value('Account', paidTo, 'account_currency')).message.account_currency;
-            if (paidToCurrency !== peDoc.paid_from_account_currency) {
-                frappe.msgprint(__(
-                    'Currency mismatch: the invoice account is in {0} but the "{1}" account is in {2}.',
-                    [peDoc.paid_from_account_currency, rail, paidToCurrency]
-                ));
-                return;
-            }
-
-            // 5. Reference No / Date are mandatory when the Paid To account is a Bank account.
-            //    Uses the optional inputs if they exist on the screen, otherwise falls back.
-            const refNo = ($('#f-payment-ref').val() || '').trim() || siDoc.name;
-            const refDate = $('#f-payment-date').val() || frappe.datetime.get_today();
-
-            Object.assign(peDoc, {
-                posting_date: frappe.datetime.get_today(),
-                mode_of_payment: rail,
-                paid_to: paidTo,
-                paid_to_account_currency: paidToCurrency,
-                target_exchange_rate: 1,
-                received_amount: peDoc.paid_amount,
-                reference_no: refNo,
-                reference_date: refDate,
-                custom_buy_ticket: l.name,
-                remarks: `Payment received via ${rail} for Sales Invoice ${siDoc.name} (Buy Ticket ${l.name}). Ref: ${refNo}`
-            });
-
-            // 6. Save as draft, then submit so it reconciles against the invoice
-            const pe = await frappe.db.insert(peDoc);
-            await submitFrappeDoc(pe);
-
-        } catch (err) {
-            console.error('Error submitting invoice or creating payment entry:', err);
-            frappe.msgprint(__('Failed to record payment: ') + (err.message || err));
-            return;
-        }
-
-        await frappe.db.set_value('Buy Ticket', l.name, { status: 'Settled' });
-        showToast(`Payment received via ${rail} and lot settled`);
-        await loadMasterData();
-        navigate('lots', { id: l.name });
-    });
-    }
-
+    // =====================================================================
+    // COST LEDGER
+    // =====================================================================
     function renderCostLedger(container) {
         const settledLots = LIVE_STORE.lots.filter(l => (l.status || 'Ticket') === 'Settled');
-        
-        let totalRealisedMargin = 0;
-        settledLots.forEach(l => {
-            const p = computePayable(l);
-            const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-            const sellRate = flt(l.sell_rate || 48);
-            const revenue = qty * sellRate;
-            const totalCost = p.netPayable + p.totalTransport;
-            totalRealisedMargin += (revenue - totalCost);
-        });
 
-        const avgMarginPerTonne = settledLots.length > 0 
-            ? Math.round(totalRealisedMargin / settledLots.reduce((acc, l) => {
-                const p = computePayable(l);
-                const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-                return acc + (qty / 1000);
-            }, 0)) 
-            : 1414;
+        let totalRealisedMargin = 0;
+        let totalTonnes = 0;
+        settledLots.forEach(l => {
+            const m = computeMargin(l);
+            totalRealisedMargin += m.margin;
+            totalTonnes += m.soldKg / 1000;
+        });
+        const avgMarginPerTonne = totalTonnes > 0 ? Math.round(totalRealisedMargin / totalTonnes) : 0;
 
         const buyRows = LIVE_STORE.lots.map(l => {
             const p = computePayable(l);
@@ -1779,93 +1636,61 @@ function renderNewCustomer(container) {
                     <td style="padding:12px 16px;color:#2d3748;">${fmtKES(p.totalTransport)}</td>
                     <td style="padding:12px 16px;color:#2d3748;">${p.landedCostPerKg} /kg</td>
                     <td style="padding:12px 16px;">${statusBadge(l.status || 'Ticket')}</td>
-                </tr>
-            `;
+                </tr>`;
         }).join('');
 
         const soldOrInvoicedLots = LIVE_STORE.lots.filter(l => ['Invoiced', 'Settled'].includes(l.status));
         const sellRows = soldOrInvoicedLots.map(l => {
-            const p = computePayable(l);
-            const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-            const sellRate = flt(l.sell_rate || 48);
-            const revenue = qty * sellRate;
-            const totalCost = p.netPayable + p.totalTransport;
-            const marginPerTonne = qty > 0 ? Math.round((revenue - totalCost) / (qty / 1000)) : 0;
-
+            const m = computeMargin(l);
             return `
                 <tr style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'" onclick="navigate('lots', { id: '${l.name}' })">
                     <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${l.name}</td>
-                    <td style="padding:12px 16px;color:#2d3748;">${l.customer || 'Unga Group Kenya'}</td>
-                    <td style="padding:12px 16px;color:#2d3748;">KES ${sellRate}/kg</td>
-                    <td style="padding:12px 16px;color:#2d3748;">${fmtKES(revenue)}</td>
-                    <td style="padding:12px 16px;color:#2d3748;">KES ${marginPerTonne.toLocaleString('en-KE')}</td>
+                    <td style="padding:12px 16px;color:#2d3748;">${l.customer || '—'}</td>
+                    <td style="padding:12px 16px;color:#2d3748;">KES ${m.sellRate}/kg</td>
+                    <td style="padding:12px 16px;color:#2d3748;">${fmtKES(m.revenue)}</td>
+                    <td style="padding:12px 16px;color:#2d3748;">${fmtKES(m.marginPerTonne)}</td>
                     <td style="padding:12px 16px;">${statusBadge(l.status)}</td>
-                </tr>
-            `;
+                </tr>`;
         }).join('');
+
+        const th = (t) => `<th style="padding:12px 16px;">${t}</th>`;
+        const kpi = (label, value) => `
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;">
+                <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
+                <strong style="font-size:24px;color:#1a202c;font-weight:700;">${value}</strong>
+            </div>`;
+        const table = (heads, body, empty) => `
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">${heads.map(th).join('')}</tr></thead>
+                    <tbody>${body || `<tr><td colspan="${heads.length}" style="padding:20px;text-align:center;color:#718096;">${empty}</td></tr>`}</tbody>
+                </table>
+            </div>`;
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Insight</span> › <span style="color:#2d3748;font-weight:500;">Cost Ledger & Margin</span>
             </div>
-            
+
             <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Cost Ledger & Margin</h1>
 
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:24px;">
-                <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;">
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Settled trades</span>
-                    <strong style="font-size:24px;color:#1a202c;font-weight:700;">${settledLots.length}</strong>
-                </div>
-                <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;">
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Total realised margin</span>
-                    <strong style="font-size:24px;color:#1a202c;font-weight:700;">${fmtKES(totalRealisedMargin)}</strong>
-                </div>
-                <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;">
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Average margin / tonne</span>
-                    <strong style="font-size:24px;color:#1a202c;font-weight:700;">KES ${avgMarginPerTonne.toLocaleString('en-KE')}</strong>
-                </div>
+                ${kpi('Settled trades', settledLots.length)}
+                ${kpi('Total realised margin', fmtKES(totalRealisedMargin))}
+                ${kpi('Average margin / tonne', fmtKES(avgMarginPerTonne))}
             </div>
 
             <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">BUY — SUPPLIER COST</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead>
-                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                            <th style="padding:12px 16px;">Ticket</th>
-                            <th style="padding:12px 16px;">Supplier</th>
-                            <th style="padding:12px 16px;">Net Payable</th>
-                            <th style="padding:12px 16px;">Transport</th>
-                            <th style="padding:12px 16px;">Landed/kg</th>
-                            <th style="padding:12px 16px;">State</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${buyRows || `<tr><td colspan="6" style="padding:20px;text-align:center;color:#718096;">No supplier data found.</td></tr>`}
-                    </tbody>
-                </table>
-            </div>
+            ${table(['Ticket', 'Supplier', 'Net Payable', 'Transport', 'Landed/kg', 'State'], buyRows, 'No supplier data found.')}
 
             <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">SELL — CUSTOMER REVENUE</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead>
-                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                            <th style="padding:12px 16px;">Ticket</th>
-                            <th style="padding:12px 16px;">Customer</th>
-                            <th style="padding:12px 16px;">Sell rate</th>
-                            <th style="padding:12px 16px;">Revenue</th>
-                            <th style="padding:12px 16px;">Margin/tonne</th>
-                            <th style="padding:12px 16px;">State</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${sellRows || `<tr><td colspan="6" style="padding:20px;text-align:center;color:#718096;">No customer revenue data found.</td></tr>`}
-                    </tbody>
-                </table>
-            </div>
+            ${table(['Ticket', 'Customer', 'Sell rate', 'Revenue', 'Margin/tonne', 'State'], sellRows, 'No customer revenue data found.')}
         `;
     }
 
+    // =====================================================================
+    // REPORTS
+    // =====================================================================
     function renderReports(container) {
         const stateCounts = STAGE_ORDER.reduce((acc, s) => {
             acc[s] = LIVE_STORE.lots.filter(l => (l.status || 'Ticket') === s).length;
@@ -1873,26 +1698,14 @@ function renderNewCustomer(container) {
         }, {});
 
         let totalNetPayable = 0;
-        let totalAlreadyPaid = 0;
-        LIVE_STORE.lots.forEach(l => {
-            const p = computePayable(l);
-            totalNetPayable += p.netPayable;
-        });
-        
-        try {
-            totalAlreadyPaid = 669072;
-        } catch (e) {
-            totalAlreadyPaid = 0;
-        }
+        LIVE_STORE.lots.forEach(l => { totalNetPayable += computePayable(l).netPayable; });
+
+        // TODO: replace with a real query of submitted Payment Entries to suppliers
+        const totalAlreadyPaid = 0;
         const outstandingPayable = Math.max(0, totalNetPayable - totalAlreadyPaid);
 
         const invoicedLots = LIVE_STORE.lots.filter(l => l.status === 'Invoiced');
-        const receivablesDue = invoicedLots.reduce((acc, l) => {
-            const p = computePayable(l);
-            const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 5256);
-            const sellRate = flt(l.sell_rate || 48);
-            return acc + (qty * sellRate);
-        }, 268068);
+        const receivablesDue = invoicedLots.reduce((acc, l) => acc + computeMargin(l).revenue, 0);
 
         const stockLots = LIVE_STORE.lots.filter(l => ['Lot', 'Position'].includes(l.status));
         const stockRows = stockLots.map(l => {
@@ -1901,11 +1714,10 @@ function renderNewCustomer(container) {
             return `
                 <tr style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'" onclick="navigate('lots', { id: '${l.name}' })">
                     <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${l.name}</td>
-                    <td style="padding:12px 16px;color:#2d3748;">${l.region || 'Nakuru, Njoro'}</td>
+                    <td style="padding:12px 16px;color:#2d3748;">${l.region || '—'}</td>
                     <td style="padding:12px 16px;color:#2d3748;font-weight:500;">${fmtKg(qty)}</td>
                     <td style="padding:12px 16px;">${statusBadge(l.status)}</td>
-                </tr>
-            `;
+                </tr>`;
         }).join('');
 
         const cessMap = {};
@@ -1917,52 +1729,38 @@ function renderNewCustomer(container) {
             cessMap[cty] += cAmt;
             totalCessSum += cAmt;
         });
-        if (totalCessSum === 0) {
-            cessMap['Nakuru'] = 10500;
-            cessMap['Uasin Gishu'] = 2700;
-            totalCessSum = 13200;
-        }
 
-        const cessRows = Object.keys(cessMap).map(cty => {
-            const amt = cessMap[cty];
-            return `
-                <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;max-width:400px;">
-                    <span style="color:#2d3748;font-weight:500;">${cty}</span>
-                    <strong style="color:#2d3748;">KES ${amt.toLocaleString('en-KE')}</strong>
-                </div>
-            `;
-        }).join('');
+        const cessRows = Object.keys(cessMap).map(cty => `
+            <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;max-width:400px;">
+                <span style="color:#2d3748;font-weight:500;">${cty}</span>
+                <strong style="color:#2d3748;">KES ${cessMap[cty].toLocaleString('en-KE')}</strong>
+            </div>`).join('');
 
         const cessBars = Object.keys(cessMap).map(cty => {
-            const amt = cessMap[cty];
-            const pct = totalCessSum > 0 ? Math.max(20, Math.round((amt / totalCessSum) * 180)) : 50;
+            const pct = totalCessSum > 0 ? Math.max(20, Math.round((cessMap[cty] / totalCessSum) * 180)) : 20;
             return `
                 <div style="display:flex;align-items:center;gap:12px;">
                     <div style="width:${pct}px;height:24px;background:#1a202c;border-radius:4px;"></div>
                     <span style="font-size:11px;color:#718096;">${cty}</span>
-                </div>
-            `;
+                </div>`;
         }).join('');
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Insight</span> › <span style="color:#2d3748;font-weight:500;">Reports</span>
             </div>
-            
+
             <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Reports</h1>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Open Lots By State</h3>
-                <div style="display:flex;gap:32px;align-items:flex-end;">
-                    <div style="display:flex;gap:24px;">
-                        ${STAGE_ORDER.map(s => `
-                            <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
-                                <strong style="font-size:16px;color:#1a202c;">${stateCounts[s] || 1}</strong>
-                                <div style="width:36px;height:${Math.max(30, (stateCounts[s] || 1) * 30)}px;background:#1a202c;border-radius:4px 4px 0 0;"></div>
-                                <span style="font-size:12px;color:#718096;">${s}</span>
-                            </div>
-                        `).join('')}
-                    </div>
+                <div style="display:flex;gap:24px;align-items:flex-end;">
+                    ${STAGE_ORDER.map(s => `
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+                            <strong style="font-size:16px;color:#1a202c;">${stateCounts[s] || 0}</strong>
+                            <div style="width:36px;height:${Math.max(6, (stateCounts[s] || 0) * 30)}px;background:#1a202c;border-radius:4px 4px 0 0;"></div>
+                            <span style="font-size:12px;color:#718096;">${s}</span>
+                        </div>`).join('')}
                 </div>
             </div>
 
@@ -1988,7 +1786,7 @@ function renderNewCustomer(container) {
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0;font-size:14px;">
                         <div>
                             <strong style="display:block;color:#2d3748;margin-bottom:2px;">Invoiced, Awaiting Payment</strong>
-                            <span style="font-size:12px;color:#718096;">${invoicedLots.length || 1} invoice(s)</span>
+                            <span style="font-size:12px;color:#718096;">${invoicedLots.length} invoice(s)</span>
                         </div>
                         <strong style="font-size:16px;color:#1a202c;">${fmtKES(receivablesDue)}</strong>
                     </div>
@@ -2013,26 +1811,19 @@ function renderNewCustomer(container) {
             </div>
 
             <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">CESS BY COUNTY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;display:flex;justify-content:space-between;align-items:center;">
-                <div style="flex-grow:1;">
-                    ${cessRows}
-                </div>
-                <div style="display:flex;flex-direction:column;gap:12px;align-items:flex-start;">
-                    ${cessBars}
-                </div>
+            <div style="${CARD_BOX}display:flex;justify-content:space-between;align-items:center;">
+                <div style="flex-grow:1;">${cessRows || '<span style="color:#718096;font-size:13px;">No cess recorded.</span>'}</div>
+                <div style="display:flex;flex-direction:column;gap:12px;align-items:flex-start;">${cessBars}</div>
             </div>
         `;
     }
 
+    // =====================================================================
+    // TRADE EVENT LOG
+    // =====================================================================
     function renderTradeEventLog(container) {
         const searchTerm = container._searchQuery || '';
-        const logs = LIVE_STORE.lotEventLogs.length > 0 ? LIVE_STORE.lotEventLogs : [
-            { name: '737qoedces', lot: 'LOT-2604-0020', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 11:32:50' },
-            { name: 'oigmb8v4ia', lot: 'LOT-2604-0019', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 11:08:03' },
-            { name: 'khlhjh2gt2', lot: 'LOT-2604-0018', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 11:01:10' },
-            { name: 'evqq51u0rk', lot: 'LOT-2604-0017', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 10:51:41' },
-            { name: '2qrln2gjtk', lot: 'LOT-2604-0016', state: 'Ticket', owner: 'Administrator', modified: '29-08-2026 10:30:57' }
-        ];
+        const logs = LIVE_STORE.lotEventLogs || [];
 
         const filteredLogs = logs.filter(e => {
             const lotName = (e.lot || '').toLowerCase();
@@ -2042,45 +1833,34 @@ function renderNewCustomer(container) {
         });
 
         const rows = filteredLogs.map(e => {
-            const lotName = e.lot || ('LOT-' + (e.name ? e.name.slice(0, 8).toUpperCase() : 'XXXX'));
-            const stateVal = e.state || 'Ticket';
-            const ownerVal = e.owner || 'Administrator';
-            const dateVal = e.modified || e.creation || '29-08-2026 11:32:50';
-            const idVal = e.name || '737qoedces';
-
+            const idVal = e.name;
             return `
-                <tr style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
-                    <td style="padding:14px 16px;"><input type="checkbox" style="margin-right:8px;" onclick="event.stopPropagation();"><span style="color:#3182ce;font-weight:500;">${idVal}</span></td>
-                    <td style="padding:14px 16px;font-family:monospace;color:#2d3748;">${lotName}</td>
-                    <td style="padding:14px 16px;color:#2d3748;">${stateVal}</td>
-                    <td style="padding:14px 16px;color:#4a5568;">${ownerVal}</td>
-                    <td style="padding:14px 16px;color:#718096;">${dateVal}</td>
+                <tr style="border-bottom:1px solid #edf2f7;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:14px 16px;"><span style="color:#3182ce;font-weight:500;">${idVal}</span></td>
+                    <td style="padding:14px 16px;font-family:monospace;color:#2d3748;">${e.lot || '—'}</td>
+                    <td style="padding:14px 16px;color:#2d3748;">${e.state || '—'}</td>
+                    <td style="padding:14px 16px;color:#4a5568;">${e.owner || '—'}</td>
+                    <td style="padding:14px 16px;color:#718096;">${e.modified || e.creation || '—'}</td>
                     <td style="padding:14px 16px;text-align:right;">
-                        <a href="/app/lot-event-log/${idVal}" target="_blank" class="h-btn sm" style="padding:4px 10px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;text-decoration:none;color:#2d3748;font-size:12px;font-weight:500;" onclick="event.stopPropagation();">Open ↗</a>
+                        <a href="/app/lot-event-log/${idVal}" target="_blank" class="h-btn sm" style="padding:4px 10px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;text-decoration:none;color:#2d3748;font-size:12px;font-weight:500;">Open ↗</a>
                     </td>
-                </tr>
-            `;
+                </tr>`;
         }).join('');
 
         container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;">Lot Event Log</h1>
-                </div>
+            <div style="margin-bottom:20px;">
+                <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;">Lot Event Log</h1>
             </div>
 
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;background:#ffffff;padding:10px 14px;border:1px solid #e2e8f0;border-radius:6px;">
-                <div style="display:flex;gap:8px;align-items:center;font-size:13px;color:#4a5568;">
-                    <span style="background:#edf2f7;padding:4px 8px;border-radius:4px;border:1px solid #cbd5e0;">ID ≈</span>
-                    <input type="text" id="log-search-input" value="${searchTerm}" placeholder="Search Lot or ID" style="border:1px solid #cbd5e0;border-radius:4px;padding:4px 8px;font-size:13px;width:180px;">
-                </div>
+            <div style="display:flex;align-items:center;margin-bottom:16px;background:#ffffff;padding:10px 14px;border:1px solid #e2e8f0;border-radius:6px;">
+                <input type="text" id="log-search-input" value="${searchTerm}" placeholder="Search Lot or ID" style="border:1px solid #cbd5e0;border-radius:4px;padding:4px 8px;font-size:13px;width:220px;">
             </div>
 
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                            <th style="padding:12px 16px;"><input type="checkbox" style="margin-right:8px;">ID</th>
+                            <th style="padding:12px 16px;">ID</th>
                             <th style="padding:12px 16px;">Lot</th>
                             <th style="padding:12px 16px;">State</th>
                             <th style="padding:12px 16px;">Changed By</th>
@@ -2105,638 +1885,212 @@ function renderNewCustomer(container) {
         });
     }
 
-    // ============================================================
-// PAY TRANSPORTER - UI changes for holec_trading.js
-// (all of this lives inside init_holec_trading_engine())
-// ============================================================
+    // =====================================================================
+    // PAYMENTS LIST + PAY TRANSPORTER
+    // =====================================================================
+    async function renderPaymentsList(container) {
+        let paymentEntries = [];
+        let transportTickets = [];
 
-// ---- 1. loadMasterData(): add 'transport_paid' to the Buy Ticket fields list ----
-//   'sell_rate', 'invoice_number', 'transport_paid'
-
-// ---- 2. REPLACE renderPaymentsList with this ----
-async function renderPaymentsList(container) {
-    let paymentEntries = [];
-    let transportTickets = [];
-
-    try {
-        [paymentEntries, transportTickets] = await Promise.all([
-            frappe.db.get_list('Payment Entry', {
-                fields: ['name', 'party', 'party_type', 'paid_amount', 'mode_of_payment', 'docstatus', 'creation'],
-                order_by: 'creation desc',
-                limit: 50
-            }),
-            frappe.db.get_list('Buy Ticket', {
-                filters: [
-                    ['transporter', 'is', 'set'],          // has a transporter
-                    ['transport_paid', '=', 0],            // not paid yet
-                    ['status', 'in', ['Position', 'Invoiced', 'Settled']]
-                ],
-                fields: ['name', 'transporter', 'haulage_kes', 'cess_kes', 'status'],
-                order_by: 'creation desc',
-                limit: 100
-            })
-        ]);
-    } catch (e) {
-        console.error('Error fetching payment data:', e);
-    }
-
-    // Only tickets with haulage or cess to pay
-    const dueTickets = (transportTickets || []).filter(t => flt(t.haulage_kes) > 0 || flt(t.cess_kes) > 0);
-
-    const transporterRows = dueTickets.map(t => `
-        <tr style="border-bottom:1px solid #edf2f7;">
-            <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${t.name}</td>
-            <td style="padding:12px 16px;color:#2d3748;">${t.transporter}</td>
-            <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.haulage_kes)}</td>
-            <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.cess_kes)}</td>
-            <td style="padding:12px 16px;text-align:right;">
-                <button class="h-btn sm primary pay-transporter-btn" data-id="${t.name}" style="background:#1a202c;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">Pay Transporter</button>
-            </td>
-        </tr>
-    `).join('');
-
-    const historyRows = (paymentEntries || []).map(pe => `
-        <tr style="border-bottom:1px solid #edf2f7;">
-            <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${pe.name}</td>
-            <td style="padding:12px 16px;color:#2d3748;">${pe.party || '—'}</td>
-            <td style="padding:12px 16px;color:#718096;">${pe.party_type || 'Customer'}</td>
-            <td style="padding:12px 16px;color:#2d3748;font-weight:500;">KES ${flt(pe.paid_amount).toLocaleString('en-KE')}</td>
-            <td style="padding:12px 16px;color:#718096;">${pe.mode_of_payment || '—'}</td>
-            <td style="padding:12px 16px;"><span style="display:inline-flex;align-items:center;gap:6px;background:#f0fff4;color:#276749;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:#38a169;border-radius:50%;"></span>Completed</span></td>
-        </tr>
-    `).join('');
-
-    container.innerHTML = `
-        <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-            <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-            <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Payments <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${(paymentEntries || []).length}</span></h1>
-        </div>
-
-        <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYABLE TO TRANSPORTERS</div>
-        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-            <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                <thead>
-                    <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                        <th style="padding:12px 16px;">Ticket</th>
-                        <th style="padding:12px 16px;">Transporter</th>
-                        <th style="padding:12px 16px;">Haulage</th>
-                        <th style="padding:12px 16px;">Cess</th>
-                        <th style="padding:12px 16px;text-align:right;">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${transporterRows || `<tr><td colspan="5" style="padding:20px;text-align:center;color:#718096;">No pending transporter payments.</td></tr>`}
-                </tbody>
-            </table>
-        </div>
-
-        <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY</div>
-        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-            <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                <thead>
-                    <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                        <th style="padding:12px 16px;">ID</th>
-                        <th style="padding:12px 16px;">Party</th>
-                        <th style="padding:12px 16px;">Type</th>
-                        <th style="padding:12px 16px;">Amount</th>
-                        <th style="padding:12px 16px;">Rail</th>
-                        <th style="padding:12px 16px;">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${historyRows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No payment history found.</td></tr>`}
-                </tbody>
-            </table>
-        </div>
-    `;
-
-    container.querySelectorAll('.pay-transporter-btn').forEach(btn => {
-        btn.addEventListener('click', () => navigate('payments_form', { id: btn.dataset.id }));
-    });
-}
-
-// ---- 3. ADD this new screen (the page the "Pay Transporter" button opens) ----
-async function renderPayTransporter(container, params) {
-    const l = LIVE_STORE.lots.find(x => x.name === params.id);
-    if (!l) return navigate('payments_list');
-
-    const haulage = flt(l.haulage_kes);
-    const cess = flt(l.cess_kes);
-    const amount = haulage + cess;
-
-    // Same condition as the list: transporter set, not paid, haulage or cess > 0
-    if (!l.transporter || cint(l.transport_paid) || amount <= 0) {
-        showToast('Nothing payable to a transporter for this ticket.', 'orange');
-        return navigate('payments_list');
-    }
-
-    const transporter = (LIVE_STORE.suppliers || []).find(s => s.name === l.transporter);
-    const transporterLabel = transporter && transporter.supplier_name ? `${transporter.supplier_name} (${l.transporter})` : l.transporter;
-
-    let modeOfPayments = ['Bank Transfer', 'Pesalink', 'Mpesa'];
-    try {
-        const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], order_by: 'name asc', limit: 50 });
-        if (mopList && mopList.length) modeOfPayments = mopList.map(m => m.name);
-    } catch (e) {
-        console.error('Error fetching Mode of Payment:', e);
-    }
-
-    const readonlyBox = (label, value, bold) => `
-        <div style="display:flex;flex-direction:column;gap:8px;">
-            <label style="font-size:13px;font-weight:500;color:#4a5568;">${label}</label>
-            <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:${bold ? '700' : '500'};">${value}</div>
-        </div>`;
-
-    container.innerHTML = `
-        <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-            <span>Holec Trading</span> › <span>Finance</span> › <a href="#" id="back-payments-link" style="color:#3182ce;text-decoration:none;">Payments</a> › <span style="color:#2d3748;font-weight:500;">Pay transporter</span>
-        </div>
-
-        <div style="margin-bottom:20px;">
-            <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Pay transporter</h1>
-            <span style="font-size:13px;color:#718096;">${l.name} · ${transporterLabel}</span>
-        </div>
-
-        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
-            <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport payment</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                ${readonlyBox('Haulage', fmtKES(haulage))}
-                ${readonlyBox('Cess', fmtKES(cess))}
-                ${readonlyBox('Total payable', fmtKES(amount), true)}
-                ${field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: modeOfPayments, value: modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '') })}
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-                ${field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)' })}
-                ${field({ label: 'Reference Date', id: 'f-tp-date', type: 'date', value: frappe.datetime.get_today() })}
-            </div>
-        </div>
-
-        <div style="display:flex;gap:12px;align-items:center;">
-            <button class="h-btn primary" id="confirm-tp-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Confirm payment</button>
-            <button class="h-btn ghost" id="cancel-tp-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
-        </div>
-    `;
-
-    document.getElementById('back-payments-link').addEventListener('click', (e) => { e.preventDefault(); navigate('payments_list'); });
-    document.getElementById('cancel-tp-btn').addEventListener('click', () => navigate('payments_list'));
-
-    document.getElementById('confirm-tp-btn').addEventListener('click', () => {
-        const rail = $('#f-tp-rail').val();
-        if (!rail) {
-            frappe.msgprint(__('Please select a Mode of Payment.'));
-            return;
+        try {
+            [paymentEntries, transportTickets] = await Promise.all([
+                frappe.db.get_list('Payment Entry', {
+                    fields: ['name', 'party', 'party_type', 'paid_amount', 'mode_of_payment', 'docstatus', 'creation'],
+                    order_by: 'creation desc',
+                    limit: 50
+                }),
+                frappe.db.get_list('Buy Ticket', {
+                    filters: [
+                        ['transporter', 'is', 'set'],
+                        ['transport_paid', '=', 0],
+                        ['status', 'in', ['Position', 'Invoiced', 'Settled']]
+                    ],
+                    fields: ['name', 'transporter', 'haulage_kes', 'cess_kes', 'status'],
+                    order_by: 'creation desc',
+                    limit: 100
+                })
+            ]);
+        } catch (e) {
+            console.error('Error fetching payment data:', e);
         }
-        const btn = $('#confirm-tp-btn').prop('disabled', true).text('Paying...');
 
-        frappe.call({
-            method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.pay_transporter',
-            args: {
-                ticket: l.name,
-                mode_of_payment: rail,
-                reference_no: ($('#f-tp-ref').val() || '').trim(),
-                reference_date: $('#f-tp-date').val() || frappe.datetime.get_today()
-            },
-            freeze: true,
-            freeze_message: 'Recording payment...',
-            callback: async (r) => {
-                if (r && r.message) {
-                    showToast(`${transporterLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
-                    await loadMasterData();
-                    navigate('payments_list');
-                } else {
-                    btn.prop('disabled', false).text('Confirm payment');
-                }
-            },
-            error: () => btn.prop('disabled', false).text('Confirm payment')
-        });
-    });
-}
+        const dueTickets = (transportTickets || []).filter(t => flt(t.haulage_kes) > 0 || flt(t.cess_kes) > 0);
 
-    function renderTicketDetail(container, id) {
-        const l = LIVE_STORE.lots.find(x => x.name === id);
-        if (!l) return navigate('lots');
-        const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
-        const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
+        const transporterRows = dueTickets.map(t => `
+            <tr style="border-bottom:1px solid #edf2f7;">
+                <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${t.name}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${t.transporter}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.haulage_kes)}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.cess_kes)}</td>
+                <td style="padding:12px 16px;text-align:right;">
+                    <button class="h-btn sm primary pay-transporter-btn" data-id="${t.name}" style="background:#1a202c;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">Pay Transporter</button>
+                </td>
+            </tr>`).join('');
+
+        const historyRows = (paymentEntries || []).map(pe => `
+            <tr style="border-bottom:1px solid #edf2f7;">
+                <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${pe.name}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${pe.party || '—'}</td>
+                <td style="padding:12px 16px;color:#718096;">${pe.party_type || 'Customer'}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:500;">KES ${flt(pe.paid_amount).toLocaleString('en-KE')}</td>
+                <td style="padding:12px 16px;color:#718096;">${pe.mode_of_payment || '—'}</td>
+                <td style="padding:12px 16px;"><span style="display:inline-flex;align-items:center;gap:6px;background:#f0fff4;color:#276749;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:#38a169;border-radius:50%;"></span>Completed</span></td>
+            </tr>`).join('');
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
-            </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-                <div>
-                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
-                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · origin not yet captured</span>
-                </div>
-                ${statusBadge(l.status || 'Ticket')}
+                <span>Holec Trading</span> › <span>Finance</span> › <span style="color:#2d3748;font-weight:500;">Payments</span>
             </div>
 
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">
-                ${STAGE_ORDER.map((s, i) => {
-                    const isCurrent = s === (l.status || 'Ticket');
-                    const bg = isCurrent ? '#1a202c' : '#edf2f7';
-                    const color = isCurrent ? '#fff' : '#718096';
-                    return `
-                        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:${isCurrent ? '#1a202c' : '#a0aec0'};font-weight:${isCurrent ? '600' : '400'};">
-                            <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:12px;">${i + 1}</span>
-                            <span>${s}</span>
-                        </div>
-                        ${i < STAGE_ORDER.length - 1 ? '<span style="color:#cbd5e0;margin:0 4px;">›</span>' : ''}
-                    `;
-                }).join('')}
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h1 style="margin:0;font-size:22px;font-weight:700;color:#1a202c;display:flex;align-items:center;gap:10px;">Payments <span style="background:#edf2f7;color:#4a5568;font-size:12px;padding:2px 8px;border-radius:10px;font-weight:600;">${(paymentEntries || []).length}</span></h1>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Customer</span>
-                    <span style="font-size:14px;color:#718096;">Not yet matched</span>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Gross weight</span>
-                    <strong style="font-size:14px;color:#2d3748;">—</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Accepted (payable) qty</span>
-                    <strong style="font-size:14px;color:#2d3748;">—</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Moisture</span>
-                    <strong style="font-size:14px;color:#2d3748;">—</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Aflatoxin</span>
-                    <strong style="font-size:14px;color:#2d3748;">—</strong>
-                </div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYABLE TO TRANSPORTERS</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                            <th style="padding:12px 16px;">Ticket</th>
+                            <th style="padding:12px 16px;">Transporter</th>
+                            <th style="padding:12px 16px;">Haulage</th>
+                            <th style="padding:12px 16px;">Cess</th>
+                            <th style="padding:12px 16px;text-align:right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${transporterRows || `<tr><td colspan="5" style="padding:20px;text-align:center;color:#718096;">No pending transporter payments.</td></tr>`}
+                    </tbody>
+                </table>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:30px;margin-bottom:24px;text-align:center;color:#718096;font-size:13px;">
-                No events logged for this lot.
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-intake-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Intake →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                            <th style="padding:12px 16px;">ID</th>
+                            <th style="padding:12px 16px;">Party</th>
+                            <th style="padding:12px 16px;">Type</th>
+                            <th style="padding:12px 16px;">Amount</th>
+                            <th style="padding:12px 16px;">Rail</th>
+                            <th style="padding:12px 16px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${historyRows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No payment history found.</td></tr>`}
+                    </tbody>
+                </table>
             </div>
         `;
 
-        document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
-        document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
-        document.getElementById('advance-intake-btn').addEventListener('click', () => {
-            navigate('intake', { id: l.name });
+        container.querySelectorAll('.pay-transporter-btn').forEach(btn => {
+            btn.addEventListener('click', () => navigate('payments_form', { id: btn.dataset.id }));
         });
     }
 
-    function renderLotDetail(container, id) {
-        const l = LIVE_STORE.lots.find(x => x.name === id);
-        if (!l) return navigate('lots');
-        const p = computePayable(l);
-        const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
-        const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
+    async function renderPayTransporter(container, params) {
+        const l = LIVE_STORE.lots.find(x => x.name === params.id);
+        if (!l) return navigate('payments_list');
+
+        const haulage = flt(l.haulage_kes);
+        const cess = flt(l.cess_kes);
+        const amount = haulage + cess;
+
+        if (!l.transporter || cint(l.transport_paid) || amount <= 0) {
+            showToast('Nothing payable to a transporter for this ticket.', 'orange');
+            return navigate('payments_list');
+        }
+
+        const transporter = (LIVE_STORE.suppliers || []).find(s => s.name === l.transporter);
+        const transporterLabel = transporter && transporter.supplier_name ? `${transporter.supplier_name} (${l.transporter})` : l.transporter;
+
+        let modeOfPayments = ['Bank Transfer', 'Pesalink', 'Mpesa'];
+        try {
+            const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], order_by: 'name asc', limit: 50 });
+            if (mopList && mopList.length) modeOfPayments = mopList.map(x => x.name);
+        } catch (e) {
+            console.error('Error fetching Mode of Payment:', e);
+        }
+
+        const readonlyBox = (label, value, bold) => `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label style="font-size:13px;font-weight:500;color:#4a5568;">${label}</label>
+                <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:${bold ? '700' : '500'};">${value}</div>
+            </div>`;
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
-            </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-                <div>
-                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
-                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Nakuru, Njoro'}</span>
-                </div>
-                ${statusBadge(l.status || 'Lot')}
+                <span>Holec Trading</span> › <span>Finance</span> › <a href="#" id="back-payments-link" style="color:#3182ce;text-decoration:none;">Payments</a> › <span style="color:#2d3748;font-weight:500;">Pay transporter</span>
             </div>
 
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">
-                ${STAGE_ORDER.map((s, i) => {
-                    const isPassed = i < 2;
-                    const isCurrent = s === (l.status || 'Lot');
-                    const bg = isPassed || isCurrent ? (isCurrent ? '#1a202c' : '#38a169') : '#edf2f7';
-                    const color = isPassed || isCurrent ? '#fff' : '#718096';
-                    return `
-                        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:${isCurrent ? '#1a202c' : '#a0aec0'};font-weight:${isCurrent ? '600' : '400'};">
-                            <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:12px;">${isPassed ? '✓' : i + 1}</span>
-                            <span>${s}</span>
-                        </div>
-                        ${i < STAGE_ORDER.length - 1 ? '<span style="color:#cbd5e0;margin:0 4px;">›</span>' : ''}
-                    `;
-                }).join('')}
+            <div style="margin-bottom:20px;">
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Pay transporter</h1>
+                <span style="font-size:13px;color:#718096;">${l.name} · ${transporterLabel}</span>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
+            <div style="${CARD_BOX}">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport payment</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${readonlyBox('Haulage', fmtKES(haulage))}
+                    ${readonlyBox('Cess', fmtKES(cess))}
+                    ${readonlyBox('Total payable', fmtKES(amount), true)}
+                    ${field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: modeOfPayments, value: modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '') })}
                 </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Customer</span>
-                    <span style="font-size:14px;color:#718096;">${l.customer || 'Not yet matched'}</span>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Gross weight</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(l.gross_weight_kg || 0)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Accepted (payable) qty</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(p.acceptedNetKg)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Moisture</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.moisture_ ? l.moisture_ + '%' : '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Aflatoxin</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.aflatoxin_ppb ? l.aflatoxin_ppb + ' ppb' : '—'}</strong>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net Payable to Supplier</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Transport & handling</span>
-                    <strong style="color:#2d3748;">KES 0</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0 0;font-size:15px;font-weight:700;">
-                    <span style="color:#1a202c;">Landed cost per kg</span>
-                    <span style="color:#1a202c;">${p.landedCostPerKg} /kg</span>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot created, net invoice posted</strong>
-                    <span style="font-size:13px;color:#718096;">Invoiced to ${l.supplier}</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#a0aec0;">
-                    <div>You (Purchase User)</div>
-                    <div>${modifiedTime}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                    ${field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)' })}
+                    ${field({ label: 'Reference Date', id: 'f-tp-date', type: 'date', value: frappe.datetime.get_today() })}
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-position-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Position →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
+                <button class="h-btn primary" id="confirm-tp-btn" style="${BTN_PRIMARY}">Confirm payment</button>
+                <button class="h-btn ghost" id="cancel-tp-btn" style="${BTN_GHOST}">Cancel</button>
             </div>
         `;
 
-        document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
-        document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
-        document.getElementById('advance-position-btn').addEventListener('click', () => {
-            navigate('transport', { id: l.name });
+        document.getElementById('back-payments-link').addEventListener('click', (e) => { e.preventDefault(); navigate('payments_list'); });
+        document.getElementById('cancel-tp-btn').addEventListener('click', () => navigate('payments_list'));
+
+        document.getElementById('confirm-tp-btn').addEventListener('click', () => {
+            const rail = $('#f-tp-rail').val();
+            if (!rail) {
+                frappe.msgprint(__('Please select a Mode of Payment.'));
+                return;
+            }
+            const btn = $('#confirm-tp-btn').prop('disabled', true).text('Paying...');
+
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.pay_transporter',
+                args: {
+                    ticket: l.name,
+                    mode_of_payment: rail,
+                    reference_no: ($('#f-tp-ref').val() || '').trim(),
+                    reference_date: $('#f-tp-date').val() || frappe.datetime.get_today()
+                },
+                freeze: true,
+                freeze_message: 'Recording payment...',
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(`${transporterLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
+                        await loadMasterData();
+                        navigate('payments_list');
+                    } else {
+                        btn.prop('disabled', false).text('Confirm payment');
+                    }
+                },
+                error: () => btn.prop('disabled', false).text('Confirm payment')
+            });
         });
     }
 
-    function renderPositionDetail(container, id) {
-        const l = LIVE_STORE.lots.find(x => x.name === id);
-        if (!l) return navigate('lots');
-        const p = computePayable(l);
-        const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
-        const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
-        
-        const haulage = flt(l.haulage_kes || 0);
-        const cess = flt(l.cess_kes || 0);
-        const offloading = flt(l.offloading_kes || 0);
-
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
-            </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-                <div>
-                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
-                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Nakuru, Njoro'}</span>
-                </div>
-                ${statusBadge(l.status || 'Position')}
-            </div>
-
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">
-                ${STAGE_ORDER.map((s, i) => {
-                    const isPassed = i < 3;
-                    const isCurrent = s === (l.status || 'Position');
-                    const bg = isPassed || isCurrent ? (isCurrent ? '#1a202c' : '#38a169') : '#edf2f7';
-                    const color = isPassed || isCurrent ? '#fff' : '#718096';
-                    return `
-                        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:${isCurrent ? '#1a202c' : '#a0aec0'};font-weight:${isCurrent ? '600' : '400'};">
-                            <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:12px;">${isPassed ? '✓' : i + 1}</span>
-                            <span>${s}</span>
-                        </div>
-                        ${i < STAGE_ORDER.length - 1 ? '<span style="color:#cbd5e0;margin:0 4px;">›</span>' : ''}
-                    `;
-                }).join('')}
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Customer</span>
-                    <span style="font-size:14px;color:#2d3748;">${l.customer || 'Not yet matched'}</span>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Gross weight</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(l.gross_weight_kg || 0)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Accepted (payable) qty</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(p.acceptedNetKg)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Moisture</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.moisture_ ? l.moisture_ + '%' : '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Aflatoxin</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.aflatoxin_ppb ? l.aflatoxin_ppb + ' ppb' : '—'}</strong>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net Payable to Supplier</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Transport & handling</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.totalTransport)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0 0;font-size:15px;font-weight:700;">
-                    <span style="color:#1a202c;">Landed cost per kg</span>
-                    <span style="color:#1a202c;">${p.landedCostPerKg} /kg</span>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Transport capitalised, moved to Position</strong>
-                    <span style="font-size:13px;color:#718096;">Haulage KES ${haulage}, cess KES ${cess}, offloading KES ${offloading}</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#a0aec0;">
-                    <div>You (Purchase User)</div>
-                    <div>${modifiedTime}</div>
-                </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-invoiced-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Sale & Invoicing →</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
-            </div>
-        `;
-
-        document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
-        document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
-        document.getElementById('advance-invoiced-btn').addEventListener('click', () => {
-            navigate('sale_invoicing', { id: l.name });
-        });
-    }
-
-    function renderIntakeDetail(container, id) {
-        const l = LIVE_STORE.lots.find(x => x.name === id);
-        if (!l) return navigate('lots');
-        const p = computePayable(l);
-        const lotId = 'LOT-' + (l.name.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase() || 'XXXXX');
-        const modifiedTime = frappe.datetime.str_to_user(l.modified || l.creation);
-
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <a href="#" id="back-link" style="color:#3182ce;text-decoration:none;">Lots</a>
-            </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-                <div>
-                    <h1 style="margin:0 0 4px 0;font-size:22px;color:#1a202c;font-weight:700;">${l.name} · ${lotId}</h1>
-                    <span style="color:#718096;font-size:13px;">${l.supplier || '—'} · ${l.region || 'Nakuru, Njoro'}</span>
-                </div>
-                ${statusBadge(l.status || 'Intake')}
-            </div>
-
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;">
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#276749;font-weight:600;">
-                    <span style="width:24px;height:24px;border-radius:50%;background:#38a169;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;">✓</span>
-                    <span>Ticket</span>
-                </div>
-                <span style="color:#cbd5e0;margin:0 4px;">›</span>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#1a202c;font-weight:600;">
-                    <span style="width:24px;height:24px;border-radius:50%;background:#1a202c;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;">2</span>
-                    <span>Intake</span>
-                </div>
-                <span style="color:#cbd5e0;margin:0 4px;">›</span>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#a0aec0;font-weight:400;">
-                    <span style="width:24px;height:24px;border-radius:50%;background:#edf2f7;color:#718096;display:inline-flex;align-items:center;justify-content:center;font-size:12px;">3</span>
-                    <span>Lot</span>
-                </div>
-                <span style="color:#cbd5e0;margin:0 4px;">›</span>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#a0aec0;font-weight:400;">
-                    <span style="width:24px;height:24px;border-radius:50%;background:#edf2f7;color:#718096;display:inline-flex;align-items:center;justify-content:center;font-size:12px;">4</span>
-                    <span>Position</span>
-                </div>
-                <span style="color:#cbd5e0;margin:0 4px;">›</span>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#a0aec0;font-weight:400;">
-                    <span style="width:24px;height:24px;border-radius:50%;background:#edf2f7;color:#718096;display:inline-flex;align-items:center;justify-content:center;font-size:12px;">5</span>
-                    <span>Invoiced</span>
-                </div>
-                <span style="color:#cbd5e0;margin:0 4px;">›</span>
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#a0aec0;font-weight:400;">
-                    <span style="width:24px;height:24px;border-radius:50%;background:#edf2f7;color:#718096;display:inline-flex;align-items:center;justify-content:center;font-size:12px;">6</span>
-                    <span>Settled</span>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">OVERVIEW</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Supplier</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.supplier || '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Customer</span>
-                    <span style="font-size:14px;color:#718096;">Not yet matched</span>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Gross weight</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(l.gross_weight_kg || 0)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Accepted (payable) qty</span>
-                    <strong style="font-size:14px;color:#2d3748;">${fmtKg(p.acceptedNetKg)}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Moisture</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.moisture_ ? l.moisture_ + '%' : '—'}</strong>
-                </div>
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">Aflatoxin</span>
-                    <strong style="font-size:14px;color:#2d3748;">${l.aflatoxin_ppb ? l.aflatoxin_ppb + ' ppb' : '—'}</strong>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">COST SUMMARY</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Net Payable to Supplier</span>
-                    <strong style="color:#2d3748;">${fmtKES(p.netPayable)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Transport & Handling</span>
-                    <strong style="color:#2d3748;">KES 0</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 0 0;font-size:15px;font-weight:700;">
-                    <span style="color:#1a202c;">Landed Cost Per kg</span>
-                    <span style="color:#1a202c;">${p.landedCostPerKg} /kg</span>
-                </div>
-            </div>
-
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">TRADE EVENT LOG</div>
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <strong style="font-size:14px;color:#2d3748;display:block;margin-bottom:2px;">Lot lifecycle seeded to INTAKE</strong>
-                    <span style="font-size:13px;color:#718096;">Weighbridge capture and quality inspection completed successfully.</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#a0aec0;">
-                    <div>You (Purchase User)</div>
-                    <div>${modifiedTime}</div>
-                </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="advance-lot-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Continue to Lot →</button>
-                <button class="h-btn ghost" id="back-btn3" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to lots</button>
-            </div>
-        `;
-
-        document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
-        document.getElementById('back-btn3').addEventListener('click', () => navigate('lots'));
-        document.getElementById('advance-lot-btn').addEventListener('click', async () => {
-            await frappe.db.set_value('Buy Ticket', l.name, { status: 'Lot' });
-            showToast(`Moved ${l.name} to Lot status`);
-            await loadMasterData();
-            navigate('lots', { id: l.name });
-        });
-    }
-
+    // =====================================================================
+    // NEW TICKET
+    // =====================================================================
     function renderNewTicket(container) {
-        const itemOptions = LIVE_STORE.items.map(i => ({ 
-            value: i.name, 
-            label: i.item_name ? `${i.item_name} (${i.name})` : i.name 
+        const itemOptions = LIVE_STORE.items.map(i => ({
+            value: i.name,
+            label: i.item_name ? `${i.item_name} (${i.name})` : i.name
         }));
         const defaultCommodity = itemOptions.length > 0 ? itemOptions[0].value : 'Maize';
 
@@ -2745,13 +2099,8 @@ async function renderPayTransporter(container, params) {
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">New Ticket</span>
             </div>
             <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1a202c;">New Ticket</h1>
-            
-            <div style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#2b6cb0;display:flex;align-items:center;gap:12px;">
-                <span>ℹ</span>
-                <span>2 supplier(s) are not yet Approved and won't appear below — check Suppliers to move them forward.</span>
-            </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+            <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;margin-bottom:20px;">
                     ${field({ label: 'Supplier *', id: 'f-supplier', type: 'select', required: true, options: LIVE_STORE.suppliers.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })) })}
@@ -2764,8 +2113,8 @@ async function renderPayTransporter(container, params) {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="create-ticket-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Create Ticket</button>
-                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="create-ticket-btn" style="${BTN_PRIMARY}">Create Ticket</button>
+                <button class="h-btn ghost" id="cancel-btn" style="${BTN_GHOST}">Cancel</button>
             </div>
         `;
 
@@ -2784,7 +2133,7 @@ async function renderPayTransporter(container, params) {
                 commodity: commodity,
                 quantity_kg: qty,
                 status: 'Ticket',
-                negotiated_price: 48.0
+                negotiated_price: PAYABLE_RULES.defaultRate
             });
 
             if (res) {
@@ -2795,24 +2144,22 @@ async function renderPayTransporter(container, params) {
         });
     }
 
+    // =====================================================================
+    // INTAKE & QUALITY
+    // =====================================================================
     function renderIntake(container, params) {
         const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots[0];
         if (!l) return navigate('lots');
 
         const waitingTickets = LIVE_STORE.lots.filter(x => (x.status || 'Ticket') === 'Ticket');
-        const areaOptions = (LIVE_STORE?.origin_area || []).map(d => ({ value: d.name, label: d.area_name || d.name }));
-        const counOptions = (LIVE_STORE?.origin_county || []).map(a => ({ value: a.name, label: a.area_name || a.name }));
-        const vehicleOptions = LIVE_STORE.vehicles.map(v => {
-            const labelStr = v.license_plate ? `${v.license_plate} (${v.name})` : v.name;
-            return { value: v.name, label: labelStr };
-        });
-        const transporterOptions = LIVE_STORE.vehicles.map(s => ({ value: s.name, label: s.name ? `${s.name} (${s.name})` : s.name }));
+        // Transporters are Suppliers (the Pay Transporter screen looks them up in suppliers)
+        const transporterOptions = LIVE_STORE.suppliers.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name }));
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Intake & Quality</span>
             </div>
-            
+
             <div style="margin-bottom:20px;">
                 <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Intake & Quality capture</h1>
                 <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || '—'}</span>
@@ -2822,22 +2169,22 @@ async function renderPayTransporter(container, params) {
                 <span>${waitingTickets.length} tickets waiting:</span>
                 <div style="display:flex;gap:6px;">
                     ${waitingTickets.map(t => `
-                        <button class="h-btn sm ${t.name === l.name ? 'primary' : ''}" data-ticket="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
+                        <button class="h-btn sm" data-ticket="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
                     `).join('')}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Weighbridge capture</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Gross Weight (kg) *', id: 'f-gross', type: 'number', value: l.gross_weight_kg || '', required: true, placeholder: '' })}
-                    ${field({ label: 'Tare Weight (kg) *', id: 'f-tare', type: 'number', value: l.tare_weight_kg || '', required: true, placeholder: '' })}
-                    ${field({ label: 'Bag Count *', id: 'f-bags', type: 'number', value: l.bag_count || '', required: true, placeholder: '' })}
+                    ${field({ label: 'Gross Weight (kg) *', id: 'f-gross', type: 'number', value: l.gross_weight_kg || '', required: true })}
+                    ${field({ label: 'Tare Weight (kg) *', id: 'f-tare', type: 'number', value: l.tare_weight_kg || '', required: true })}
+                    ${field({ label: 'Bag Count *', id: 'f-bags', type: 'number', value: l.bag_count || '', required: true })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Weighbridge Ticket Number *', id: 'f-wbnum', value: l.weighbridge_ticket_number || '', required: true, placeholder: 'Unique, e.g. WB-88213' })}
                     ${field({ label: 'Transporter', id: 'f-transporter', type: 'select', value: l.transporter || '', options: transporterOptions })}
-                    ${field({ label: 'Vehicle Registration', id: 'f-vehicle', type: 'data', value: l.vehicle_registration || '', options: vehicleOptions })}
+                    ${field({ label: 'Vehicle Registration', id: 'f-vehicle', type: 'text', value: l.vehicle_registration || '', placeholder: 'e.g. KDA 123A' })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     <div style="display:flex;flex-direction:column;gap:8px;">
@@ -2847,13 +2194,6 @@ async function renderPayTransporter(container, params) {
                             <span id="gross-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
                         </div>
                     </div>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge Slip — Tare (Out)</label>
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <button type="button" id="upload-tare-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload Tare Slip</button>
-                            <span id="tare-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
-                        </div>
-                    </div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:8px;">
                     <label style="font-size:13px;font-weight:500;color:#4a5568;">Net Weight (Calculated)</label>
@@ -2861,23 +2201,19 @@ async function renderPayTransporter(container, params) {
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+            <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
                     ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'number', value: l.foreign_matter_ || '', required: true })}
                     ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'County', id: 'f-county', type: 'select', options: counOptions })}
-                    ${field({ label: 'Area', id: 'f-area', type: 'select', options: areaOptions })}
-                </div>
                 ${field({ label: 'Reason Code (if foreign matter judgement or wet buy)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-intake-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit Intake & Create Lot</button>
-                <button class="h-btn ghost" id="cancel-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Cancel</button>
+                <button class="h-btn primary" id="submit-intake-btn" style="${BTN_PRIMARY}">Submit Intake & Create Lot</button>
+                <button class="h-btn ghost" id="cancel-btn" style="${BTN_GHOST}">Cancel</button>
             </div>
         `;
 
@@ -2900,56 +2236,39 @@ async function renderPayTransporter(container, params) {
             const tare = flt($('#f-tare').val());
             const bags = cint($('#f-bags').val());
             const wbNo = $('#f-wbnum').val();
-            const moisture = flt($('#f-moisture').val());
-            const fm = flt($('#f-fm').val());
-            const afla = flt($('#f-afla').val());
 
             if (!gross || !tare || !bags || !wbNo) {
                 frappe.msgprint(__('Please fill all mandatory Weighbridge fields.'));
                 return;
             }
+            if (gross <= tare) {
+                frappe.msgprint(__('Gross weight must be greater than tare weight.'));
+                return;
+            }
 
+            // Held in memory until "Post Net Invoice & Create Lot" saves them on the Deductions screen
             l.gross_weight_kg = gross;
             l.tare_weight_kg = tare;
             l.bag_count = bags;
             l.weighbridge_ticket_number = wbNo;
             l.transporter = $('#f-transporter').val();
             l.vehicle_registration = $('#f-vehicle').val();
-            l.moisture_ = moisture;
-            l.foreign_matter_ = fm;
-            l.aflatoxin_ppb = afla;
-            l.county = $('#f-county').val();
-            l.region = $('#f-area').val();
+            l.moisture_ = flt($('#f-moisture').val());
+            l.foreign_matter_ = flt($('#f-fm').val());
+            l.aflatoxin_ppb = flt($('#f-afla').val());
             l.reason_code_if_foreign_matter_judgement_or_wet_buy = $('#f-reason').val();
 
-            showToast(`Intake calculated for ${l.name}`);
+            showToast(`Intake captured for ${l.name}`);
             navigate('deductions', { id: l.name });
         });
 
         function updateWeighbridgeFields(data) {
-            if (data.gross_weight !== null && data.gross_weight !== undefined && data.gross_weight !== '') {
-                $('#f-gross').val(data.gross_weight);
-            }
-            if (data.tare_weight !== null && data.tare_weight !== undefined && data.tare_weight !== '') {
-                $('#f-tare').val(data.tare_weight);
-            }
-            if (data.ticket_no !== null && data.ticket_no !== undefined && data.ticket_no !== '') {
-                $('#f-wbnum').val(data.ticket_no);
-            }
-            if (data.bag_count !== null && data.bag_count !== undefined && data.bag_count !== '') {
-                $('#f-bags').val(data.bag_count);
-            }
-            if (data.vehicle_no !== null && data.vehicle_no !== undefined && data.vehicle_no !== '') {
-                const vehicleSelect = $('#f-vehicle');
-                const vehicleNo = String(data.vehicle_no).trim();
-                let existingOption = vehicleSelect.find('option').filter(function () {
-                    return String($(this).val()).trim().toUpperCase() === vehicleNo.toUpperCase();
-                });
-                if (existingOption.length === 0) {
-                    vehicleSelect.append($('<option>', { value: vehicleNo, text: vehicleNo }));
-                }
-                vehicleSelect.val(vehicleNo).trigger('change');
-            }
+            const has = (v) => v !== null && v !== undefined && v !== '';
+            if (has(data.gross_weight)) $('#f-gross').val(data.gross_weight);
+            if (has(data.tare_weight)) $('#f-tare').val(data.tare_weight);
+            if (has(data.ticket_no)) $('#f-wbnum').val(data.ticket_no);
+            if (has(data.bag_count)) $('#f-bags').val(data.bag_count);
+            if (has(data.vehicle_no)) $('#f-vehicle').val(String(data.vehicle_no).trim());
             updateNetCalc();
         }
 
@@ -2957,29 +2276,28 @@ async function renderPayTransporter(container, params) {
             if (!file) return;
             const reader = new FileReader();
             reader.onload = function (uploadEvent) {
-                const base64Data = uploadEvent.target.result;
                 showToast(`${buttonLabel} uploaded. Extracting details via AI...`, 'orange');
 
                 frappe.call({
                     method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_weighbridge_data',
                     args: {
-                        filedata: base64Data,
+                        filedata: uploadEvent.target.result,
                         slip_type: slipType,
-                        ticket_name: typeof l !== 'undefined' ? l.name : null,
+                        ticket_name: l.name,
                         filename: file.name
                     },
                     freeze: true,
                     freeze_message: `Reading ${buttonLabel}...`,
                     callback: function (r) {
                         if (r.exc || !r.message || !r.message.success) {
-                            showToast(r.message?.message || `Could not extract ${buttonLabel} details.`, 'orange');
+                            showToast((r.message && r.message.message) || `Could not extract ${buttonLabel} details.`, 'orange');
                             return;
                         }
                         updateWeighbridgeFields(r.message);
                         $(fileNameSelector).text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
                         showToast(`${buttonLabel} OCR completed successfully.`, 'green');
                     },
-                    error: function (xhr) {
+                    error: function () {
                         showToast(`Error while processing ${buttonLabel}.`, 'red');
                     }
                 });
@@ -2987,250 +2305,324 @@ async function renderPayTransporter(container, params) {
             reader.readAsDataURL(file);
         }
 
-        const grossSlipBtn = document.getElementById('upload-gross-slip');
-        if (grossSlipBtn) {
-            grossSlipBtn.addEventListener('click', () => {
-                const fileInput = document.createElement('input');
-                fileInput.type = 'file';
-                fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
-                fileInput.onchange = function (e) {
-                    const file = e.target.files[0];
-                    if (file) processWeighbridgeSlip(file, 'gross', '#gross-file-name', 'Gross Weight Slip');
-                };
-                fileInput.click();
-            });
-        }
-
-        const tareSlipBtn = document.getElementById('upload-tare-slip');
-        if (tareSlipBtn) {
-            tareSlipBtn.addEventListener('click', () => {
-                const fileInput = document.createElement('input');
-                fileInput.type = 'file';
-                fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
-                fileInput.onchange = function (e) {
-                    const file = e.target.files[0];
-                    if (file) processWeighbridgeSlip(file, 'tare', '#tare-file-name', 'Tare Weight Slip');
-                };
-                fileInput.click();
-            });
-        }
+        document.getElementById('upload-gross-slip').addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
+            fileInput.onchange = function (e) {
+                const file = e.target.files[0];
+                if (file) processWeighbridgeSlip(file, 'gross', '#gross-file-name', 'Gross Weight Slip');
+            };
+            fileInput.click();
+        });
     }
 
+    // =====================================================================
+    // DEDUCTIONS & PAYABLE
+    // =====================================================================
     function renderDeductionsPayable(container, params) {
         const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots[0];
         if (!l) return navigate('lots');
-        const p = computePayable(l);
-        const grossKg = flt(l.gross_weight_kg || l.quantity_kg || 0);
-        const tareKg = flt(l.tare_weight_kg || 0);
-        const netKg = Math.max(0, grossKg - tareKg);
-        const moisture = flt(l.moisture_ || 0);
-        const fm = flt(l.foreign_matter_ || 0);
-        const bags = cint(l.bag_count || 0);
+
+        const R = PAYABLE_RULES;
+        const initialRate = flt(l.negotiated_price || R.defaultRate);
+
+        const row = (label, sub, id, color) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                <div>
+                    <span style="color:#4a5568;display:block;">${label}</span>
+                    ${sub !== null ? `<span id="${id}-sub" style="font-size:12px;color:#a0aec0;">${sub}</span>` : ''}
+                </div>
+                <strong id="${id}" style="color:${color || '#2d3748'};"></strong>
+            </div>`;
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Deductions & Payable</span>
             </div>
-            
-            <h1 style="margin:0 0 20px 0;font-size:22px;font-weight:700;color:#1a202c;">Deductions & Payable Engine</h1>
+            <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Deductions & Payable Engine</h1>
+            <div style="font-size:13px;color:#718096;margin-bottom:20px;">${l.name} · ${l.supplier || '—'}</div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Gross Weight</span>
-                    <strong style="color:#2d3748;">${fmtKg(grossKg)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Tare Weight</span>
-                    <strong style="color:#e53e3e;">- ${fmtKg(tareKg)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <div>
-                        <span style="color:#4a5568;display:block;">Net Weight</span>
-                        <span style="font-size:12px;color:#a0aec0;">Gross Minus Tare</span>
-                    </div>
-                    <strong style="color:#2d3748;">${fmtKg(netKg)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <div>
-                        <span style="color:#4a5568;display:block;">Moisture Deduction</span>
-                        <span style="font-size:12px;color:#a0aec0;">${moisture}% Recorded vs 13.5% Standard</span>
-                    </div>
-                    <strong style="color:#e53e3e;">- ${fmtKg(netKg * 0.03)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <div>
-                        <span style="color:#4a5568;display:block;">Foreign Matter Deduction</span>
-                        <span style="font-size:12px;color:#a0aec0;">${fm}% Recorded</span>
-                    </div>
-                    <strong style="color:#e53e3e;">- ${fmtKg(netKg * 0.012)}</strong>
-                </div>
+                ${row('Gross Weight', null, 'd-gross')}
+                ${row('Tare Weight', null, 'd-tare', '#e53e3e')}
+                ${row('Net Weight', 'Gross minus tare', 'd-net')}
+                ${row('Moisture Deduction', '', 'd-moist', '#e53e3e')}
+                ${row('Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:14px;">
                     <div>
                         <strong style="color:#1a202c;display:block;">Accepted Net Quantity</strong>
                         <span style="font-size:12px;color:#718096;">This is what lands in the stock ledger — not the gross weight</span>
                     </div>
-                    <strong style="color:#1a202c;font-size:16px;">${fmtKg(p.acceptedNetKg)}</strong>
+                    <strong id="d-accepted" style="color:#1a202c;font-size:16px;"></strong>
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payable Value</h3>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Reference Rate</span>
-                    <strong style="color:#2d3748;">KES 48 /kg</strong>
+                <div style="max-width:320px;margin-bottom:16px;">
+                    ${field({ label: 'Reference Rate (KES/kg) *', id: 'f-ref-rate', type: 'number', required: true, value: initialRate })}
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <div>
-                        <span style="color:#4a5568;display:block;">Gross Value</span>
-                        <span style="font-size:12px;color:#a0aec0;">${fmtKg(p.acceptedNetKg)} × rate</span>
-                    </div>
-                    <strong style="color:#2d3748;">${fmtKES(p.acceptedNetKg * 48)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <div>
-                        <span style="color:#4a5568;display:block;">Bagging Deduction</span>
-                        <span style="font-size:12px;color:#a0aec0;">${bags} bags × KES 25</span>
-                    </div>
-                    <strong style="color:#e53e3e;">- ${fmtKES(bags * 25)}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
-                    <span style="color:#4a5568;">Aflatoxin Test Fee</span>
-                    <strong style="color:#e53e3e;">- KES 300</strong>
-                </div>
+                ${row('Net Weight × Rate', '', 'p-gross')}
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:15px;">
                     <strong style="color:#1a202c;">Net Payable to Supplier</strong>
-                    <strong style="color:#1a202c;font-size:16px;">${fmtKES(p.netPayable)}</strong>
+                    <strong id="p-net" style="color:#1a202c;font-size:16px;"></strong>
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+            <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Net Supplier Invoice</h3>
                 <div style="display:flex;flex-direction:column;gap:8px;">
                     <label style="font-size:13px;font-weight:500;color:#4a5568;">Invoice Value</label>
-                    <div style="padding:10px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">${fmtKES(p.netPayable)}</div>
+                    <div id="p-invoice" style="padding:10px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;"></div>
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="post-invoice-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Post Net Invoice & Create Lot</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
+                <button class="h-btn primary" id="post-invoice-btn" style="${BTN_PRIMARY}">Post Net Invoice & Create Lot</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
             </div>
         `;
 
+        // Every line comes from computePayable, so the screen and totals always agree
+        const update = () => {
+            const rate = flt($('#f-ref-rate').val());
+            const p = computePayable(l, rate);
+
+            $('#d-gross').text(fmtKg1(p.grossKg));
+            $('#d-tare').text('- ' + fmtKg1(p.tareKg));
+            $('#d-net').text(fmtKg1(p.netKg));
+
+            $('#d-moist').text('- ' + fmtKg1(p.moistureDeductionKg));
+            $('#d-moist-sub').text(p.moistureExcess > 0
+                ? `${p.moisture}% vs ${R.moistureStandard}% standard: ${p.moistureExcess.toFixed(1)} pts over × ${p.moistureMultiplier} = ${p.moisturePenaltyPct.toFixed(2)}% of net weight`
+                : `${p.moisture}% recorded — at or below ${R.moistureStandard}% standard, no deduction`);
+
+            $('#d-fm').text('- ' + fmtKg1(p.fmDeductionKg));
+            $('#d-fm-sub').text(p.fmExcess > 0
+                ? `${p.fm}% vs ${R.fmAllowance}% allowance: ${p.fmExcess.toFixed(1)} pts over × ${R.fmFactor} = ${p.fmPenaltyPct.toFixed(2)}% of net weight`
+                : `${p.fm}% recorded — within ${R.fmAllowance}% allowance, no deduction`);
+
+            $('#d-accepted').text(fmtKg1(p.acceptedNetKg));
+
+            $('#p-gross').text(fmtKES(p.grossValue));
+            $('#p-gross-sub').text(`${fmtKg1(p.netKg)} net × KES ${rate}/kg`);
+            $('#p-net').text(fmtKES(p.netPayable));
+            $('#p-invoice').text(fmtKES(p.netPayable));
+        };
+
+        $('#f-ref-rate').on('input', update);
+        update();
+
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
         document.getElementById('post-invoice-btn').addEventListener('click', async () => {
-            await frappe.db.set_value('Buy Ticket', l.name, { status: 'Lot' });
+            const rate = flt($('#f-ref-rate').val());
+            if (rate <= 0) { frappe.msgprint(__('Please enter a valid Reference Rate.')); return; }
+
+            // Save the edited rate AND the intake values
+            await frappe.db.set_value('Buy Ticket', l.name, {
+                status: 'Lot',
+                negotiated_price: rate,
+                gross_weight_kg: flt(l.gross_weight_kg),
+                tare_weight_kg: flt(l.tare_weight_kg),
+                bag_count: cint(l.bag_count),
+                weighbridge_ticket_number: l.weighbridge_ticket_number || '',
+                transporter: l.transporter || '',
+                vehicle_registration: l.vehicle_registration || '',
+                moisture_: flt(l.moisture_),
+                foreign_matter_: flt(l.foreign_matter_),
+                aflatoxin_ppb: flt(l.aflatoxin_ppb),
+                reason_code_if_foreign_matter_judgement_or_wet_buy: l.reason_code_if_foreign_matter_judgement_or_wet_buy || ''
+            });
             showToast(`Net invoice posted and ${l.name} moved to Lot status`);
             await loadMasterData();
             navigate('lots', { id: l.name });
         });
     }
 
+    // =====================================================================
+    // TRANSPORT & LOSS
+    // =====================================================================
     function renderTransportLoss(container, params) {
         const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots.filter(x => (x.status || 'Lot') === 'Lot')[0];
         if (!l) return navigate('lots');
 
         const readyLots = LIVE_STORE.lots.filter(x => (x.status || 'Lot') === 'Lot');
-        const expectedQty = flt(l.quantity_kg || l.gross_weight_kg || 7578);
+
+        // Expected Quantity = Supplier Net Weight
+        // Supplier Net Weight = Gross Weight - Tare Weight
+        const supplierGross = flt(l.gross_weight_kg || 0);
+        const supplierTare = flt(l.tare_weight_kg || 0);
+
+        const expectedQty = Math.max(0, supplierGross - supplierTare);
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport & Loss</span>
             </div>
-            
+
             <div style="margin-bottom:20px;">
                 <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport & Loss</h1>
-                <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || 'Wanjiru Grain Traders'}</span>
+                <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || '—'}</span>
             </div>
 
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px;color:#4a5568;">
                 <span>${readyLots.length} lots ready:</span>
                 <div style="display:flex;gap:6px;">
                     ${readyLots.map(t => `
-                        <button class="h-btn sm ${t.name === l.name ? 'primary' : ''}" data-lot="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
+                        <button class="h-btn sm" data-lot="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
                     `).join('')}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport Charges</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${field({ label: 'Haulage (KES)', id: 'f-haulage', type: 'number', value: l.haulage_kes || '', placeholder: '' })}
-                    ${field({ label: 'Cess (KES)', id: 'f-cess', type: 'number', value: l.cess_kes || '', placeholder: '' })}
-                    ${field({ label: 'Offloading (KES)', id: 'f-offloading', type: 'number', value: l.offloading_kes || '', placeholder: '' })}
+                    ${field({ label: 'Haulage (KES)', id: 'f-haulage', type: 'number', value: l.haulage_kes || '' })}
+                    ${field({ label: 'Cess (KES)', id: 'f-cess', type: 'number', value: l.cess_kes || '' })}
+                    ${field({ label: 'Offloading (KES)', id: 'f-offloading', type: 'number', value: l.offloading_kes || '' })}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+            <div style="${CARD_BOX}">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Weighbridge Slip</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge slip at customer (delivery)</label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <button type="button" id="upload-delivery-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload Delivery Slip</button>
+                        <span id="delivery-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                    ${field({ label: 'Gross Weight (kg) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || '' })}
+                    ${field({ label: 'Tare Weight (kg) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || '' })}
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Net Weight Delivered (Calculated)</label>
+                        <div id="delivered-calc-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">0 kg</div>
+                        <span style="font-size:12px;color:#a0aec0;">Gross minus tare. Used as Delivered Quantity and for revenue.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Loss Reconciliation</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="font-size:13px;font-weight:500;color:#4a5568;">Expected Quantity</label>
                         <div style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">${expectedQty.toLocaleString('en-KE')} kg</div>
                     </div>
-                    ${field({ label: 'Delivered Quantity (kg)', id: 'f-delivered-qty', type: 'number', value: l.delivered_quantity_kg || expectedQty })}
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Delivered Quantity (kg)</label>
+                        <div id="delivered-qty-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">0 kg</div>
+                    </div>
                 </div>
-                <div id="loss-alert-box" style="background:#f0fff4;border:1px solid #c6f6d5;border-radius:6px;padding:12px 16px;font-size:13px;color:#276749;display:flex;align-items:center;gap:12px;">
-                    <span>✓</span>
-                    <span id="loss-alert-text">No Loss Recorded — Full Expected Quantity Delivered.</span>
+                <div id="loss-alert-box" style="border-radius:6px;padding:12px 16px;font-size:13px;display:flex;align-items:center;gap:12px;">
+                    <span></span><span id="loss-alert-text"></span>
                 </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="capitalise-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Capitalise Costs & Move to Position</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
+                <button class="h-btn primary" id="capitalise-btn" style="${BTN_PRIMARY}">Capitalise Costs & Move to Position</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
             </div>
         `;
 
+        // Delivered quantity is always gross - tare from the customer weighbridge
+        const getDelivered = () => Math.max(0, flt($('#f-d-gross').val()) - flt($('#f-d-tare').val()));
+
         const updateReconciliation = () => {
-            const delivered = flt($('#f-delivered-qty').val());
+            const delivered = getDelivered();
             const diff = expectedQty - delivered;
             const alertBox = $('#loss-alert-box');
             const alertText = $('#loss-alert-text');
+            const icon = alertBox.find('span:first');
 
-            if (diff <= 0 || delivered === expectedQty) {
+            $('#delivered-calc-box').text(fmtKg(delivered));
+            $('#delivered-qty-box').text(fmtKg(delivered));
+
+            if (delivered <= 0) {
+                alertBox.css({ background: '#f7fafc', border: '1px solid #e2e8f0', color: '#4a5568' });
+                icon.text('ℹ');
+                alertText.text('Upload the customer weighbridge slip, or enter gross and tare weight, to calculate the delivered quantity.');
+            } else if (diff <= 0) {
                 alertBox.css({ background: '#f0fff4', border: '1px solid #c6f6d5', color: '#276749' });
-                alertText.html('No Loss Recorded — Full Expected Quantity Delivered.');
-                alertBox.find('span:first').text('✓');
+                icon.text('✓');
+                alertText.text('No loss recorded. Full expected quantity delivered.');
             } else {
                 const tolerance = 80;
                 const recovered = Math.max(0, diff - tolerance);
-                const sellRate = 48; 
-                const recoveredValue = recovered * sellRate;
-
-                if (diff <= tolerance) {
-                    alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
-                    alertBox.find('span:first').text('⚠');
-                    alertText.text(`${diff.toLocaleString('en-KE')} kg loss is within the ${tolerance}kg tolerance limit.`);
-                } else {
-                    alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
-                    alertBox.find('span:first').text('⚠');
-                    alertText.text(`${diff.toLocaleString('en-KE')} kg loss exceeds the ${tolerance}kg tolerance. ${recovered.toLocaleString('en-KE')} kg recovered from the transporter at sell rate = KES ${recoveredValue.toLocaleString('en-KE')}, split across inventory reversal and margin recovery.`);
-                }
+                const sellRate = flt(l.sell_rate || l.negotiated_price || PAYABLE_RULES.defaultRate);
+                alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
+                icon.text('⚠');
+                alertText.text(diff <= tolerance
+                    ? `${diff.toLocaleString('en-KE')} kg loss is within the ${tolerance} kg tolerance limit.`
+                    : `${diff.toLocaleString('en-KE')} kg loss exceeds the ${tolerance} kg tolerance. ${recovered.toLocaleString('en-KE')} kg recovered from the transporter at sell rate = KES ${(recovered * sellRate).toLocaleString('en-KE')}, split across inventory reversal and margin recovery.`);
             }
         };
 
-        $('#f-delivered-qty').on('input', updateReconciliation);
+        $('#f-d-gross, #f-d-tare').on('input', updateReconciliation);
         updateReconciliation();
+
+        // ---- OCR on the customer weighbridge slip ----
+        document.getElementById('upload-delivery-slip').addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
+            fileInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    showToast('Delivery slip uploaded. Extracting details...', 'orange');
+                    frappe.call({
+                        method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_weighbridge_data',
+                        args: { filedata: ev.target.result, slip_type: 'delivery', ticket_name: l.name, filename: file.name },
+                        freeze: true,
+                        freeze_message: 'Reading delivery weighbridge slip...',
+                        callback: (r) => {
+                            if (r.exc || !r.message || !r.message.success) {
+                                showToast((r.message && r.message.message) || 'Could not read the slip. Enter gross and tare manually.', 'orange');
+                                $('#delivery-file-name').text(file.name);
+                                return;
+                            }
+                            const d = r.message;
+                            const has = (v) => v !== null && v !== undefined && v !== '';
+                            if (has(d.gross_weight)) $('#f-d-gross').val(d.gross_weight);
+                            if (has(d.tare_weight)) $('#f-d-tare').val(d.tare_weight);
+                            $('#delivery-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
+                            updateReconciliation();
+                            showToast('Delivery slip read successfully. Please check the weights.');
+                        },
+                        error: () => showToast('Error while reading the delivery slip.', 'red')
+                    });
+                };
+                reader.readAsDataURL(file);
+            };
+            fileInput.click();
+        });
 
         container.querySelectorAll('[data-lot]').forEach(btn => {
             btn.addEventListener('click', () => navigate('transport', { id: btn.dataset.lot }));
         });
-
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
+
         document.getElementById('capitalise-btn').addEventListener('click', async () => {
-            const haulage = flt($('#f-haulage').val());
-            const cess = flt($('#f-cess').val());
-            const offloading = flt($('#f-offloading').val());
-            const deliveredQty = flt($('#f-delivered-qty').val());
+            const gross = flt($('#f-d-gross').val());
+            const tare = flt($('#f-d-tare').val());
+            if (gross <= 0 || tare <= 0 || gross <= tare) {
+                frappe.msgprint(__('Enter a valid customer weighbridge gross and tare weight (gross must be greater than tare).'));
+                return;
+            }
 
             await frappe.db.set_value('Buy Ticket', l.name, {
                 status: 'Position',
-                haulage_kes: haulage,
-                cess_kes: cess,
-                offloading_kes: offloading,
-                delivered_quantity_kg: deliveredQty
+                haulage_kes: flt($('#f-haulage').val()),
+                cess_kes: flt($('#f-cess').val()),
+                offloading_kes: flt($('#f-offloading').val()),
+                delivery_gross_kg: gross,
+                delivery_tare_kg: tare,
+                delivered_quantity_kg: gross - tare
             });
 
             showToast(`Costs capitalised and ${l.name} moved to Position`);
@@ -3239,83 +2631,91 @@ async function renderPayTransporter(container, params) {
         });
     }
 
+    // =====================================================================
+    // SALE & INVOICING
+    // =====================================================================
     function renderSaleInvoicing(container, params) {
         const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots.filter(x => (x.status || 'Position') === 'Position')[0] || LIVE_STORE.lots[0];
         if (!l) return navigate('lots');
 
         const positionLots = LIVE_STORE.lots.filter(x => (x.status || 'Position') === 'Position');
         const customerOptions = LIVE_STORE.customers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name }));
-        const p = computePayable(l);
-        const qty = flt(l.delivered_quantity_kg || p.acceptedNetKg || 7578);
-        const defaultSellRate = flt(l.negotiated_price || 48);
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Sale & Invoicing</span>
             </div>
-            
+
             <div style="margin-bottom:20px;">
                 <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Sale & Invoicing</h1>
-                <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || 'Wanjiru Grain Traders'} → ${qty.toLocaleString('en-KE')} kg @ KES <span id="header-sell-rate">${defaultSellRate}</span>/kg landed</span>
+                <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || '—'} · Margin: <strong id="header-margin" style="color:#2d3748;"></strong></span>
             </div>
 
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px;color:#4a5568;">
                 <span>${positionLots.length} lots ready:</span>
                 <div style="display:flex;gap:6px;">
                     ${positionLots.map(t => `
-                        <button class="h-btn sm ${t.name === l.name ? 'primary' : ''}" data-sale-lot="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
+                        <button class="h-btn sm" data-sale-lot="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
                     `).join('')}
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;">
+            <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Delivery</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Customer *', id: 'f-customer', type: 'select', required: true, options: customerOptions, value: l.customer || '' })}
-                    ${field({ label: 'Sell Rate (KES/kg) *', id: 'f-sell-rate', type: 'number', required: true, value: l.sell_rate || defaultSellRate })}
+                    ${field({ label: 'Sell Rate (KES/kg) *', id: 'f-sell-rate', type: 'number', required: true, value: l.sell_rate || '', placeholder: 'Enter sell rate' })}
                 </div>
                 <div style="border-top:1px solid #edf2f7;padding-top:16px;display:flex;flex-direction:column;gap:12px;">
                     <div style="display:flex;justify-content:space-between;font-size:14px;">
-                        <span style="color:#4a5568;">Revenue</span>
+                        <div>
+                            <span style="color:#4a5568;display:block;">Revenue</span>
+                            <span id="calc-revenue-sub" style="font-size:12px;color:#a0aec0;"></span>
+                        </div>
                         <strong style="color:#2d3748;" id="calc-revenue">KES 0</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:14px;">
-                        <span style="color:#4a5568;">Landed Cost</span>
-                        <strong style="color:#e53e3e;" id="calc-landed">- ${fmtKES(p.netPayable + p.totalTransport)}</strong>
+                        <div>
+                            <span style="color:#4a5568;display:block;">Landed Cost</span>
+                            <span id="calc-landed-sub" style="font-size:12px;color:#a0aec0;"></span>
+                        </div>
+                        <strong style="color:#e53e3e;" id="calc-landed">KES 0</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:14px;">
-                        <span style="color:#4a5568;">Margin Per Tonne</span>
-                        <strong style="color:#2d3748;" id="calc-margin">KES 0</strong>
+                        <span style="color:#4a5568;">Margin</span>
+                        <strong style="color:#2d3748;" id="calc-margin-total">KES 0</strong>
                     </div>
+                  
                 </div>
             </div>
 
-            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:28px;">
+            <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Sales Invoice + eTIMS</h3>
                 <div style="display:flex;flex-direction:column;gap:8px;">
                     <label style="font-size:13px;font-weight:500;color:#4a5568;">Invoice Number</label>
                     <div id="f-invoice-no-display" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:${l.invoice_number ? '#2d3748' : '#a0aec0'};font-weight:${l.invoice_number ? '600' : '400'};">
                         ${l.invoice_number || 'Generated on submit'}
                     </div>
-                </div>;
+                </div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="submit-etims-btn" style="background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Submit Invoice & Transmit to eTIMS</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;">Back to Lots</button>
+                <button class="h-btn primary" id="submit-etims-btn" style="${BTN_PRIMARY}">Submit Invoice & Transmit to eTIMS</button>
+                <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
             </div>
-        `
+        `;
 
         const updateCalculations = () => {
-            const sellRate = flt($('#f-sell-rate').val()) || 0;
-            $('#header-sell-rate').text(sellRate);
-            const revenue = qty * sellRate;
-            const totalCost = p.netPayable + p.totalTransport;
-            const totalMargin = revenue - totalCost;
-            const marginPerTonne = qty > 0 ? (totalMargin / (qty / 1000)) : 0;
+            const m = computeMargin(l, flt($('#f-sell-rate').val()));
+            const color = m.margin < 0 ? '#e53e3e' : '#2d3748';
 
-            $('#calc-revenue').text(fmtKES(revenue));
-            $('#calc-margin').text(fmtKES(marginPerTonne));
+            $('#calc-revenue').text(fmtKES(m.revenue));
+            $('#calc-revenue-sub').text(`${fmtKg1(m.soldKg)} customer net × KES ${m.sellRate}/kg`);
+            $('#calc-landed').text('- ' + fmtKES(m.landedCost));
+            $('#calc-landed-sub').text(`${fmtKg1(m.buyKg)} supplier net × KES ${m.refRate}/kg`);
+            $('#calc-margin-total').text(fmtKES(m.margin)).css('color', color);
+            $('#calc-margin').text(fmtKES(m.marginPerTonne)).css('color', color);
+            $('#header-margin').text(fmtKES(m.margin)).css('color', color);
         };
 
         $('#f-sell-rate').on('input', updateCalculations);
@@ -3327,56 +2727,64 @@ async function renderPayTransporter(container, params) {
 
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
         document.getElementById('submit-etims-btn').addEventListener('click', async () => {
-        const customer = $('#f-customer').val();
-        const sellRate = flt($('#f-sell-rate').val());
- 
-        if (!customer) {
-            frappe.msgprint(__('Please select a Customer.'));
-            return;
-        }
-        if (sellRate <= 0) {
-            frappe.msgprint(__('Please enter a valid Sell Rate.'));
-            return;
-        }
- 
-        let invoiceDoc = null;
-        try {
-            invoiceDoc = await frappe.db.insert({
-                doctype: 'Sales Invoice',
-                company: 'Holec (E.A.) Limited',
+            const customer = $('#f-customer').val();
+            const sellRate = flt($('#f-sell-rate').val());
+
+            if (!customer) {
+                frappe.msgprint(__('Please select a Customer.'));
+                return;
+            }
+            if (sellRate <= 0) {
+                frappe.msgprint(__('Please enter a valid Sell Rate.'));
+                return;
+            }
+
+            const m = computeMargin(l, sellRate);
+            if (m.soldKg <= 0) {
+                frappe.msgprint(__('No customer weighbridge weight recorded. Complete the Transport & Loss step first.'));
+                return;
+            }
+
+            let invoiceDoc = null;
+            try {
+                invoiceDoc = await frappe.db.insert({
+                    doctype: 'Sales Invoice',
+                    company: COMPANY,
+                    customer: customer,
+                    grand_total: flt(m.revenue),
+                    currency: 'KES',
+                    custom_buy_ticket: l.name,
+                    items: [{
+                        item_code: l.commodity || (LIVE_STORE.items[0] && LIVE_STORE.items[0].name) || 'Commodity',
+                        qty: flt(m.soldKg),         // customer net weight, same as the revenue shown
+                        rate: flt(sellRate),
+                        amount: flt(m.revenue)
+                    }]
+                });
+            } catch (err) {
+                console.error('Error creating Sales Invoice:', err);
+                frappe.msgprint(__('Failed to create Sales Invoice: ') + (err.message || err));
+                return; // do NOT advance the ticket on failure
+            }
+
+            const realInvoiceNo = invoiceDoc.name;
+
+            await frappe.db.set_value('Buy Ticket', l.name, {
+                status: 'Invoiced',
                 customer: customer,
-                grand_total: flt(qty * sellRate),
-                currency: 'KES',
-                custom_buy_ticket: l.name,
-                items: [{
-                    item_code: l.commodity || LIVE_STORE.items[0]?.name || 'Commodity',
-                    qty: flt(qty),
-                    rate: flt(sellRate),
-                    amount: flt(qty * sellRate)
-                }]
+                sell_rate: sellRate,
+                invoice_number: realInvoiceNo
             });
-        } catch (err) {
-            console.error('Error creating Sales Invoice:', err);
-            frappe.msgprint(__('Failed to create Sales Invoice: ') + (err.message || err));
-            return; // stop here — do NOT advance the ticket on failure
-        }
- 
-        // The real, Frappe-assigned document name — not user-typed text
-        const realInvoiceNo = invoiceDoc.name;
- 
-        await frappe.db.set_value('Buy Ticket', l.name, {
-            status: 'Invoiced',
-            customer: customer,
-            sell_rate: sellRate,
-            invoice_number: realInvoiceNo
+
+            showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
+            await loadMasterData();
+            navigate('lots', { id: l.name });
         });
- 
-        showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
-        await loadMasterData();
-        navigate('lots', { id: l.name });
-    });
     }
 
+    // =====================================================================
+    // NAVIGATION
+    // =====================================================================
     const MODULE_REGISTRY = [
         { id: 'suppliers', group: 'PARTIES', name: 'Suppliers', render: renderSuppliers },
         { id: 'new_supplier', group: 'PARTIES', name: 'New supplier', render: renderNewSupplier },
@@ -3408,40 +2816,49 @@ async function renderPayTransporter(container, params) {
     function renderSidebar() {
         const el = document.getElementById('h-sidebar');
         if (!el) return;
-        
-        const isSuppliersActive = route.module === 'suppliers' || route.module === 'new_supplier';
-        const isCustomersActive = route.module === 'customers' || route.module === 'new_customer';
-        
+
+        // Sidebar items; related sub-screens keep the parent highlighted
+        const GROUPS = [
+            { title: 'PARTIES', items: [
+                { id: 'suppliers', label: 'Suppliers', also: ['new_supplier'] },
+                { id: 'customers', label: 'Customers', also: ['new_customer'] }
+            ]},
+            { title: 'TRADE', items: [
+                { id: 'lots', label: 'Lots' },
+                { id: 'tickets', label: 'New Ticket' },
+                { id: 'intake', label: 'Intake & Quality' },
+                { id: 'deductions', label: 'Deductions & Payable' },
+                { id: 'transport', label: 'Transport & Loss' },
+                { id: 'sale_invoicing', label: 'Sale & Invoicing' }
+            ]},
+            { title: 'FINANCE', items: [
+                { id: 'payments_list', label: 'Payments', also: ['payments', 'payments_form'] }
+            ]},
+            { title: 'INSIGHT', items: [
+                { id: 'ledger', label: 'Cost Ledger & Margin' },
+                { id: 'reports', label: 'Reports' },
+                { id: 'event_log', label: 'Trade event log' }
+            ]}
+        ];
+
         el.innerHTML = `
             <div style="font-weight:700;font-size:16px;color:#1a202c;margin-bottom:20px;display:flex;align-items:center;gap:8px;">
                 <span style="background:#1a202c;color:#fff;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;font-size:12px;">H</span> Holec ERP
             </div>
-            
-            <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;margin-top:12px;">PARTIES</div>
-            <div class="mod-item ${isSuppliersActive ? 'active' : ''}" data-mod="suppliers" style="padding:6px 10px;border-radius:6px;background:${isSuppliersActive ? '#ebf8ff' : 'transparent'};color:${isSuppliersActive ? '#2b6cb0' : '#4a5568'};font-weight:${isSuppliersActive ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='suppliers'&&route.module!=='new_supplier')this.style.background='#f7fafc'" onmouseout="if(route.module!=='suppliers'&&route.module!=='new_supplier')this.style.background='transparent'">Suppliers</div>
-            <div class="mod-item ${isCustomersActive ? 'active' : ''}" data-mod="customers" style="padding:6px 10px;border-radius:6px;background:${isCustomersActive ? '#ebf8ff' : 'transparent'};color:${isCustomersActive ? '#2b6cb0' : '#4a5568'};font-weight:${isCustomersActive ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if(route.module!=='customers'&&route.module!=='new_customer')this.style.background='#f7fafc'" onmouseout="if(route.module!=='customers'&&route.module!=='new_customer')this.style.background='transparent'">Customers</div>            
-            
-            <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">TRADE</div>
-            <div class="mod-item ${route.module === 'lots' ? 'active' : ''}" data-mod="lots" style="padding:6px 10px;border-radius:6px;background:${route.module === 'lots' ? '#ebf8ff' : 'transparent'};color:${route.module === 'lots' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'lots' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='lots')this.style.background='#f7fafc'" onmouseout="if(route.module!=='lots')this.style.background='transparent'">Lots</div>
-            <div class="mod-item ${route.module === 'tickets' ? 'active' : ''}" data-mod="tickets" style="padding:6px 10px;border-radius:6px;background:${route.module === 'tickets' ? '#ebf8ff' : 'transparent'};color:${route.module === 'tickets' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'tickets' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='tickets')this.style.background='#f7fafc'" onmouseout="if(route.module!=='tickets')this.style.background='transparent'">New Ticket</div>
-            <div class="mod-item ${route.module === 'intake' ? 'active' : ''}" data-mod="intake" style="padding:6px 10px;border-radius:6px;background:${route.module === 'intake' ? '#ebf8ff' : 'transparent'};color:${route.module === 'intake' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'intake' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='intake')this.style.background='#f7fafc'" onmouseout="if(route.module!=='intake')this.style.background='transparent'">Intake & Quality</div>
-            <div class="mod-item ${route.module === 'deductions' ? 'active' : ''}" data-mod="deductions" style="padding:6px 10px;border-radius:6px;background:${route.module === 'deductions' ? '#ebf8ff' : 'transparent'};color:${route.module === 'deductions' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'deductions' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='deductions')this.style.background='#f7fafc'" onmouseout="if(route.module!=='deductions')this.style.background='transparent'">Deductions & Payable</div>
-            <div class="mod-item ${route.module === 'transport' ? 'active' : ''}" data-mod="transport" style="padding:6px 10px;border-radius:6px;background:${route.module === 'transport' ? '#ebf8ff' : 'transparent'};color:${route.module === 'transport' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'transport' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='transport')this.style.background='#f7fafc'" onmouseout="if(route.module!=='transport')this.style.background='transparent'">Transport & Loss</div>
-            <div class="mod-item ${route.module === 'sale_invoicing' ? 'active' : ''}" data-mod="sale_invoicing" style="padding:6px 10px;border-radius:6px;background:${route.module === 'sale_invoicing' ? '#ebf8ff' : 'transparent'};color:${route.module === 'sale_invoicing' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'sale_invoicing' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:8px;" onmouseover="if(route.module!=='sale_invoicing')this.style.background='#f7fafc'" onmouseout="if(route.module!=='sale_invoicing')this.style.background='transparent'">Sale & Invoicing</div>
-
-            <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">FINANCE</div>
-            <div id="sidebar-payments-btn" style="padding:6px 10px;color:#4a5568;font-size:13px;cursor:pointer;border-radius:4px;margin-bottom:8px;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">Payments</div>
-
-            <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:6px;">INSIGHT</div>
-            <div class="mod-item ${route.module === 'ledger' ? 'active' : ''}" data-mod="ledger" style="padding:6px 10px;border-radius:6px;background:${route.module === 'ledger' ? '#ebf8ff' : 'transparent'};color:${route.module === 'ledger' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'ledger' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='ledger')this.style.background='#f7fafc'" onmouseout="if(route.module!=='ledger')this.style.background='transparent'">Cost Ledger & Margin</div>
-            <div class="mod-item ${route.module === 'reports' ? 'active' : ''}" data-mod="reports" style="padding:6px 10px;border-radius:6px;background:${route.module === 'reports' ? '#ebf8ff' : 'transparent'};color:${route.module === 'reports' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'reports' ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;" onmouseover="if(route.module!=='reports')this.style.background='#f7fafc'" onmouseout="if(route.module!=='reports')this.style.background='transparent'">Reports</div>
-            <div class="mod-item ${route.module === 'event_log' ? 'active' : ''}" data-mod="event_log" style="padding:6px 10px;border-radius:6px;background:${route.module === 'event_log' ? '#ebf8ff' : 'transparent'};color:${route.module === 'event_log' ? '#2b6cb0' : '#4a5568'};font-weight:${route.module === 'event_log' ? '600' : '400'};cursor:pointer;font-size:13px;" onmouseover="if(route.module!=='event_log')this.style.background='#f7fafc'" onmouseout="if(route.module!=='event_log')this.style.background='transparent'">Trade event log</div>
+            ${GROUPS.map(g => `
+                <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin:12px 0 6px 0;">${g.title}</div>
+                ${g.items.map(it => {
+                    const active = route.module === it.id || (it.also || []).includes(route.module);
+                    return `<div class="mod-item" data-mod="${it.id}" data-active="${active ? 1 : 0}" style="padding:6px 10px;border-radius:6px;background:${active ? '#ebf8ff' : 'transparent'};color:${active ? '#2b6cb0' : '#4a5568'};font-weight:${active ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;">${it.label}</div>`;
+                }).join('')}
+            `).join('')}
         `;
 
         el.querySelectorAll('.mod-item').forEach(node => {
             node.addEventListener('click', () => navigate(node.dataset.mod));
+            node.addEventListener('mouseover', () => { if (node.dataset.active !== '1') node.style.background = '#f7fafc'; });
+            node.addEventListener('mouseout', () => { if (node.dataset.active !== '1') node.style.background = 'transparent'; });
         });
-        el.querySelector('#sidebar-payments-btn').addEventListener('click', () => navigate('payments_list'));
     }
 
     function renderTimeline() {

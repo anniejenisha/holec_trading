@@ -573,9 +573,8 @@ Return JSON only.
         if data.get("vehicle_no") is not None:
             data["vehicle_no"] = str(data["vehicle_no"]).strip().upper() or None
 
-        if data.get("bag_count") is not None:
-            bag_match = re.search(r"\d+", str(data["bag_count"]))
-            data["bag_count"] = int(bag_match.group(0)) if bag_match else None
+       
+        data["bag_count"] = int(data["net_weight"] / 90)
 
         return data
 
@@ -638,7 +637,7 @@ def extract_weighbridge_data(filedata=None, file_url=None, slip_type="gross", ti
             "net_weight": result.get("net_weight"),
             "ticket_no": result.get("ticket_no"),
             "vehicle_no": result.get("vehicle_no"),
-            "bag_count": result.get("bag_count")
+            "bag_count": int(result.get("net_weight") / 90)
         }
 
     except Exception as e:
