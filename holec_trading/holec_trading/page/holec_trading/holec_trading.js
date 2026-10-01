@@ -32,9 +32,17 @@ function init_holec_trading_engine() {
     const STAGE_ORDER = ['Ticket', 'Intake', 'Lot', 'Position', 'Invoiced', 'Settled'];
     const COMPANY = 'Holec (E.A.) Limited';
 
+    // Data field on Customer that holds the unique Customer ID (create it, mark Unique)
+    const CUSTOMER_ID_FIELD = 'alias';
+
     const BTN_PRIMARY = 'background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_GHOST = 'background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
+    const BTN_OUTLINE = 'background:#ffffff;color:#1a202c;border:1px solid #cbd5e0;padding:9px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const CARD_BOX = 'background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;';
+
+    // Escapes text for safe use inside HTML
+    const escHtml = (v) => String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
     const LIVE_STORE = {
         suppliers: [],
@@ -232,6 +240,256 @@ function init_holec_trading_engine() {
     };
 
     // =====================================================================
+    // INVOICE TEMPLATE (printable sales invoice)
+    //   - Bank details come from Bank Account records linked to the company
+    //   - Customer block shows the unique Customer ID (CUSTOMER_ID_FIELD)
+    // =====================================================================
+    async function loadInvoiceTemplateData(l) {
+        const data = { si: null, customer: null, customerAddress: '', company: null, bankAccounts: [] };
+
+        // Sales Invoice
+        if (l.invoice_number) {
+            try { data.si = await frappe.db.get_doc('Sales Invoice', l.invoice_number); }
+            catch (e) { console.error('Invoice template: Sales Invoice load failed', e); }
+        }
+
+        // Customer (unique ID, KRA PIN, contacts, delivery points)
+        const customerName = (data.si && data.si.customer) || l.customer;
+        if (customerName) {
+            try { data.customer = await frappe.db.get_doc('Customer', customerName); }
+            catch (e) { console.error('Invoice template: Customer load failed', e); }
+        }
+        if (data.customer && data.customer.customer_primary_address) {
+            try {
+                const r = await frappe.call({
+                    method: 'frappe.contacts.doctype.address.address.get_address_display',
+                    args: { address_dict: data.customer.customer_primary_address }
+                });
+                data.customerAddress = (r && r.message) || '';
+            } catch (e) { console.warn('Invoice template: customer address not loaded', e); }
+        }
+
+        // Company header details
+        try {
+            const r = await frappe.db.get_value('Company', COMPANY, ['company_name', 'tax_id', 'email', 'phone_no', 'website']);
+            data.company = (r && r.message) || null;
+        } catch (e) { console.warn('Invoice template: company details not loaded', e); }
+
+        // Company bank accounts: Bank Account records that belong to this company
+        try {
+            let accts = await frappe.db.get_list('Bank Account', {
+                filters: { company: COMPANY, is_company_account: 1, disabled: 0 },
+                fields: ['name', 'account_name', 'bank', 'bank_account_no', 'branch_code', 'iban', 'is_default'],
+                order_by: 'is_default desc, creation asc',
+                limit: 20
+            });
+            accts = accts || [];
+
+            // Bank name + SWIFT come from the Bank record
+            const bankCache = {};
+            for (const a of accts) {
+                if (!a.bank) continue;
+                if (!(a.bank in bankCache)) {
+                    try {
+                        const r = await frappe.db.get_value('Bank', a.bank, ['bank_name', 'swift_number']);
+                        bankCache[a.bank] = (r && r.message) || {};
+                    } catch (e) { bankCache[a.bank] = {}; }
+                }
+                a.bank_label = bankCache[a.bank].bank_name || a.bank;
+                a.swift_number = bankCache[a.bank].swift_number || '';
+            }
+            data.bankAccounts = accts;
+        } catch (e) {
+            console.error('Invoice template: Bank Account load failed', e);
+        }
+
+        return data;
+    }
+
+    function buildInvoiceHtml(l, d) {
+        const si = d.si;
+        const cust = d.customer || {};
+        const m = computeMargin(l);
+
+        // Customer details with the unique ID
+        const customerId = cust[CUSTOMER_ID_FIELD] || '';
+        const customerName = cust.customer_name || l.customer || '';
+        const customerPin = cust.tax_id || cust.custom_kra_pin || '';
+        const primaryContact = (cust.custom_holec_contacts || []).find(c => cint(c.is_primary)) || (cust.custom_holec_contacts || [])[0] || null;
+        const deliveryPoint = (cust.custom_holec_delivery_points || [])[0] || null;
+
+        // Lines: use the real invoice items when present, otherwise rebuild from the ticket
+        let lines = [];
+        if (si && (si.items || []).length) {
+            lines = si.items.map(it => ({
+                desc: it.item_name || it.item_code || l.commodity || 'Commodity',
+                qty: flt(it.qty),
+                rate: flt(it.rate),
+                amount: flt(it.amount)
+            }));
+        } else {
+            lines = [{ desc: l.commodity || 'Commodity', qty: m.soldKg, rate: m.sellRate, amount: m.revenue }];
+        }
+        const subTotal = lines.reduce((a, x) => a + flt(x.amount), 0);
+        const grandTotal = si && flt(si.grand_total) ? flt(si.grand_total) : subTotal;
+        const taxTotal = Math.max(0, grandTotal - subTotal);
+
+        const invoiceNo = (si && si.name) || l.invoice_number || '';
+        const postingDate = si && si.posting_date ? frappe.datetime.str_to_user(si.posting_date) : frappe.datetime.str_to_user(frappe.datetime.get_today());
+        const dueDate = si && si.due_date ? frappe.datetime.str_to_user(si.due_date) : '';
+        const terms = (si && si.payment_terms_template) || cust.payment_terms || '';
+
+        const co = d.company || {};
+        const companyName = co.company_name || COMPANY;
+
+        const bankBlocks = d.bankAccounts.length
+            ? d.bankAccounts.map(b => `
+                <div class="bank">
+                    <div class="row"><span>Account Name</span><b>${escHtml(b.account_name || companyName)}</b></div>
+                    <div class="row"><span>Bank</span><b>${escHtml(b.bank_label || b.bank || '')}</b></div>
+                    <div class="row"><span>Account Number</span><b>${escHtml(b.bank_account_no || '')}</b></div>
+                    ${b.branch_code ? `<div class="row"><span>Branch Code</span><b>${escHtml(b.branch_code)}</b></div>` : ''}
+                    ${b.swift_number ? `<div class="row"><span>SWIFT Code</span><b>${escHtml(b.swift_number)}</b></div>` : ''}
+                    ${b.iban ? `<div class="row"><span>IBAN</span><b>${escHtml(b.iban)}</b></div>` : ''}
+                </div>`).join('')
+            : `<div class="muted">No company Bank Account found for ${escHtml(companyName)}. Add one in Bank Account (tick "Is Company Account").</div>`;
+
+        return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Invoice ${escHtml(invoiceNo)}</title>
+<style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color:#1a202c; margin:0; padding:32px; font-size:13px; }
+    .head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1a202c; padding-bottom:16px; margin-bottom:20px; }
+    .head h1 { margin:0 0 4px 0; font-size:22px; }
+    .title { text-align:right; }
+    .title h2 { margin:0 0 6px 0; font-size:20px; letter-spacing:0.05em; }
+    .muted { color:#718096; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:20px; }
+    .box { border:1px solid #e2e8f0; border-radius:6px; padding:14px 16px; }
+    .box h4 { margin:0 0 8px 0; font-size:11px; letter-spacing:0.06em; color:#718096; }
+    .row { display:flex; justify-content:space-between; gap:16px; padding:3px 0; }
+    .row span { color:#718096; }
+    table { width:100%; border-collapse:collapse; margin-bottom:16px; }
+    th { background:#f8fafc; text-align:left; padding:10px 12px; border-bottom:1px solid #e2e8f0; font-size:12px; color:#4a5568; }
+    td { padding:10px 12px; border-bottom:1px solid #edf2f7; }
+    .r { text-align:right; }
+    .totals { margin-left:auto; width:300px; }
+    .totals .row { border-bottom:1px solid #edf2f7; padding:6px 0; }
+    .totals .grand { font-size:15px; font-weight:700; border-bottom:2px solid #1a202c; }
+    .bank { padding:6px 0; }
+    .bank + .bank { border-top:1px dashed #cbd5e0; margin-top:6px; padding-top:10px; }
+    .foot { margin-top:28px; font-size:11px; color:#718096; border-top:1px solid #e2e8f0; padding-top:12px; }
+    @media print { body { padding:16px; } }
+</style>
+</head>
+<body>
+    <div class="head">
+        <div>
+            <h1>${escHtml(companyName)}</h1>
+            ${co.tax_id ? `<div class="muted">KRA PIN: ${escHtml(co.tax_id)}</div>` : ''}
+            ${co.email ? `<div class="muted">${escHtml(co.email)}</div>` : ''}
+            ${co.phone_no ? `<div class="muted">${escHtml(co.phone_no)}</div>` : ''}
+            ${co.website ? `<div class="muted">${escHtml(co.website)}</div>` : ''}
+        </div>
+        <div class="title">
+            <h2>SALES INVOICE</h2>
+            <div class="row"><span>Invoice No.</span><b>${escHtml(invoiceNo)}</b></div>
+            <div class="row"><span>Date</span><b>${escHtml(postingDate)}</b></div>
+            ${dueDate ? `<div class="row"><span>Due Date</span><b>${escHtml(dueDate)}</b></div>` : ''}
+            <div class="row"><span>Ticket</span><b>${escHtml(l.name)}</b></div>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="box">
+            <h4>BILL TO</h4>
+            <div style="font-size:15px;font-weight:700;margin-bottom:6px;">${escHtml(customerName)}</div>
+            <div class="row"><span>Customer ID</span><b>${escHtml(customerId || '—')}</b></div>
+            <div class="row"><span>KRA PIN</span><b>${escHtml(customerPin || '—')}</b></div>
+            ${terms ? `<div class="row"><span>Payment Terms</span><b>${escHtml(terms)}</b></div>` : ''}
+            ${d.customerAddress ? `<div style="margin-top:6px;" class="muted">${d.customerAddress}</div>` : ''}
+            ${deliveryPoint ? `<div style="margin-top:6px;"><span class="muted">Delivery point:</span> ${escHtml(deliveryPoint.delivery_point_name || '')}${deliveryPoint.location ? ', ' + escHtml(deliveryPoint.location) : ''}</div>` : ''}
+            ${primaryContact ? `<div style="margin-top:6px;"><span class="muted">Contact:</span> ${escHtml(primaryContact.contact_name || '')}${primaryContact.phone ? ' · ' + escHtml(primaryContact.phone) : ''}</div>` : ''}
+        </div>
+        <div class="box">
+            <h4>DELIVERY DETAILS</h4>
+            <div class="row"><span>Commodity</span><b>${escHtml(l.commodity || '—')}</b></div>
+            <div class="row"><span>Net weight delivered</span><b>${escHtml(fmtKg1(m.soldKg))}</b></div>
+            <div class="row"><span>Vehicle</span><b>${escHtml(l.vehicle_registration || '—')}</b></div>
+            <div class="row"><span>Weighbridge ticket</span><b>${escHtml(l.weighbridge_ticket_number || '—')}</b></div>
+        </div>
+    </div>
+
+    <table>
+        <thead><tr><th>Description</th><th class="r">Quantity (kg)</th><th class="r">Rate (KES/kg)</th><th class="r">Amount (KES)</th></tr></thead>
+        <tbody>
+            ${lines.map(x => `
+            <tr>
+                <td>${escHtml(x.desc)}</td>
+                <td class="r">${flt(x.qty).toLocaleString('en-KE', { maximumFractionDigits: 1 })}</td>
+                <td class="r">${flt(x.rate).toLocaleString('en-KE', { maximumFractionDigits: 2 })}</td>
+                <td class="r">${Math.round(flt(x.amount)).toLocaleString('en-KE')}</td>
+            </tr>`).join('')}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <div class="row"><span>Sub total</span><b>${fmtKES(subTotal)}</b></div>
+        ${taxTotal > 0 ? `<div class="row"><span>Tax</span><b>${fmtKES(taxTotal)}</b></div>` : ''}
+        <div class="row grand"><span>Total due</span><span>${fmtKES(grandTotal)}</span></div>
+    </div>
+
+    <div class="box" style="margin-top:24px;">
+        <h4>PAYMENT DETAILS</h4>
+        ${bankBlocks}
+        <div class="muted" style="margin-top:8px;">Please quote invoice number ${escHtml(invoiceNo)} and Customer ID ${escHtml(customerId || '')} as the payment reference.</div>
+    </div>
+
+    <div class="foot">
+        Transmitted via eTIMS. Thank you for your business.
+    </div>
+</body>
+</html>`;
+    }
+
+    async function printInvoiceTemplate(l) {
+        // Open the window first so the browser doesn't treat it as a blocked popup
+        const win = window.open('', '_blank');
+        if (!win) {
+            showToast('Allow pop-ups for this site to open the invoice.', 'orange');
+            return;
+        }
+        win.document.write('<p style="font-family:sans-serif;padding:24px;">Preparing invoice...</p>');
+
+        try {
+            const data = await loadInvoiceTemplateData(l);
+
+            if (!data.customer) {
+                showToast('Customer record could not be loaded. Customer ID will be blank.', 'orange');
+            } else if (!data.customer[CUSTOMER_ID_FIELD]) {
+                showToast('This customer has no Customer ID set.', 'orange');
+            }
+            if (!data.bankAccounts.length) {
+                showToast(`No company Bank Account found for ${COMPANY}.`, 'orange');
+            }
+
+            const html = buildInvoiceHtml(l, data);
+            win.document.open();
+            win.document.write(html);
+            win.document.close();
+            win.focus();
+            setTimeout(() => win.print(), 400);
+        } catch (err) {
+            console.error('Invoice template error:', err);
+            win.close();
+            showToast('Failed to build the invoice template.', 'red');
+        }
+    }
+
+    // =====================================================================
     // SUPPLIERS
     // =====================================================================
     function renderSuppliers(container) {
@@ -410,7 +668,6 @@ function init_holec_trading_engine() {
         const MAX_FILE_MB = 10;
         const DEFAULT_GROUP = 'Holec Trading';
         const DEFAULT_TERRITORY = 'All Territories';
-        const CUSTOMER_ID_FIELD = 'alias';  // Data field on Customer (create it, mark Unique)
 
         const KRA_REGEX = /^[AP]\d{9}[A-Z]$/;
         const PHONE_REGEX = /^(?:\+?254|0)[17]\d{8}$/;
@@ -1337,6 +1594,7 @@ function init_holec_trading_engine() {
         const isTicket = status === 'Ticket';
         const showMargin = ['Invoiced', 'Settled'].includes(status);
         const customerKnown = ['Invoiced', 'Settled'].includes(status);
+        const hasInvoice = ['Invoiced', 'Settled'].includes(status) && !!l.invoice_number;
 
         const PASSED = { Ticket: 0, Intake: 1, Lot: 2, Position: 3, Invoiced: 4, Settled: 5 };
         const passed = PASSED[status] != null ? PASSED[status] : 2;
@@ -1365,9 +1623,8 @@ function init_holec_trading_engine() {
             Lot: { label: 'Continue to Position →', run: () => navigate('transport', { id: l.name }) },
             Position: { label: 'Continue to Sale & Invoicing →', run: () => navigate('sale_invoicing', { id: l.name }) },
             Invoiced: { label: 'Continue to Settled →', run: () => navigate('payments', { id: l.name }) }
-            
         }[status];
-        
+
         const dash = '—';
         const stat = (label, value, muted) => `
             <div>
@@ -1445,6 +1702,7 @@ function init_holec_trading_engine() {
             <div style="margin-bottom:12px;">${eventsHtml}</div>
 
             <div style="display:flex;gap:12px;align-items:center;">
+                ${hasInvoice ? `<button class="h-btn" id="download-invoice-template-btn" style="${BTN_OUTLINE}">↓ Invoice Template</button>` : ''}
                 ${actions ? `<button class="h-btn primary" id="advance-btn" style="${BTN_PRIMARY}">${actions.label}</button>` : ''}
                 <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to lots</button>
             </div>
@@ -1453,6 +1711,20 @@ function init_holec_trading_engine() {
         document.getElementById('back-link').addEventListener('click', (e) => { e.preventDefault(); navigate('lots'); });
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
         if (actions) document.getElementById('advance-btn').addEventListener('click', actions.run);
+
+        const invoiceBtn = document.getElementById('download-invoice-template-btn');
+        if (invoiceBtn) {
+            invoiceBtn.addEventListener('click', async () => {
+                const original = invoiceBtn.textContent;
+                invoiceBtn.disabled = true;
+                invoiceBtn.textContent = 'Preparing...';
+                try { await printInvoiceTemplate(l); }
+                finally {
+                    invoiceBtn.disabled = false;
+                    invoiceBtn.textContent = original;
+                }
+            });
+        }
     }
 
     // =====================================================================
@@ -2685,7 +2957,7 @@ function init_holec_trading_engine() {
                         <span style="color:#4a5568;">Margin</span>
                         <strong style="color:#2d3748;" id="calc-margin-total">KES 0</strong>
                     </div>
-                  
+
                 </div>
             </div>
 
