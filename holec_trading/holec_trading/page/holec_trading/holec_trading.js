@@ -173,12 +173,16 @@ function init_holec_trading_engine() {
     async function loadMasterData() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
-                frappe.db.get_list('Supplier', { filters: { supplier_group: 'Holec Trading' }, fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'], limit: 500 }),
-                frappe.db.get_list('Customer', {
-                    filters: { customer_group: 'Holec Trading' },
-                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
-                    limit: 500
-                }),
+                    frappe.db.get_list('Supplier', {
+                        filters: { supplier_group: ['in', ['Transporter', 'Farmer', 'CESS']] },
+                        fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'],
+                        limit: 500
+                    }),                
+                    frappe.db.get_list('Customer', {
+                        filters: { customer_group: 'Holec Trading' },
+                        fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
+                        limit: 500
+                    }),
                 frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc', limit: 500 }),
                 frappe.db.get_list('Country', { fields: ['name', 'country_name'], limit: 250, order_by: 'name asc' }),
                 frappe.db.get_list('Item', {
@@ -275,30 +279,94 @@ function init_holec_trading_engine() {
             data.company = (r && r.message) || null;
         } catch (e) { console.warn('Invoice template: company details not loaded', e); }
 
-        // Company bank accounts: Bank Account records that belong to this company
+        // Company bank accounts: Bank Account records that belong to this company.
+        // Account details come from Bank Account; bank name, SWIFT, bank code and address
+        // come from the Bank record; branch name comes from Bank Branch.
         try {
-            let accts = await frappe.db.get_list('Bank Account', {
+            const acctRows = await frappe.db.get_list('Bank Account', {
                 filters: { company: COMPANY, is_company_account: 1, disabled: 0 },
-                fields: ['name', 'account_name', 'bank', 'bank_account_no', 'branch_code', 'iban', 'is_default'],
+                fields: ['name', 'is_default'],
                 order_by: 'is_default desc, creation asc',
                 limit: 20
-            });
-            accts = accts || [];
+            }) || [];
 
-            // Bank name + SWIFT come from the Bank record
+            const stripHtml = (h) => String(h || '')
+                .replace(/<br\s*\/?>/gi, ', ').replace(/<[^>]+>/g, '')
+                .replace(/\s*,\s*(,\s*)+/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '');
+            const pick = (o, keys) => { for (const k of keys) { if (o && o[k]) return o[k]; } return ''; };
             const bankCache = {};
-            for (const a of accts) {
-                if (!a.bank) continue;
-                if (!(a.bank in bankCache)) {
-                    try {
-                        const r = await frappe.db.get_value('Bank', a.bank, ['bank_name', 'swift_number']);
-                        bankCache[a.bank] = (r && r.message) || {};
-                    } catch (e) { bankCache[a.bank] = {}; }
+
+            for (const row of acctRows) {
+                let acct = {};
+                try { acct = await frappe.db.get_doc('Bank Account', row.name); }
+                catch (e) { console.error('Bank Account load failed', row.name, e); continue; }
+
+                // Bank record (bank name, SWIFT, bank code, address)
+                let bank = {}, bankAddress = '';
+                if (acct.bank) {
+                    if (!bankCache[acct.bank]) {
+                        const entry = { doc: {}, address: '' };
+                        try { entry.doc = await frappe.db.get_doc('Bank', acct.bank); } catch (e) { console.warn('Bank load failed', e); }
+                        try {
+                            const addrs = await frappe.db.get_list('Address', {
+                                filters: [['Dynamic Link', 'link_doctype', '=', 'Bank'], ['Dynamic Link', 'link_name', '=', acct.bank]],
+                                fields: ['name'],
+                                limit: 1
+                            });
+                            if (addrs && addrs.length) {
+                                const r = await frappe.call({
+                                    method: 'frappe.contacts.doctype.address.address.get_address_display',
+                                    args: { address_dict: addrs[0].name }
+                                });
+                                entry.address = stripHtml(r && r.message);
+                            }
+                        } catch (e) { console.warn('Bank address not loaded', e); }
+                        bankCache[acct.bank] = entry;
+                    }
+                    bank = bankCache[acct.bank].doc;
+                    bankAddress = bankCache[acct.bank].address;
                 }
-                a.bank_label = bankCache[a.bank].bank_name || a.bank;
-                a.swift_number = bankCache[a.bank].swift_number || '';
+
+                // Branch record: Bank Branch documents are linked to the Bank (Bank Branch.bank)
+                let branch = {};
+                try {
+                    const branchLink = pick(acct, ['bank_branch', 'custom_bank_branch', 'branch']);
+                    let branchName = branchLink;
+                    if (!branchName && acct.bank) {
+                        const branches = await frappe.db.get_list('Bank Branch', {
+                            filters: { bank: acct.bank },
+                            fields: ['name'],
+                            order_by: 'name asc',
+                            limit: 50
+                        }) || [];
+                        if (branches.length === 1) {
+                            branchName = branches[0].name;
+                        } else if (branches.length > 1) {
+                            // Several branches on this bank: match the account's branch code
+                            for (const br of branches) {
+                                const doc = await frappe.db.get_doc('Bank Branch', br.name);
+                                if (acct.branch_code && String(pick(doc, ['branch_code', 'custom_branch_code'])) === String(acct.branch_code)) {
+                                    branch = doc;
+                                    break;
+                                }
+                            }
+                            if (!branch.name) console.warn('Several Bank Branch records for', acct.bank, '- none matches branch code', acct.branch_code);
+                        }
+                    }
+                    if (branchName && !branch.name) branch = await frappe.db.get_doc('Bank Branch', branchName);
+                } catch (e) { console.warn('Bank Branch load failed', e); }
+
+                data.bankAccounts.push({
+                    account_name: acct.account_name || '',
+                    account_no: acct.bank_account_no || '',
+                    bank_name: bank.bank_name || acct.bank || '',
+                    branch_name: branch.branch_name || pick(acct, ['branch_name', 'custom_branch_name']) || '',
+                    bank_address: bankAddress || pick(bank, ['address', 'bank_address', 'custom_address']),
+                    swift: pick(bank, ['swift_number', 'swift_code', 'custom_swift_code']),
+                    bank_code: pick(bank, ['bank_code', 'custom_bank_code']) || pick(acct, ['bank_code', 'custom_bank_code']),
+                    branch_code: pick(acct, ['branch_code', 'custom_branch_code']) || pick(branch, ['branch_code', 'custom_branch_code'])
+                });
             }
-            data.bankAccounts = accts;
         } catch (e) {
             console.error('Invoice template: Bank Account load failed', e);
         }
@@ -342,16 +410,19 @@ function init_holec_trading_engine() {
         const co = d.company || {};
         const companyName = co.company_name || COMPANY;
 
+        const bankRow = (label, value) => `<tr><td class="bl">${label}</td><td class="bv">${escHtml(String(value || '').toUpperCase())}</td></tr>`;
         const bankBlocks = d.bankAccounts.length
             ? d.bankAccounts.map(b => `
-                <div class="bank">
-                    <div class="row"><span>Account Name</span><b>${escHtml(b.account_name || companyName)}</b></div>
-                    <div class="row"><span>Bank</span><b>${escHtml(b.bank_label || b.bank || '')}</b></div>
-                    <div class="row"><span>Account Number</span><b>${escHtml(b.bank_account_no || '')}</b></div>
-                    ${b.branch_code ? `<div class="row"><span>Branch Code</span><b>${escHtml(b.branch_code)}</b></div>` : ''}
-                    ${b.swift_number ? `<div class="row"><span>SWIFT Code</span><b>${escHtml(b.swift_number)}</b></div>` : ''}
-                    ${b.iban ? `<div class="row"><span>IBAN</span><b>${escHtml(b.iban)}</b></div>` : ''}
-                </div>`).join('')
+                <table class="bank-table">
+                    ${bankRow('Account Name', b.account_name || companyName)}
+                    ${bankRow('KES Account number', b.account_no)}
+                    ${bankRow('Bank Name', b.bank_name)}
+                    ${bankRow('Branch Name', b.branch_name)}
+                    ${bankRow('Address of the Bank', b.bank_address)}
+                    ${bankRow('Swift code', b.swift)}
+                    ${bankRow('Bank Code', b.bank_code)}
+                    ${bankRow('Branch Code', b.branch_code)}
+                </table>`).join('')
             : `<div class="muted">No company Bank Account found for ${escHtml(companyName)}. Add one in Bank Account (tick "Is Company Account").</div>`;
 
         return `<!DOCTYPE html>
@@ -379,8 +450,10 @@ function init_holec_trading_engine() {
     .totals { margin-left:auto; width:300px; }
     .totals .row { border-bottom:1px solid #edf2f7; padding:6px 0; }
     .totals .grand { font-size:15px; font-weight:700; border-bottom:2px solid #1a202c; }
-    .bank { padding:6px 0; }
-    .bank + .bank { border-top:1px dashed #cbd5e0; margin-top:6px; padding-top:10px; }
+    .bank-table { width:100%; border-collapse:collapse; margin:0 0 12px 0; }
+    .bank-table td { border:1px solid #1a202c; padding:5px 10px; font-size:13px; }
+    .bank-table .bl { width:38%; }
+    .bank-table .bv { font-weight:700; }
     .foot { margin-top:28px; font-size:11px; color:#718096; border-top:1px solid #e2e8f0; padding-top:12px; }
     @media print { body { padding:16px; } }
 </style>
@@ -445,7 +518,6 @@ function init_holec_trading_engine() {
     <div class="box" style="margin-top:24px;">
         <h4>PAYMENT DETAILS</h4>
         ${bankBlocks}
-        <div class="muted" style="margin-top:8px;">Please quote invoice number ${escHtml(invoiceNo)} and Customer ID ${escHtml(customerId || '')} as the payment reference.</div>
     </div>
 
     <div class="foot">
@@ -1273,7 +1345,7 @@ function init_holec_trading_engine() {
                 <div style="${SEC}margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
                     ${field({ label: 'Supplier Name *', id: 'ns-name', required: true })}
-                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Holec Trading'] })}
+                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: ['Farmer','Transporter','CESS'] })}
                     ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: ['Company', 'Individual', 'Partnership'], value: 'Company' })}
                 </div>
             </div>
