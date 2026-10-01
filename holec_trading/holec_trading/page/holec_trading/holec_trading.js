@@ -38,12 +38,14 @@ function init_holec_trading_engine() {
     // =====================================================================
     // APPROVAL WORKFLOW SETTINGS - change here, not in the screens
     // =====================================================================
-    // Select field on Supplier (options: Draft, Approved, Rejected)
+    // Select field on Supplier (options: Draft, Submitted, Approved, Rejected)
     const SUPPLIER_STATUS_FIELD = 'custom_status';
-    // Select field on Customer (options: Draft, Approved, Rejected)
+    // Select field on Customer (options: Draft, Submitted, Approved, Rejected)
     const CUSTOMER_STATUS_FIELD = 'custom_approval_status';
-    // Roles allowed to approve / reject suppliers, customers and payments
-    const APPROVER_ROLES = ['Accounts Manager', 'System Manager'];
+    // Roles allowed to submit suppliers and customers
+    const SUBMITTER_ROLES = ['Holec Finance', 'System Manager'];
+    // Roles allowed to approve / reject suppliers and customers
+    const APPROVER_ROLES = ['Holec Manager', 'System Manager'];
     // true = the person who created a record (or requested a payment) cannot approve it
     const ENFORCE_MAKER_CHECKER = false;
     // true = a transporter payment cannot be submitted or dispatched unless the supplier record is Approved
@@ -52,9 +54,11 @@ function init_holec_trading_engine() {
     const BTN_PRIMARY = 'background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_GHOST = 'background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_OUTLINE = 'background:#ffffff;color:#1a202c;border:1px solid #cbd5e0;padding:9px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
+    const BTN_SUBMIT = 'background:#2b6cb0;color:#fff;border:none;padding:9px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_APPROVE = 'background:#276749;color:#fff;border:none;padding:9px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_REJECT = 'background:#ffffff;color:#c53030;border:1px solid #feb2b2;padding:9px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_SM = 'padding:4px 10px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;color:#2d3748;font-size:12px;font-weight:500;cursor:pointer;';
+    const BTN_SM_SUBMIT = 'padding:4px 10px;border:none;background:#2b6cb0;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;';
     const BTN_SM_APPROVE = 'padding:4px 10px;border:none;background:#276749;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;';
     const CARD_BOX = 'background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;margin-bottom:24px;';
 
@@ -209,6 +213,7 @@ function init_holec_trading_engine() {
     // =====================================================================
     // APPROVAL HELPERS (suppliers, customers, payments)
     // =====================================================================
+    const canSubmit = () => SUBMITTER_ROLES.some(r => frappe.user.has_role(r));
     const canApprove = () => APPROVER_ROLES.some(r => frappe.user.has_role(r));
 
     function blockedByMakerChecker(createdBy, what = 'record') {
@@ -272,6 +277,26 @@ function init_holec_trading_engine() {
         });
     }
 
+    async function submitSupplier(name) {
+        let doc;
+        try { doc = await frappe.db.get_doc('Supplier', name); }
+        catch (e) { showToast('Could not load the supplier.', 'red'); return false; }
+
+        const ok = await confirmAsync(__('Submit supplier {0} for approval by Holec Manager?', [doc.supplier_name || doc.name]));
+        if (!ok) return false;
+        return runApproval('Supplier', name, SUPPLIER_STATUS_FIELD, 'Submitted');
+    }
+
+    async function submitCustomer(name) {
+        let doc;
+        try { doc = await frappe.db.get_doc('Customer', name); }
+        catch (e) { showToast('Could not load the customer.', 'red'); return false; }
+
+        const ok = await confirmAsync(__('Submit customer {0} for approval by Holec Manager?', [doc.customer_name || doc.name]));
+        if (!ok) return false;
+        return runApproval('Customer', name, CUSTOMER_STATUS_FIELD, 'Submitted');
+    }
+
     async function approveSupplier(name) {
         let doc;
         try { doc = await frappe.db.get_doc('Supplier', name); }
@@ -310,25 +335,51 @@ function init_holec_trading_engine() {
 
     // Status card shown at the top of supplier / customer detail screens
     function approvalBarHtml(status, noun) {
-        const can = canApprove();
-        const showActions = can && status !== 'Approved';
+        const curStatus = status || 'Draft';
+        const canSub = canSubmit();
+        const canApp = canApprove();
+
+        let actionsHtml = '';
+        if (curStatus === 'Draft') {
+            if (canSub) {
+                actionsHtml = `<button type="button" id="ap-submit-btn" style="${BTN_SUBMIT}">Submit ${noun}</button>`;
+            } else {
+                actionsHtml = `<span style="font-size:12px;color:#718096;">Draft. Awaiting submission by Holec Finance</span>`;
+            }
+        } else if (curStatus === 'Submitted') {
+            if (canApp) {
+                actionsHtml = `
+                    <button type="button" id="ap-approve-btn" style="${BTN_APPROVE}">Approve ${noun}</button>
+                    <button type="button" id="ap-reject-btn" style="${BTN_REJECT}">Reject</button>
+                `;
+            } else {
+                actionsHtml = `<span style="font-size:12px;color:#718096;">Submitted. Awaiting approval by Holec Manager</span>`;
+            }
+        } else if (curStatus === 'Approved') {
+            actionsHtml = `<span style="font-size:12px;color:#276749;">Approved. This ${noun} can be used for trades and payments.</span>`;
+        } else if (curStatus === 'Rejected') {
+            if (canSub) {
+                actionsHtml = `<button type="button" id="ap-submit-btn" style="${BTN_SUBMIT}">Re-submit ${noun}</button>`;
+            } else {
+                actionsHtml = `<span style="font-size:12px;color:#c53030;">Rejected. Ask Holec Finance to revise and re-submit.</span>`;
+            }
+        }
+
         return `
             <div style="${CARD_BOX}padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
                 <div style="display:flex;align-items:center;gap:12px;">
-                    <span style="font-size:13px;color:#4a5568;font-weight:600;">Approval status</span>
-                    ${approvalBadge(status)}
+                    <span style="font-size:13px;color:#4a5568;font-weight:600;">Status</span>
+                    ${approvalBadge(curStatus)}
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;">
-                    ${showActions ? `<button type="button" id="ap-approve-btn" style="${BTN_APPROVE}">Approve ${noun}</button>` : ''}
-                    ${showActions && status !== 'Rejected' ? `<button type="button" id="ap-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
-                    ${!can && status !== 'Approved' ? `<span style="font-size:12px;color:#718096;">Awaiting approval by Finance</span>` : ''}
-                    ${status === 'Approved' ? `<span style="font-size:12px;color:#276749;">Approved. This ${noun} can be used for trades and payments.</span>` : ''}
+                    ${actionsHtml}
                 </div>
             </div>`;
     }
 
-    function bindApprovalBar(onApprove, onReject) {
+    function bindApprovalBar(handlers = {}) {
         const wire = (id, fn) => {
+            if (!fn) return;
             const el = document.getElementById(id);
             if (!el) return;
             el.addEventListener('click', async () => {
@@ -336,23 +387,24 @@ function init_holec_trading_engine() {
                 try { await fn(); } finally { el.disabled = false; }
             });
         };
-        wire('ap-approve-btn', onApprove);
-        wire('ap-reject-btn', onReject);
+        wire('ap-submit-btn', handlers.onSubmit);
+        wire('ap-approve-btn', handlers.onApprove);
+        wire('ap-reject-btn', handlers.onReject);
     }
 
     async function loadMasterData() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
-                    frappe.db.get_list('Supplier', {
-                        filters: { supplier_group: ['in', ['Transporter', 'Farmer', 'CESS']] },
-                        fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'],
-                        limit: 500
-                    }),                
-                    frappe.db.get_list('Customer', {
-                        filters: { customer_group: 'Holec Trading' },
-                        fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
-                        limit: 500
-                    }),
+                frappe.db.get_list('Supplier', {
+                    filters: { supplier_group: ['in', ['Transporter', 'Farmer', 'CESS']] },
+                    fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'],
+                    limit: 500
+                }),
+                frappe.db.get_list('Customer', {
+                    filters: { customer_group: 'Holec Trading' },
+                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
+                    limit: 500
+                }),
                 frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc', limit: 500 }),
                 frappe.db.get_list('Country', { fields: ['name', 'country_name'], limit: 250, order_by: 'name asc' }),
                 frappe.db.get_list('Item', {
@@ -786,6 +838,7 @@ function init_holec_trading_engine() {
     function renderSuppliers(container) {
         const searchTerm = container._searchQuery || '';
         const statusFilter = container._statusFilter || 'ALL';
+        const submitter = canSubmit();
         const approver = canApprove();
         const all = LIVE_STORE.suppliers || [];
         const stOf = (s) => s.approval_status || 'Draft';
@@ -800,7 +853,7 @@ function init_holec_trading_engine() {
         });
 
         const counts = {};
-        ['Draft', 'Approved', 'Rejected'].forEach(k => { counts[k] = all.filter(s => stOf(s) === k).length; });
+        ['Draft', 'Submitted', 'Approved', 'Rejected'].forEach(k => { counts[k] = all.filter(s => stOf(s) === k).length; });
 
         const filterBtn = (key, label) => `
             <button type="button" data-filter="${key}" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${statusFilter === key ? '#1a202c' : '#fff'};color:${statusFilter === key ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">${label}</button>`;
@@ -816,7 +869,8 @@ function init_holec_trading_engine() {
                     <td style="padding:14px 16px;font-family:monospace;color:#718096;">${escHtml(s.tax_id || '—')}</td>
                     <td style="padding:14px 20px;">${approvalBadge(st)}</td>
                     <td style="padding:14px 20px;text-align:right;white-space:nowrap;">
-                        ${approver && st !== 'Approved' ? `<button type="button" class="sup-approve" data-id="${escHtml(s.name)}" style="${BTN_SM_APPROVE}margin-right:6px;">Approve</button>` : ''}
+                        ${(st === 'Draft' || st === 'Rejected') && submitter ? `<button type="button" class="sup-submit" data-id="${escHtml(s.name)}" style="${BTN_SM_SUBMIT}margin-right:6px;">Submit</button>` : ''}
+                        ${st === 'Submitted' && approver ? `<button type="button" class="sup-approve" data-id="${escHtml(s.name)}" style="${BTN_SM_APPROVE}margin-right:6px;">Approve</button>` : ''}
                         <button type="button" class="sup-open" data-id="${escHtml(s.name)}" style="${BTN_SM}">Open</button>
                     </td>
                 </tr>`;
@@ -835,6 +889,7 @@ function init_holec_trading_engine() {
             <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
                 ${filterBtn('ALL', 'All')}
                 ${filterBtn('Draft', `Draft (${counts.Draft})`)}
+                ${filterBtn('Submitted', `Submitted (${counts.Submitted})`)}
                 ${filterBtn('Approved', `Approved (${counts.Approved})`)}
                 ${filterBtn('Rejected', `Rejected (${counts.Rejected})`)}
             </div>
@@ -875,6 +930,14 @@ function init_holec_trading_engine() {
         container.querySelectorAll('.sup-open').forEach(btn => {
             btn.addEventListener('click', (e) => { e.stopPropagation(); navigate('supplier_detail', { id: btn.dataset.id }); });
         });
+        container.querySelectorAll('.sup-submit').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                btn.disabled = true;
+                const done = await submitSupplier(btn.dataset.id);
+                if (done) renderSuppliers(container); else btn.disabled = false;
+            });
+        });
         container.querySelectorAll('.sup-approve').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -900,6 +963,7 @@ function init_holec_trading_engine() {
     function renderCustomers(container) {
         const searchTerm = container._searchQuery || '';
         const statusFilter = container._statusFilter || 'ALL';
+        const submitter = canSubmit();
         const approver = canApprove();
         const all = LIVE_STORE.customers || [];
         const stOf = (c) => (cint(c.disabled) === 1 ? 'Disabled' : (c.approval_status || 'Draft'));
@@ -913,7 +977,7 @@ function init_holec_trading_engine() {
         });
 
         const counts = {};
-        ['Draft', 'Approved', 'Rejected'].forEach(k => { counts[k] = all.filter(c => stOf(c) === k).length; });
+        ['Draft', 'Submitted', 'Approved', 'Rejected'].forEach(k => { counts[k] = all.filter(c => stOf(c) === k).length; });
 
         const filterBtn = (key, label) => `
             <button type="button" data-filter="${key}" style="padding:6px 14px;border-radius:6px;border:1px solid #cbd5e0;background:${statusFilter === key ? '#1a202c' : '#fff'};color:${statusFilter === key ? '#fff' : '#4a5568'};cursor:pointer;font-size:13px;font-weight:500;">${label}</button>`;
@@ -932,7 +996,8 @@ function init_holec_trading_engine() {
                     <td style="padding:14px 16px;color:#718096;">${escHtml(c.payment_terms || '—')}</td>
                     <td style="padding:14px 20px;">${approvalBadge(st)}</td>
                     <td style="padding:14px 20px;text-align:right;white-space:nowrap;">
-                        ${approver && (st === 'Draft' || st === 'Rejected') ? `<button type="button" class="cus-approve" data-id="${escHtml(c.name)}" style="${BTN_SM_APPROVE}margin-right:6px;">Approve</button>` : ''}
+                        ${(st === 'Draft' || st === 'Rejected') && submitter ? `<button type="button" class="cus-submit" data-id="${escHtml(c.name)}" style="${BTN_SM_SUBMIT}margin-right:6px;">Submit</button>` : ''}
+                        ${st === 'Submitted' && approver ? `<button type="button" class="cus-approve" data-id="${escHtml(c.name)}" style="${BTN_SM_APPROVE}margin-right:6px;">Approve</button>` : ''}
                         <button type="button" class="cus-open" data-id="${escHtml(c.name)}" style="${BTN_SM}">Open</button>
                     </td>
                 </tr>`;
@@ -951,6 +1016,7 @@ function init_holec_trading_engine() {
             <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
                 ${filterBtn('ALL', 'All')}
                 ${filterBtn('Draft', `Draft (${counts.Draft})`)}
+                ${filterBtn('Submitted', `Submitted (${counts.Submitted})`)}
                 ${filterBtn('Approved', `Approved (${counts.Approved})`)}
                 ${filterBtn('Rejected', `Rejected (${counts.Rejected})`)}
             </div>
@@ -990,6 +1056,14 @@ function init_holec_trading_engine() {
         container.querySelectorAll('.cus-open').forEach(btn => {
             btn.addEventListener('click', (e) => { e.stopPropagation(); navigate('customer_detail', { id: btn.dataset.id }); });
         });
+        container.querySelectorAll('.cus-submit').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                btn.disabled = true;
+                const done = await submitCustomer(btn.dataset.id);
+                if (done) renderCustomers(container); else btn.disabled = false;
+            });
+        });
         container.querySelectorAll('.cus-approve').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -1016,109 +1090,124 @@ function init_holec_trading_engine() {
         const id = params.id;
         container.innerHTML = `<div style="padding:40px;text-align:center;color:#718096;">Loading customer...</div>`;
 
-        let doc;
-        try { doc = await frappe.db.get_doc('Customer', id); }
-        catch (e) {
-            console.error('Customer load failed', e);
+        let doc = null;
+        try {
+            doc = await frappe.db.get_doc('Customer', id);
+        } catch (e) {
+            console.warn('Customer get_doc failed, using LIVE_STORE fallback:', e);
+        }
+
+        if (!doc) {
+            doc = (LIVE_STORE.customers || []).find(c => c.name === id);
+        }
+
+        if (!doc) {
             showToast('Could not load this customer.', 'red');
             return navigate('customers');
         }
+
         if (route.module !== 'customer_detail' || route.params.id !== id) return;
 
-        const status = doc[CUSTOMER_STATUS_FIELD] || 'Draft';
-        const kv = (label, value) => `
-            <div>
-                <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
-                <strong style="font-size:14px;color:#2d3748;">${escHtml((value === 0 || value) ? value : '—')}</strong>
-            </div>`;
-        const fileLink = (label, url) => `
-            <div>
-                <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
-                ${url ? `<a href="${escHtml(url)}" target="_blank" style="font-size:14px;color:#3182ce;font-weight:600;text-decoration:none;">View file ↗</a>` : '<strong style="font-size:14px;color:#a0aec0;">—</strong>'}
-            </div>`;
-        const SEC = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;';
-        const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
-        const TD = 'padding:10px 12px;color:#2d3748;';
+        try {
+            const status = doc[CUSTOMER_STATUS_FIELD] || doc.approval_status || 'Draft';
+            const kv = (label, value) => `
+                <div>
+                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
+                    <strong style="font-size:14px;color:#2d3748;">${escHtml((value === 0 || value) ? value : '—')}</strong>
+                </div>`;
+            const fileLink = (label, url) => `
+                <div>
+                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
+                    ${url ? `<a href="${escHtml(url)}" target="_blank" style="font-size:14px;color:#3182ce;font-weight:600;text-decoration:none;">View file ↗</a>` : '<strong style="font-size:14px;color:#a0aec0;">—</strong>'}
+                </div>`;
+            const SEC = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;';
+            const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
+            const TD = 'padding:10px 12px;color:#2d3748;';
 
-        const dpRows = (doc.custom_holec_delivery_points || []).map((r, i) => `
-            <tr style="border-bottom:1px solid #edf2f7;"><td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.delivery_point_name)}</td><td style="${TD}">${escHtml(r.location)}</td></tr>`).join('');
-        const ctRows = (doc.custom_holec_contacts || []).map((r, i) => `
-            <tr style="border-bottom:1px solid #edf2f7;">
-                <td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.contact_name)}</td><td style="${TD}">${escHtml(r.role)}</td>
-                <td style="${TD}">${escHtml(r.phone)}</td><td style="${TD}">${escHtml(r.whatsapp)}</td><td style="${TD}">${escHtml(r.email)}</td>
-                <td style="${TD}">${cint(r.is_primary) ? 'Yes' : ''}</td>
-            </tr>`).join('');
+            const dpRows = (doc.custom_holec_delivery_points || []).map((r, i) => `
+                <tr style="border-bottom:1px solid #edf2f7;"><td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.delivery_point_name || r.name || '')}</td><td style="${TD}">${escHtml(r.location || '')}</td></tr>`).join('');
+            const ctRows = (doc.custom_holec_contacts || doc.holec_contacts || []).map((r, i) => `
+                <tr style="border-bottom:1px solid #edf2f7;">
+                    <td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.contact_name || r.name || '')}</td><td style="${TD}">${escHtml(r.role || '')}</td>
+                    <td style="${TD}">${escHtml(r.phone || '')}</td><td style="${TD}">${escHtml(r.whatsapp || '')}</td><td style="${TD}">${escHtml(r.email || '')}</td>
+                    <td style="${TD}">${cint(r.is_primary) ? 'Yes' : ''}</td>
+                </tr>`).join('');
 
-        container.innerHTML = `
-            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">${escHtml(doc.customer_name || doc.name)}</span>
-            </div>
-            <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">${escHtml(doc.customer_name || doc.name)}</h1>
-                <span style="font-size:13px;color:#718096;">${escHtml(doc.name)}</span>
-            </div>
-
-            ${approvalBarHtml(status, 'customer')}
-
-            <div style="${CARD_BOX}">
-                <div style="${SEC}">CUSTOMER DETAILS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${kv('Customer ID', doc[CUSTOMER_ID_FIELD])}
-                    ${kv('Customer Name', doc.customer_name)}
-                    ${kv('Customer Group', doc.customer_group)}
-                    ${kv('KRA PIN', doc.custom_kra_pin || doc.tax_id)}
-                    ${kv('Registered Name (per KRA)', doc.custom_registered_name_per_kra)}
-                    ${fileLink('KRA PIN Certificate', doc.custom_kra_certificate)}
-                    ${fileLink('Business Registration / CR12', doc.custom_business_registration)}
+            container.innerHTML = `
+                <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                    <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">${escHtml(doc.customer_name || doc.name)}</span>
                 </div>
-            </div>
-
-            <div style="${CARD_BOX}">
-                <div style="${SEC}">DELIVERY POINTS</div>
-                <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                        <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><th style="${TH}width:60px;">No.</th><th style="${TH}">Delivery Point Name</th><th style="${TH}">Location / Address</th></tr></thead>
-                        <tbody>${dpRows || `<tr><td colspan="3" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
-                    </table>
+                <div style="margin-bottom:20px;">
+                    <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">${escHtml(doc.customer_name || doc.name)}</h1>
+                    <span style="font-size:13px;color:#718096;">${escHtml(doc.name)}</span>
                 </div>
-            </div>
 
-            <div style="${CARD_BOX}">
-                <div style="${SEC}">CONTACT PERSONS</div>
-                <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px;">
-                        <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                            <th style="${TH}width:50px;">No.</th><th style="${TH}">Name</th><th style="${TH}">Role</th><th style="${TH}">Phone</th><th style="${TH}">WhatsApp</th><th style="${TH}">Email</th><th style="${TH}">Primary</th>
-                        </tr></thead>
-                        <tbody>${ctRows || `<tr><td colspan="7" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
-                    </table>
+                ${approvalBarHtml(status, 'customer')}
+
+                <div style="${CARD_BOX}">
+                    <div style="${SEC}">CUSTOMER DETAILS</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                        ${kv('Customer ID', doc[CUSTOMER_ID_FIELD] || doc.alias || '')}
+                        ${kv('Customer Name', doc.customer_name)}
+                        ${kv('Customer Group', doc.customer_group)}
+                        ${kv('KRA PIN', doc.custom_kra_pin || doc.tax_id)}
+                        ${kv('Registered Name (per KRA)', doc.custom_registered_name_per_kra)}
+                        ${fileLink('KRA PIN Certificate', doc.custom_kra_certificate)}
+                        ${fileLink('Business Registration / CR12', doc.custom_business_registration)}
+                    </div>
                 </div>
-            </div>
 
-            <div style="${CARD_BOX}">
-                <div style="${SEC}">COMMERCIAL TERMS & QUALITY SPEC</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${kv('Payment Terms', doc.payment_terms)}
-                    ${kv('Offloading Borne By', doc.custom_offloading_borne_by)}
-                    <div></div>
-                    ${kv('Moisture Max (%)', doc.custom_moisture_max)}
-                    ${kv('Foreign Matter Max (%)', doc.custom_foreign_matter_max)}
-                    ${kv('Aflatoxin Max (ppb)', doc.custom_aflatoxin_max)}
+                <div style="${CARD_BOX}">
+                    <div style="${SEC}">DELIVERY POINTS</div>
+                    <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><th style="${TH}width:60px;">No.</th><th style="${TH}">Delivery Point Name</th><th style="${TH}">Location / Address</th></tr></thead>
+                            <tbody>${dpRows || `<tr><td colspan="3" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
 
-            <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn ghost" id="back-customers-btn" style="${BTN_GHOST}">Back to customers</button>
-            </div>
-        `;
+                <div style="${CARD_BOX}">
+                    <div style="${SEC}">CONTACT PERSONS</div>
+                    <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px;">
+                            <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                                <th style="${TH}width:50px;">No.</th><th style="${TH}">Name</th><th style="${TH}">Role</th><th style="${TH}">Phone</th><th style="${TH}">WhatsApp</th><th style="${TH}">Email</th><th style="${TH}">Primary</th>
+                            </tr></thead>
+                            <tbody>${ctRows || `<tr><td colspan="7" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
+                        </table>
+                    </div>
+                </div>
 
-        document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
-        document.getElementById('back-customers-btn').addEventListener('click', () => navigate('customers'));
+                <div style="${CARD_BOX}">
+                    <div style="${SEC}">COMMERCIAL TERMS & QUALITY SPEC</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                        ${kv('Payment Terms', doc.payment_terms)}
+                        ${kv('Offloading Borne By', doc.custom_offloading_borne_by)}
+                        <div></div>
+                        ${kv('Moisture Max (%)', doc.custom_moisture_max)}
+                        ${kv('Foreign Matter Max (%)', doc.custom_foreign_matter_max)}
+                        ${kv('Aflatoxin Max (ppb)', doc.custom_aflatoxin_max)}
+                    </div>
+                </div>
 
-        bindApprovalBar(
-            async () => { if (await approveCustomer(id)) navigate('customer_detail', { id }); },
-            async () => { if (await rejectParty('Customer', id, CUSTOMER_STATUS_FIELD, 'customer')) navigate('customer_detail', { id }); }
-        );
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <button class="h-btn ghost" id="back-customers-btn" style="${BTN_GHOST}">Back to customers</button>
+                </div>
+            `;
+
+            document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
+            document.getElementById('back-customers-btn').addEventListener('click', () => navigate('customers'));
+
+            bindApprovalBar({
+                onSubmit: async () => { if (await submitCustomer(id)) navigate('customer_detail', { id }); },
+                onApprove: async () => { if (await approveCustomer(id)) navigate('customer_detail', { id }); },
+                onReject: async () => { if (await rejectParty('Customer', id, CUSTOMER_STATUS_FIELD, 'customer')) navigate('customer_detail', { id }); }
+            });
+        } catch (err) {
+            console.error('Error rendering customer detail:', err);
+            showToast('Error rendering customer details.', 'red');
+        }
     }
 
     // =====================================================================
@@ -1440,8 +1529,8 @@ function init_holec_trading_engine() {
                     <td style="padding:8px 12px;"><input class="ct" data-k="phone" data-i="${i}" value="${esc(c.phone)}" placeholder="07XX XXX XXX" style="${CELL_INPUT}"></td>
                     <td style="padding:8px 12px;text-align:center;"><input type="checkbox" class="ct-wa" data-i="${i}" ${c.same_as_wa ? 'checked' : ''}></td>
                     <td style="padding:8px 12px;">${c.same_as_wa
-                        ? '<span style="color:#a0aec0;font-size:12px;">— same as phone</span>'
-                        : `<input class="ct" data-k="whatsapp" data-i="${i}" value="${esc(c.whatsapp)}" style="${CELL_INPUT}">`}</td>
+                    ? '<span style="color:#a0aec0;font-size:12px;">— same as phone</span>'
+                    : `<input class="ct" data-k="whatsapp" data-i="${i}" value="${esc(c.whatsapp)}" style="${CELL_INPUT}">`}</td>
                     <td style="padding:8px 12px;"><input class="ct" data-k="email" data-i="${i}" value="${esc(c.email)}" style="${CELL_INPUT}"></td>
                     <td style="padding:8px 12px;text-align:center;"><input type="radio" name="nc-primary" class="ct-primary" data-i="${i}" ${c.is_primary ? 'checked' : ''}></td>
                     <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="ct-del" data-i="${i}">${state.contacts.length > 1 ? '🗑' : ''}</td>
@@ -1656,13 +1745,22 @@ function init_holec_trading_engine() {
         const id = params.id;
         container.innerHTML = `<div style="padding:40px;text-align:center;color:#718096;">Loading supplier...</div>`;
 
-        let doc;
-        try { doc = await frappe.db.get_doc('Supplier', id); }
-        catch (e) {
-            console.error('Supplier load failed', e);
+        let doc = null;
+        try {
+            doc = await frappe.db.get_doc('Supplier', id);
+        } catch (e) {
+            console.warn('Supplier get_doc failed, using LIVE_STORE fallback:', e);
+        }
+
+        if (!doc) {
+            doc = (LIVE_STORE.suppliers || []).find(s => s.name === id);
+        }
+
+        if (!doc) {
             showToast('Could not load this supplier.', 'red');
             return navigate('suppliers');
         }
+
         // User may have navigated elsewhere while this was loading
         if (route.module !== 'supplier_detail' || route.params.id !== id) return;
 
@@ -1821,7 +1919,7 @@ function init_holec_trading_engine() {
 
         // Secondary bank section starts open when the supplier already has secondary details
         const hasSecondary = [d.custom_secondary_bank, d.custom_secondary_bank_code, d.custom_swift_code, d.custom_bank_branch,
-            d.custom_branch_code, d.custom_account_number, d.custom_account_name, d.custom_secondary_mpesa_name, d.custom_secondary_mpesa_number].some(v => !!v);
+        d.custom_branch_code, d.custom_account_number, d.custom_account_name, d.custom_secondary_mpesa_name, d.custom_secondary_mpesa_number].some(v => !!v);
 
         // ---------- LAYOUT ----------
         container.innerHTML = `
@@ -1900,11 +1998,11 @@ function init_holec_trading_engine() {
             </div>
 
             ${collapsible({
-                id: 'sec-bank',
-                title: 'BANKING',
-                subtitle: 'Primary bank account and Mpesa details. Click to collapse or expand.',
-                open: true,
-                body: `
+                    id: 'sec-bank',
+                    title: 'BANKING',
+                    subtitle: 'Primary bank account and Mpesa details. Click to collapse or expand.',
+                    open: true,
+                    body: `
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                         ${field({ label: 'Bank *', id: 'ns-bank', type: 'select', required: true, options: bankOptions1, value: d.bank || '' })}
                         ${field({ label: 'Bank Code *', id: 'ns-bank-code', required: true, value: d.bank_code || '' })}
@@ -1926,14 +2024,14 @@ function init_holec_trading_engine() {
                             ${field({ label: 'Mpesa Number', id: 'ns-mpesa-no', placeholder: '07XX XXX XXX', value: d.custom_mpesa_number || '' })}
                         </div>
                     </div>`
-            })}
+                })}
 
             ${collapsible({
-                id: 'sec-bank2',
-                title: 'SECONDARY BANK (OPTIONAL)',
-                subtitle: 'Backup account for payments. Leave blank if the supplier has only one bank.',
-                open: hasSecondary,
-                body: `
+                    id: 'sec-bank2',
+                    title: 'SECONDARY BANK (OPTIONAL)',
+                    subtitle: 'Backup account for payments. Leave blank if the supplier has only one bank.',
+                    open: hasSecondary,
+                    body: `
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                         ${field({ label: 'Bank', id: 'ns2-bank', type: 'select', options: bankOptions2, value: d.custom_secondary_bank || '' })}
                         ${field({ label: 'Bank Code', id: 'ns2-bank-code', value: d.custom_secondary_bank_code || '' })}
@@ -1954,7 +2052,7 @@ function init_holec_trading_engine() {
                             ${field({ label: 'Mpesa Number', id: 'ns2-mpesa-no', placeholder: '07XX XXX XXX', value: d.custom_secondary_mpesa_number || '' })}
                         </div>
                     </div>`
-            })}
+                })}
 
             <div style="display:flex;gap:12px;align-items:center;">
                 <button class="h-btn primary" id="submit-draft-supplier-btn" style="${BTN_PRIMARY}">${isEdit ? 'Save changes' : 'Submit as Draft'}</button>
@@ -2037,20 +2135,27 @@ function init_holec_trading_engine() {
         document.getElementById('back-suppliers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('suppliers'); });
         document.getElementById('cancel-supplier-btn').addEventListener('click', () => navigate('suppliers'));
 
-        // ---------- APPROVE / REJECT (open supplier only) ----------
+        // ---------- SUBMIT / APPROVE / REJECT (open supplier only) ----------
         if (isEdit) {
-            bindApprovalBar(
-                async () => {
+            bindApprovalBar({
+                onSubmit: async () => {
+                    if (dirty) {
+                        frappe.msgprint(__('You have unsaved changes. Save them first, then submit.'));
+                        return;
+                    }
+                    if (await submitSupplier(d.name)) navigate('supplier_detail', { id: d.name });
+                },
+                onApprove: async () => {
                     if (dirty) {
                         frappe.msgprint(__('You have unsaved changes. Save them first, then approve.'));
                         return;
                     }
                     if (await approveSupplier(d.name)) navigate('supplier_detail', { id: d.name });
                 },
-                async () => {
+                onReject: async () => {
                     if (await rejectParty('Supplier', d.name, SUPPLIER_STATUS_FIELD, 'supplier')) navigate('supplier_detail', { id: d.name });
                 }
-            );
+            });
         }
 
         // ---------- SAVE ----------
@@ -3099,16 +3204,16 @@ function init_holec_trading_engine() {
                     ${readonlyBox('Cess', fmtKES(cess))}
                     ${readonlyBox('Total payable', fmtKES(amount), true)}
                     ${editable
-                        ? field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })
-                        : readonlyBox('Mode of Payment', escHtml(l.transport_payment_mode || '—'))}
+                ? field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })
+                : readonlyBox('Mode of Payment', escHtml(l.transport_payment_mode || '—'))}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
                     ${editable
-                        ? field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)', value: l.transport_payment_ref || '' })
-                        : readonlyBox('Reference No', escHtml(l.transport_payment_ref || l.name))}
+                ? field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)', value: l.transport_payment_ref || '' })
+                : readonlyBox('Reference No', escHtml(l.transport_payment_ref || l.name))}
                     ${editable
-                        ? field({ label: 'Reference Date', id: 'f-tp-date', type: 'date', value: l.transport_payment_date || frappe.datetime.get_today() })
-                        : readonlyBox('Reference Date', escHtml(savedDate))}
+                ? field({ label: 'Reference Date', id: 'f-tp-date', type: 'date', value: l.transport_payment_date || frappe.datetime.get_today() })
+                : readonlyBox('Reference Date', escHtml(savedDate))}
                 </div>
             </div>
 
@@ -3983,26 +4088,34 @@ function init_holec_trading_engine() {
 
         // Sidebar items; related sub-screens keep the parent highlighted
         const GROUPS = [
-            { title: 'PARTIES', items: [
-                { id: 'suppliers', label: 'Suppliers', also: ['new_supplier', 'supplier_detail'] },
-                { id: 'customers', label: 'Customers', also: ['new_customer', 'customer_detail'] }
-            ]},
-            { title: 'TRADE', items: [
-                { id: 'lots', label: 'Lots' },
-                { id: 'tickets', label: 'New Ticket' },
-                { id: 'intake', label: 'Intake & Quality' },
-                { id: 'deductions', label: 'Deductions & Payable' },
-                { id: 'transport', label: 'Transport & Loss' },
-                { id: 'sale_invoicing', label: 'Sale & Invoicing' }
-            ]},
-            { title: 'FINANCE', items: [
-                { id: 'payments_list', label: 'Payments', also: ['payments', 'payments_form'] }
-            ]},
-            { title: 'INSIGHT', items: [
-                { id: 'ledger', label: 'Cost Ledger & Margin' },
-                { id: 'reports', label: 'Reports' },
-                { id: 'event_log', label: 'Trade event log' }
-            ]}
+            {
+                title: 'PARTIES', items: [
+                    { id: 'suppliers', label: 'Suppliers', also: ['new_supplier', 'supplier_detail'] },
+                    { id: 'customers', label: 'Customers', also: ['new_customer', 'customer_detail'] }
+                ]
+            },
+            {
+                title: 'TRADE', items: [
+                    { id: 'lots', label: 'Lots' },
+                    { id: 'tickets', label: 'New Ticket' },
+                    { id: 'intake', label: 'Intake & Quality' },
+                    { id: 'deductions', label: 'Deductions & Payable' },
+                    { id: 'transport', label: 'Transport & Loss' },
+                    { id: 'sale_invoicing', label: 'Sale & Invoicing' }
+                ]
+            },
+            {
+                title: 'FINANCE', items: [
+                    { id: 'payments_list', label: 'Payments', also: ['payments', 'payments_form'] }
+                ]
+            },
+            {
+                title: 'INSIGHT', items: [
+                    { id: 'ledger', label: 'Cost Ledger & Margin' },
+                    { id: 'reports', label: 'Reports' },
+                    { id: 'event_log', label: 'Trade event log' }
+                ]
+            }
         ];
 
         el.innerHTML = `
@@ -4012,9 +4125,9 @@ function init_holec_trading_engine() {
             ${GROUPS.map(g => `
                 <div style="font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin:12px 0 6px 0;">${g.title}</div>
                 ${g.items.map(it => {
-                    const active = route.module === it.id || (it.also || []).includes(route.module);
-                    return `<div class="mod-item" data-mod="${it.id}" data-active="${active ? 1 : 0}" style="padding:6px 10px;border-radius:6px;background:${active ? '#ebf8ff' : 'transparent'};color:${active ? '#2b6cb0' : '#4a5568'};font-weight:${active ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;">${it.label}</div>`;
-                }).join('')}
+            const active = route.module === it.id || (it.also || []).includes(route.module);
+            return `<div class="mod-item" data-mod="${it.id}" data-active="${active ? 1 : 0}" style="padding:6px 10px;border-radius:6px;background:${active ? '#ebf8ff' : 'transparent'};color:${active ? '#2b6cb0' : '#4a5568'};font-weight:${active ? '600' : '400'};cursor:pointer;font-size:13px;margin-bottom:2px;">${it.label}</div>`;
+        }).join('')}
             `).join('')}
         `;
 

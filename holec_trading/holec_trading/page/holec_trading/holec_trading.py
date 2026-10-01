@@ -499,20 +499,20 @@ def extract_weights_via_openai(file_bytes, filename="", slip_type="gross"):
             slip_type = "gross"
 
         system_prompt = """
-You are an expert OCR system for weighbridge tickets.
-Read the document carefully and extract ONLY values that are actually printed.
-DO NOT guess. DO NOT calculate. DO NOT invent values.
+            You are an expert OCR system for weighbridge tickets.
+            Read the document carefully and extract ONLY values that are actually printed.
+            DO NOT guess. DO NOT calculate. DO NOT invent values.
 
-Return ONLY valid JSON using exactly:
-{
-    "gross_weight": null,
-    "tare_weight": null,
-    "net_weight": null,
-    "ticket_no": null,
-    "vehicle_no": null,
-    "bag_count": null
-}
-"""
+            Return ONLY valid JSON using exactly:
+            {
+                "gross_weight": null,
+                "tare_weight": null,
+                "net_weight": null,
+                "ticket_no": null,
+                "vehicle_no": null,
+                "bag_count": null
+            }
+        """
 
         messages = [{"role": "system", "content": system_prompt}]
         filename_lower = (filename or "").lower()
