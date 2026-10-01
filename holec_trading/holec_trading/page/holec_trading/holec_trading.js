@@ -1380,6 +1380,7 @@ function init_holec_trading_engine() {
                     ${field({ label: 'Area', id: 'ns-area', type: 'select', options: areaOptions })}
                     ${field({ label: 'County', id: 'ns-coun', type: 'select', options: counOptions })}
                 </div>
+                ${field({ label: 'City', id: 'ns-city' })}
                 ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true })}
             </div>
 
@@ -1495,6 +1496,7 @@ function init_holec_trading_engine() {
             const supplierType = $('#ns-type').val();
             const taxId = $('#ns-krapin').val();
             const county = $('#ns-county').val();
+            const city = $('#ns-city').val();
             const area = $('#ns-area').val();
             const address = $('#ns-address').val();
             const vatStatus = $('#ns-vat').val();
@@ -1553,6 +1555,7 @@ function init_holec_trading_engine() {
                     supplier_group: supplierGroup,
                     supplier_type: supplierType,
                     country: county || 'Kenya',
+                    city: city,
                     tax_id: taxId,
                     kra_pin: taxId,
                     area: area,
