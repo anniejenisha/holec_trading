@@ -31,6 +31,9 @@ PAYMENT_TYPE_MODE_MAP = {
     "MPESA": "M-PESA",  # Added alias matching your Bruno test payload
     "AirtelPayment": "Airtel",
     "UtilityPayment": "Utility Payment",
+    "OTG" : "OTG",
+    "Branch":"Branch",
+    "PesaLink":"PesaLink"
 }
 
 # Pesalink destination subtype -> Mode of Payment.

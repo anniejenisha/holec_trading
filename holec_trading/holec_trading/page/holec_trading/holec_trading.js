@@ -396,12 +396,12 @@ function init_holec_trading_engine() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
                 frappe.db.get_list('Supplier', {
-                    filters: { supplier_group: ['in', ['Transporter', 'Farmer', 'CESS']] },
+                    filters: { supplier_group: ['in', ['Transporter', 'Farmer', 'CESS']], custom_status : 'Approved' },
                     fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'],
                     limit: 500
                 }),
                 frappe.db.get_list('Customer', {
-                    filters: { customer_group: 'Holec Trading' },
+                    filters: { customer_group: 'Holec Trading' , custom_approval_status : 'Approved' },
                     fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
                     limit: 500
                 }),
@@ -1294,7 +1294,7 @@ function init_holec_trading_engine() {
                 <div style="${SECTION}margin-bottom:16px;">KRA VERIFICATION</div>
                 <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', true)}</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true, hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
+                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload',hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
                     ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true })}
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="${LABEL}">PIN Status</label>
