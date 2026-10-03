@@ -3313,9 +3313,8 @@ function init_holec_trading_engine() {
         const partyStatus = supplier ? (supplier.approval_status || 'Draft') : 'Draft';
         const partyBlocked = REQUIRE_APPROVED_PARTY_FOR_PAYMENT && partyStatus !== 'Approved';
 
-        const userRoles = frappe.user_roles || [];
-        const isFinanceRole = userRoles.includes('Holec Finance') || userRoles.includes('System Manager');
-        const isManagerRole = userRoles.includes('Holec Manager') || userRoles.includes('System Manager');
+        const isFinanceRole = frappe.user.has_role('Holec Finance') || frappe.user.has_role('System Manager') || frappe.session.user === 'Administrator';
+        const isManagerRole = frappe.user.has_role('Holec Manager') || frappe.user.has_role('System Manager') || frappe.session.user === 'Administrator';
 
         const editable = pstatus === '' || pstatus === 'Rejected' || pstatus === 'Draft';
         const isPendingFinance = pstatus === 'Pending Finance Approval' || pstatus === 'Pending Approval' || pstatus === 'Submitted';
@@ -4422,59 +4421,62 @@ function init_holec_trading_engine() {
         });
 
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
-        document.getElementById('submit-etims-btn').addEventListener('click', async () => {
-            const customer = $('#f-customer').val();
-            const sellRate = flt($('#f-sell-rate').val());
+        const submitEtimsBtn = document.getElementById('submit-etims-btn');
+        if (submitEtimsBtn) {
+            submitEtimsBtn.addEventListener('click', async (e) => {
+                const btn = e.currentTarget || document.getElementById('submit-etims-btn');
+                const customer = $('#f-customer').val();
+                const sellRate = flt($('#f-sell-rate').val());
 
-            if (!customer) {
-                frappe.msgprint(__('Please select a Customer.'));
-                return;
-            }
-            if (sellRate <= 0) {
-                frappe.msgprint(__('Please enter a valid Sell Rate.'));
-                return;
-            }
-
-            const m = computeMargin(l, sellRate);
-            if (m.soldKg <= 0) {
-                frappe.msgprint(__('No customer weighbridge weight recorded. Complete the Transport & Loss step first.'));
-                return;
-            }
-
-            const btn = document.getElementById('submit-etims-btn');
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = 'Submitting Invoice...';
-            }
-
-            frappe.call({
-                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.submit_sale',
-                args: {
-                    ticket: l.name,
-                    customer: customer,
-                    sell_rate: sellRate
-                },
-                freeze: true,
-                freeze_message: 'Submitting Sales Invoice & Transmitting to eTIMS...',
-                callback: async (r) => {
-                    if (r && r.message) {
-                        const realInvoiceNo = r.message.invoice_number;
-                        showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
-                        await loadMasterData();
-                        navigate('lots', { id: l.name });
-                    } else if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = 'Submit Invoice & Transmit to eTIMS';
-                    }
-                },
-                error: (err) => {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = 'Submit Invoice & Transmit to eTIMS';
-                    }
+                if (!customer) {
+                    frappe.msgprint(__('Please select a Customer.'));
+                    return;
                 }
+                if (sellRate <= 0) {
+                    frappe.msgprint(__('Please enter a valid Sell Rate.'));
+                    return;
+                }
+
+                const m = computeMargin(l, sellRate);
+                if (m.soldKg <= 0) {
+                    frappe.msgprint(__('No customer weighbridge weight recorded. Complete the Transport & Loss step first.'));
+                    return;
+                }
+
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = 'Submitting Invoice...';
+                }
+
+                frappe.call({
+                    method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.submit_sale',
+                    args: {
+                        ticket: l.name,
+                        customer: customer,
+                        sell_rate: sellRate
+                    },
+                    freeze: true,
+                    freeze_message: 'Submitting Sales Invoice & Transmitting to eTIMS...',
+                    callback: async (r) => {
+                        if (r && r.message) {
+                            const realInvoiceNo = r.message.invoice_number;
+                            showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
+                            await loadMasterData();
+                            navigate('lots', { id: l.name });
+                        } else if (btn) {
+                            btn.disabled = false;
+                            btn.textContent = 'Submit Invoice & Transmit to eTIMS';
+                        }
+                    },
+                    error: (err) => {
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.textContent = 'Submit Invoice & Transmit to eTIMS';
+                        }
+                    }
+                });
             });
-        });
+        }
     }
 
     // =====================================================================
