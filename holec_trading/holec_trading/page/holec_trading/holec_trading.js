@@ -1147,15 +1147,25 @@ function init_holec_trading_engine() {
                 ${approvalBarHtml(status, 'customer')}
 
                 <div style="${CARD_BOX}">
-                    <div style="${SEC}">CUSTOMER DETAILS</div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
+                    <div style="${SEC}">CUSTOMER DETAILS & KRA VERIFICATION</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:16px;">
                         ${kv('Customer ID', doc[CUSTOMER_ID_FIELD] || doc.alias || '')}
                         ${kv('Customer Name', doc.customer_name)}
                         ${kv('Customer Group', doc.customer_group)}
-                        ${kv('KRA PIN', doc.custom_kra_pin || doc.tax_id)}
-                        ${kv('Registered Name (per KRA)', doc.custom_registered_name_per_kra)}
-                        ${fileLink('KRA PIN Certificate', doc.custom_kra_certificate)}
-                        ${fileLink('Business Registration / CR12', doc.custom_business_registration)}
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:16px;align-items:end;">
+                        <div>
+                            <label style="font-size:12px;color:#718096;display:block;margin-bottom:4px;">KRA PIN Certificate (OCR Upload)</label>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <button type="button" id="cd-upload-kra-btn" style="padding:6px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;font-weight:500;color:#2d3748;">⬆ Upload & Run OCR</button>
+                                <span id="cd-kra-filename" style="font-size:12px;color:#718096;font-style:italic;">${doc.custom_kra_certificate ? `<a href="${escHtml(doc.custom_kra_certificate)}" target="_blank" style="color:#3182ce;">View certificate ↗</a>` : 'No file uploaded'}</span>
+                            </div>
+                        </div>
+                        ${field({ label: 'KRA PIN *', id: 'cd-krapin', required: true, placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_kra_pin || doc.tax_id || '' })}
+                        ${field({ label: 'Registered Name (per KRA)', id: 'cd-regname', placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_registered_name_per_kra || '' })}
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;">
+                        <button type="button" id="cd-save-kra-btn" style="${BTN_SM_SUBMIT}">Save KRA Details</button>
                     </div>
                 </div>
 
@@ -1200,6 +1210,85 @@ function init_holec_trading_engine() {
 
             document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
             document.getElementById('back-customers-btn').addEventListener('click', () => navigate('customers'));
+
+            let cdKraFile = null;
+            document.getElementById('cd-upload-kra-btn').addEventListener('click', () => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+                fileInput.onchange = function (e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    cdKraFile = file;
+                    $('#cd-kra-filename').text(file.name).css({ color: '#2b6cb0', 'font-style': 'normal' });
+
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        showToast('Reading KRA details via OCR...', 'orange');
+                        frappe.call({
+                            method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_kra_details',
+                            args: { filedata: ev.target.result, filename: file.name },
+                            silent: true,
+                            freeze: true,
+                            freeze_message: 'Reading KRA certificate...',
+                            callback: (r) => {
+                                const m = r && r.message;
+                                if (m && (m.pin || m.name)) {
+                                    if (m.pin) $('#cd-krapin').val(String(m.pin).toUpperCase());
+                                    if (m.name) $('#cd-regname').val(String(m.name));
+                                    showToast(`OCR extracted KRA PIN: ${m.pin || ''}`);
+                                } else {
+                                    showToast('Could not read certificate text. Enter PIN manually.', 'orange');
+                                }
+                            },
+                            error: () => {
+                                showToast('Certificate OCR failed. Enter PIN manually.', 'orange');
+                            }
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                };
+                fileInput.click();
+            });
+
+            document.getElementById('cd-save-kra-btn').addEventListener('click', async () => {
+                const newPin = String($('#cd-krapin').val() || '').trim().toUpperCase();
+                const newRegName = String($('#cd-regname').val() || '').trim();
+                if (!newPin) {
+                    frappe.msgprint(__('Please enter a valid KRA PIN.'));
+                    return;
+                }
+                const btn = document.getElementById('cd-save-kra-btn');
+                btn.disabled = true;
+                try {
+                    await frappe.db.set_value('Customer', doc.name, {
+                        tax_id: newPin,
+                        custom_kra_pin: newPin,
+                        custom_registered_name_per_kra: newRegName
+                    });
+                    if (cdKraFile) {
+                        const fd = new FormData();
+                        fd.append('file', cdKraFile, cdKraFile.name);
+                        fd.append('is_private', 1);
+                        fd.append('doctype', 'Customer');
+                        fd.append('docname', doc.name);
+                        fd.append('fieldname', 'custom_kra_certificate');
+                        await fetch('/api/method/upload_file', {
+                            method: 'POST',
+                            headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
+                            body: fd
+                        });
+                    }
+                    showToast('KRA PIN and details updated successfully');
+                    await loadMasterData();
+                    navigate('customer_detail', { id: doc.name });
+                } catch (e) {
+                    console.error('Failed to save KRA details:', e);
+                    showToast('Could not save KRA details.', 'red');
+                } finally {
+                    btn.disabled = false;
+                }
+            });
 
             bindApprovalBar({
                 onSubmit: async () => { if (await submitCustomer(id)) navigate('customer_detail', { id }); },
@@ -1297,7 +1386,7 @@ function init_holec_trading_engine() {
                 <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', true)}</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
                     ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload', hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
-                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload', readonly: true })}
+                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload or edit manually' })}
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="${LABEL}">PIN Status</label>
                         <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
@@ -3026,6 +3115,43 @@ function init_holec_trading_engine() {
         }
 
         const approver = canApprove();
+
+        // 1. Supplier Net Invoice Payments from Deduction Engine
+        const dueSupplierTickets = LIVE_STORE.lots.filter(t =>
+            t.supplier &&
+            !cint(t.supplier_paid) &&
+            t.supplier_payment_status !== 'Dispatched' &&
+            ['Lot', 'Position', 'Invoiced', 'Settled'].includes(t.status)
+        );
+
+        const supplierPendingCount = dueSupplierTickets.filter(t => t.supplier_payment_status === 'Pending Approval').length;
+        const supplierApprovedCount = dueSupplierTickets.filter(t => t.supplier_payment_status === 'Approved').length;
+
+        const supplierRows = dueSupplierTickets.map(t => {
+            const p = computePayable(t);
+            const ps = t.supplier_payment_status || 'Pending Approval';
+            let label = 'Submit for approval', style = BTN_SM_APPROVE;
+            if (ps === 'Pending Approval') { label = approver ? 'Review & approve' : 'View'; style = approver ? BTN_SM_APPROVE : BTN_SM; }
+            else if (ps === 'Approved') { label = 'Dispatch to Bank'; style = BTN_SM_APPROVE; }
+            else if (ps === 'Rejected') { label = 'Fix & resubmit'; style = BTN_SM; }
+
+            const supplierObj = (LIVE_STORE.suppliers || []).find(s => s.name === t.supplier);
+            const supplierName = supplierObj && supplierObj.supplier_name ? `${supplierObj.supplier_name} (${t.supplier})` : t.supplier;
+
+            return `
+            <tr style="border-bottom:1px solid #edf2f7;">
+                <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${escHtml(t.name)}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${escHtml(supplierName)}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${fmtKg1(p.acceptedNetKg)}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(p.netPayable)}</td>
+                <td style="padding:12px 16px;">${approvalBadge(ps, 'Pending Approval')}</td>
+                <td style="padding:12px 16px;text-align:right;">
+                    <button class="h-btn sm pay-supplier-btn" data-id="${escHtml(t.name)}" style="${style}">${label}</button>
+                </td>
+            </tr>`;
+        }).join('');
+
+        // 2. Transporter Payments
         const dueTickets = LIVE_STORE.lots.filter(t =>
             t.transporter &&
             !cint(t.transport_paid) &&
@@ -3041,7 +3167,7 @@ function init_holec_trading_engine() {
             const ps = t.transport_payment_status || '';
             let label = 'Submit for approval', style = BTN_SM_APPROVE;
             if (ps === 'Pending Approval') { label = approver ? 'Review & approve' : 'View'; style = approver ? BTN_SM_APPROVE : BTN_SM; }
-            else if (ps === 'Approved') { label = 'Dispatch funds'; style = BTN_SM_APPROVE; }
+            else if (ps === 'Approved') { label = 'Dispatch to Bank'; style = BTN_SM_APPROVE; }
             else if (ps === 'Rejected') { label = 'Fix & resubmit'; style = BTN_SM; }
             const total = flt(t.haulage_kes) + flt(t.cess_kes);
 
@@ -3079,6 +3205,28 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <div style="font-size:14px;font-weight:600;color:#1a202c;">PAYABLE TO SUPPLIERS (Deduction Engine Net Invoices)</div>
+                <div style="font-size:12px;color:#718096;">${supplierPendingCount} awaiting approval · ${supplierApprovedCount} approved, ready to dispatch</div>
+            </div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
+                            <th style="padding:12px 16px;">Ticket</th>
+                            <th style="padding:12px 16px;">Supplier</th>
+                            <th style="padding:12px 16px;">Accepted Net Qty</th>
+                            <th style="padding:12px 16px;">Net Payable</th>
+                            <th style="padding:12px 16px;">Approval</th>
+                            <th style="padding:12px 16px;text-align:right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${supplierRows || `<tr><td colspan="6" style="padding:20px;text-align:center;color:#718096;">No pending supplier invoice payments.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <div style="font-size:14px;font-weight:600;color:#1a202c;">PAYABLE TO TRANSPORTERS</div>
                 <div style="font-size:12px;color:#718096;">${pendingCount} awaiting approval · ${approvedCount} approved, ready to dispatch</div>
             </div>
@@ -3101,7 +3249,7 @@ function init_holec_trading_engine() {
                 </table>
             </div>
 
-            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY</div>
+            <div style="font-size:14px;font-weight:600;color:#1a202c;margin-bottom:12px;">PAYMENT HISTORY & BANK COLLECTIONS</div>
             <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
@@ -3121,8 +3269,194 @@ function init_holec_trading_engine() {
             </div>
         `;
 
+        container.querySelectorAll('.pay-supplier-btn').forEach(btn => {
+            btn.addEventListener('click', () => navigate('pay_supplier', { id: btn.dataset.id }));
+        });
+
         container.querySelectorAll('.pay-transporter-btn').forEach(btn => {
             btn.addEventListener('click', () => navigate('payments_form', { id: btn.dataset.id }));
+        });
+    }
+
+    async function renderPaySupplier(container, params) {
+        const l = LIVE_STORE.lots.find(x => x.name === params.id);
+        if (!l) return navigate('payments_list');
+
+        const p = computePayable(l);
+        const amount = p.netPayable;
+        const pstatus = l.supplier_payment_status || 'Pending Approval';
+
+        if (!l.supplier || cint(l.supplier_paid) || pstatus === 'Dispatched' || amount <= 0) {
+            showToast('No pending supplier payment for this ticket.', 'orange');
+            return navigate('payments_list');
+        }
+
+        const supplier = (LIVE_STORE.suppliers || []).find(s => s.name === l.supplier);
+        const supplierLabel = supplier && supplier.supplier_name ? `${supplier.supplier_name} (${l.supplier})` : l.supplier;
+        const partyStatus = supplier ? (supplier.approval_status || 'Draft') : 'Draft';
+        const partyBlocked = REQUIRE_APPROVED_PARTY_FOR_PAYMENT && partyStatus !== 'Approved';
+        const approver = canApprove();
+
+        const editable = pstatus === '' || pstatus === 'Rejected' || pstatus === 'Draft';
+        const isPending = pstatus === 'Pending Approval' || pstatus === 'Submitted';
+        const isApproved = pstatus === 'Approved';
+
+        let modeOfPayments = ['Bank Transfer', 'Pesalink', 'Mpesa', 'RTGS', 'EFT'];
+        try {
+            const mopList = await frappe.db.get_list('Mode of Payment', { fields: ['name'], order_by: 'name asc', limit: 50 });
+            if (mopList && mopList.length) modeOfPayments = mopList.map(x => x.name);
+        } catch (e) {
+            console.error('Error fetching Mode of Payment:', e);
+        }
+
+        const readonlyBox = (label, value, bold) => `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label style="font-size:13px;font-weight:500;color:#4a5568;">${label}</label>
+                <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:${bold ? '700' : '500'};">${value}</div>
+            </div>`;
+
+        const savedDate = l.supplier_payment_date ? frappe.datetime.str_to_user(l.supplier_payment_date) : '—';
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                <span>Holec Trading</span> › <span>Finance</span> › <a href="#" id="back-payments-link" style="color:#3182ce;text-decoration:none;">Payments</a> › <span style="color:#2d3748;font-weight:500;">Pay Supplier</span>
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Supplier Net Invoice Payment</h1>
+                <span style="font-size:13px;color:#718096;">${escHtml(l.name)} · ${escHtml(supplierLabel)}</span>
+            </div>
+
+            <div style="${CARD_BOX}padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:13px;color:#4a5568;font-weight:600;">Payment Status</span>
+                    ${approvalBadge(pstatus, 'Pending Approval')}
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:13px;color:#4a5568;font-weight:600;">Supplier Approval</span>
+                    ${approvalBadge(partyStatus)}
+                </div>
+            </div>
+
+            ${partyBlocked ? `
+            <div style="background:#fffaf0;border:1px solid #feebc8;border-radius:8px;padding:14px 18px;margin-bottom:24px;font-size:13px;color:#9c4221;display:flex;justify-content:space-between;align-items:center;gap:16px;">
+                <span>This supplier is not approved yet. Approve the supplier record first.</span>
+                <button type="button" id="open-party-btn" style="${BTN_OUTLINE}white-space:nowrap;">Open supplier</button>
+            </div>` : ''}
+
+            <div style="${CARD_BOX}">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Net Invoice Breakdown (Deduction Engine)</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${readonlyBox('Gross Weight', fmtKg1(p.grossKg))}
+                    ${readonlyBox('Tare Weight', fmtKg1(p.tareKg))}
+                    ${readonlyBox('Net Weight', fmtKg1(p.netKg))}
+                    ${readonlyBox('Moisture Deduction', fmtKg1(p.moistureDeductionKg))}
+                    ${readonlyBox('Foreign Matter Deduction', fmtKg1(p.fmDeductionKg))}
+                    ${readonlyBox('Accepted Net Quantity', fmtKg1(p.acceptedNetKg), true)}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
+                    ${readonlyBox('Reference Rate', `KES ${p.refRate}/kg`)}
+                    ${readonlyBox('Net Payable to Supplier', fmtKES(amount), true)}
+                    ${editable
+                ? field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })
+                : readonlyBox('Mode of Payment', escHtml(l.supplier_payment_mode || '—'))}
+                    ${editable
+                ? field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || '' })
+                : readonlyBox('Reference No', escHtml(l.supplier_payment_ref || l.name))}
+                </div>
+            </div>
+
+            ${isPending && !approver ? `<div style="font-size:13px;color:#718096;margin-bottom:16px;">Submitted by ${escHtml(l.supplier_payment_requested_by || '—')}. Awaiting approval by Holec Manager.</div>` : ''}
+            ${isApproved ? `<div style="font-size:13px;color:#276749;margin-bottom:16px;">Approved${l.supplier_payment_approved_by ? ' by ' + escHtml(l.supplier_payment_approved_by) : ''}. Funds ready to send to Bank API.</div>` : ''}
+
+            <div style="display:flex;gap:12px;align-items:center;">
+                ${editable ? `<button class="h-btn primary" id="sp-submit-btn" style="${BTN_PRIMARY}">Submit for approval</button>` : ''}
+                ${isPending && approver ? `<button class="h-btn" id="sp-approve-btn" style="${BTN_APPROVE}">Approve payment</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
+                ${isApproved ? `<button class="h-btn primary" id="sp-dispatch-btn" style="${BTN_PRIMARY}">Dispatch funds to Bank</button>` : ''}
+                <button class="h-btn ghost" id="cancel-sp-btn" style="${BTN_GHOST}">Back to payments</button>
+            </div>
+        `;
+
+        const refresh = async () => { await loadMasterData(); navigate('pay_supplier', { id: l.name }); };
+        const who = () => frappe.session.user_fullname || frappe.session.user;
+
+        document.getElementById('back-payments-link').addEventListener('click', (e) => { e.preventDefault(); navigate('payments_list'); });
+        document.getElementById('cancel-sp-btn').addEventListener('click', () => navigate('payments_list'));
+        const openParty = document.getElementById('open-party-btn');
+        if (openParty && supplier) openParty.addEventListener('click', () => navigate('supplier_detail', { id: supplier.name }));
+
+        // ---- 1. Submit for approval ----
+        const submitBtn = document.getElementById('sp-submit-btn');
+        if (submitBtn) submitBtn.addEventListener('click', async () => {
+            const rail = $('#f-sp-rail').val();
+            if (!rail) { frappe.msgprint(__('Please select a Mode of Payment.')); return; }
+            if (partyBlocked) { frappe.msgprint(__('The supplier must be approved before a payment can be submitted.')); return; }
+
+            submitBtn.disabled = true;
+            try {
+                await frappe.db.set_value('Buy Ticket', l.name, {
+                    supplier_payment_status: 'Pending Approval',
+                    supplier_payment_mode: rail,
+                    supplier_payment_ref: ($('#f-sp-ref').val() || '').trim(),
+                    supplier_payment_requested_by: frappe.session.user
+                });
+                await addAuditComment('Buy Ticket', l.name, `Supplier payment of ${fmtKES(amount)} submitted for approval by ${escHtml(who())}`);
+                showToast(`Supplier payment of ${fmtKES(amount)} submitted for approval`, 'orange');
+                await refresh();
+            } catch (e) { console.error(e); submitBtn.disabled = false; }
+        });
+
+        // ---- 2. Approve payment ----
+        const approveBtn = document.getElementById('sp-approve-btn');
+        if (approveBtn) approveBtn.addEventListener('click', async () => {
+            if (blockedByMakerChecker(l.supplier_payment_requested_by, 'supplier payment request')) return;
+            const ok = await confirmAsync(__('Approve supplier payment of {0} to {1}?', [fmtKES(amount), supplierLabel]));
+            if (!ok) return;
+            approveBtn.disabled = true;
+            try {
+                await frappe.db.set_value('Buy Ticket', l.name, { supplier_payment_status: 'Approved', supplier_payment_approved_by: frappe.session.user });
+                await addAuditComment('Buy Ticket', l.name, `Supplier payment approved by ${escHtml(who())}`);
+                showToast('Supplier payment approved. Ready to send transaction to Bank.');
+                await refresh();
+            } catch (e) { console.error(e); approveBtn.disabled = false; }
+        });
+
+        // ---- 3. Dispatch to Bank ----
+        const dispatchBtn = document.getElementById('sp-dispatch-btn');
+        if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
+            if (partyBlocked) { frappe.msgprint(__('The supplier must be approved before funds can be sent to the bank.')); return; }
+
+            const ok = await confirmAsync(__('Send payment transaction of {0} to Bank API for {1}?', [fmtKES(amount), supplierLabel]));
+            if (!ok) return;
+
+            dispatchBtn.disabled = true;
+            dispatchBtn.textContent = 'Sending to Bank...';
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.pay_supplier',
+                args: {
+                    ticket: l.name,
+                    mode_of_payment: l.supplier_payment_mode || 'Bank Transfer',
+                    reference_no: (l.supplier_payment_ref || '').trim(),
+                    reference_date: frappe.datetime.get_today()
+                },
+                freeze: true,
+                freeze_message: 'Processing Bank Transaction...',
+                callback: async (r) => {
+                    if (r && r.message) {
+                        try {
+                            await frappe.db.set_value('Buy Ticket', l.name, { supplier_payment_status: 'Dispatched', supplier_paid: 1 });
+                            await addAuditComment('Buy Ticket', l.name, `Transaction sent to Bank by ${escHtml(who())} (${r.message.payment_entry})`);
+                        } catch (e) { console.warn('Could not mark payment as Dispatched', e); }
+                        showToast(`Bank transaction sent! ${supplierLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
+                        await loadMasterData();
+                        navigate('payments_list');
+                    } else {
+                        dispatchBtn.disabled = false;
+                        dispatchBtn.textContent = 'Dispatch funds to Bank';
+                    }
+                },
+                error: () => { dispatchBtn.disabled = false; dispatchBtn.textContent = 'Dispatch funds to Bank'; }
+            });
         });
     }
 
@@ -3717,9 +4051,11 @@ function init_holec_trading_engine() {
                 return;
             }
 
-            // Save the edited rate AND the intake values
+            // Save the edited rate AND the intake values, then bring payment to Payments page
             await frappe.db.set_value('Buy Ticket', l.name, {
                 status: 'Lot',
+                supplier_payment_status: 'Pending Approval',
+                supplier_payment_requested_by: frappe.session.user,
                 negotiated_price: rate,
                 gross_weight_kg: flt(l.gross_weight_kg),
                 tare_weight_kg: flt(l.tare_weight_kg),
@@ -3732,9 +4068,9 @@ function init_holec_trading_engine() {
                 aflatoxin_ppb: flt(l.aflatoxin_ppb),
                 reason_code_if_foreign_matter_judgement_or_wet_buy: l.reason_code_if_foreign_matter_judgement_or_wet_buy || ''
             });
-            showToast(`Net invoice posted and ${l.name} moved to Lot status`);
+            showToast(`Net invoice for ${l.name} submitted and brought to Payments page for approval`);
             await loadMasterData();
-            navigate('lots', { id: l.name });
+            navigate('payments_list');
         });
     }
 
@@ -4098,6 +4434,7 @@ function init_holec_trading_engine() {
         { id: 'payments_list', group: 'FINANCE', name: 'Payments', render: renderPaymentsList },
         { id: 'payments', group: 'FINANCE', name: 'Record Payment', render: renderPayments },
         { id: 'payments_form', group: 'FINANCE', name: 'Pay Transporter', render: renderPayTransporter },
+        { id: 'pay_supplier', group: 'FINANCE', name: 'Pay Supplier', render: renderPaySupplier },
         { id: 'ledger', group: 'INSIGHT', name: 'Cost Ledger & Margin', render: renderCostLedger },
         { id: 'reports', group: 'INSIGHT', name: 'Reports', render: renderReports },
         { id: 'event_log', group: 'INSIGHT', name: 'Trade event log', render: renderTradeEventLog }
@@ -4136,7 +4473,7 @@ function init_holec_trading_engine() {
             },
             {
                 title: 'FINANCE', items: [
-                    { id: 'payments_list', label: 'Payments', also: ['payments', 'payments_form'] }
+                    { id: 'payments_list', label: 'Payments', also: ['payments', 'payments_form', 'pay_supplier'] }
                 ]
             },
             {

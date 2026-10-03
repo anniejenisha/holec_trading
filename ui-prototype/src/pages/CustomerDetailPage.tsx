@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { FileUpload } from "@/components/shared/FileUpload";
 import { Banner } from "@/components/shared/Banner";
 import { FieldWrapper } from "@/components/shared/FieldWrapper";
 import { SectionCard, SectionLabel } from "@/components/shared/SectionCard";
@@ -103,8 +104,20 @@ export default function CustomerDetailPage() {
 							</SelectContent>
 						</Select>
 					</FieldWrapper>
-					<FieldWrapper label="KRA PIN">
-						<Input value={form.kraPin} onChange={(e) => set("kraPin", e.target.value)} />
+					<FieldWrapper label="KRA PIN Certificate (OCR Upload)">
+						<FileUpload onFile={(file) => {
+							if (file) {
+								toast.info("Extracting KRA details via OCR...");
+								setTimeout(() => {
+									const extractedPin = "A001928374Z";
+									set("kraPin", extractedPin);
+									toast.success(`OCR Extracted KRA PIN: ${extractedPin} (Editable)`);
+								}, 500);
+							}
+						}} />
+					</FieldWrapper>
+					<FieldWrapper label="KRA PIN (Auto-filled / Edit manually)">
+						<Input value={form.kraPin} onChange={(e) => set("kraPin", e.target.value.toUpperCase())} placeholder="e.g. A001928374Z" />
 					</FieldWrapper>
 					<FieldWrapper label="Address">
 						<Input value={form.address} onChange={(e) => set("address", e.target.value)} />

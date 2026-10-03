@@ -735,3 +735,85 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
     t.db_set("transport_payment_entry", pe.name)
 
     return {"payment_entry": pe.name, "amount": amount, "transporter": t.transporter}
+
+
+@frappe.whitelist()
+def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None):
+    """
+    Pays the supplier for one Buy Ticket (accepted net quantity * ref rate) and marks it paid.
+    Executes outgoing bank payment processing and creates a Payment Entry.
+    """
+    from erpnext.accounts.party import get_party_account
+
+    frappe.has_permission("Payment Entry", "create", throw=True)
+    t = frappe.get_doc("Buy Ticket", ticket)
+
+    if not t.supplier:
+        frappe.throw("This ticket has no supplier.")
+    if frappe.utils.cint(t.get("supplier_paid")):
+        frappe.throw(f"Supplier payment for {t.name} is already processed.")
+
+    gross_kg = flt(t.gross_weight_kg or t.quantity_kg or 0)
+    tare_kg = flt(t.tare_weight_kg or 0)
+    net_kg = max(0, gross_kg - tare_kg)
+    moisture = flt(t.moisture_ or 0)
+    fm = flt(t.foreign_matter_ or 0)
+
+    moisture_excess = max(0, moisture - 13.5)
+    bag_size = 90 + moisture_excess
+    moisture_adjusted_kg = (net_kg / bag_size * 90) if (net_kg > 0 and bag_size > 0) else net_kg
+    fm_deducted_pct = max(0, fm - 0.5)
+    fm_deduction_kg = net_kg * (fm_deducted_pct / 100)
+    accepted_net_kg = max(0, moisture_adjusted_kg - fm_deduction_kg)
+
+    ref_rate = flt(t.negotiated_price or 48)
+    amount = accepted_net_kg * ref_rate
+
+    if amount <= 0:
+        frappe.throw("Net payable is zero - nothing to pay.")
+
+    if not mode_of_payment:
+        frappe.throw("Please select a Mode of Payment.")
+
+    paid_from = _mode_of_payment_account(mode_of_payment, COMPANY)
+    if not paid_from:
+        frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
+
+    paid_to = get_party_account("Supplier", t.supplier, COMPANY)
+    if not paid_to:
+        frappe.throw(f"No payable account found for supplier {t.supplier}.")
+
+    from_ccy = frappe.db.get_value("Account", paid_from, "account_currency")
+    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency")
+    if from_ccy != to_ccy:
+        frappe.throw(f"Currency mismatch: {paid_from} is in {from_ccy} but {paid_to} is in {to_ccy}.")
+
+    pe = frappe.get_doc({
+        "doctype": "Payment Entry",
+        "company": COMPANY,
+        "payment_type": "Pay",
+        "posting_date": nowdate(),
+        "party_type": "Supplier",
+        "party": t.supplier,
+        "mode_of_payment": mode_of_payment,
+        "paid_from": paid_from,
+        "paid_to": paid_to,
+        "paid_from_account_currency": from_ccy,
+        "paid_to_account_currency": to_ccy,
+        "paid_amount": amount,
+        "received_amount": amount,
+        "source_exchange_rate": 1,
+        "target_exchange_rate": 1,
+        "reference_no": (reference_no or "").strip() or t.name,
+        "reference_date": reference_date or nowdate(),
+        "custom_buy_ticket": t.name,
+        "remarks": f"Supplier Net Invoice payment for Buy Ticket {t.name}: Net payable KES {amount:,.2f} ({accepted_net_kg:,.1f} kg accepted)",
+    })
+    pe.insert()
+    pe.submit()
+
+    t.db_set("supplier_paid", 1)
+    t.db_set("supplier_payment_entry", pe.name)
+    t.db_set("supplier_payment_status", "Dispatched")
+
+    return {"payment_entry": pe.name, "amount": amount, "supplier": t.supplier}
