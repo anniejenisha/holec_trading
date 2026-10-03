@@ -843,7 +843,12 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
     accepted_net_kg = max(0, moisture_adjusted_kg - fm_deduction_kg)
 
     ref_rate = flt(t.negotiated_price or 48)
-    amount = accepted_net_kg * ref_rate
+    paid_bags = accepted_net_kg / 90.0 if accepted_net_kg > 0 else 0
+    gross_val = accepted_net_kg * ref_rate
+    aflatoxin_ded = flt(t.get("aflatoxin_deduction_kes") or 0)
+    drying_ded = flt(t.get("drying_rate_per_bag") if t.get("drying_rate_per_bag") is not None else 50) * paid_bags
+    hema_ded = flt(t.get("hema_rate_per_bag") if t.get("hema_rate_per_bag") is not None else 24.30) * paid_bags
+    amount = max(0, gross_val - (aflatoxin_ded + drying_ded + hema_ded))
 
     if amount <= 0:
         frappe.throw("Net payable is zero - nothing to pay.")

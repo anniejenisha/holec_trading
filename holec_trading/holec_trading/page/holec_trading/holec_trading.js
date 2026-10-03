@@ -119,25 +119,40 @@ function init_holec_trading_engine() {
         const fmDeductedPct = Math.max(0, fm - 0.5);
         const fmDeductionKg = netKg * (fmDeductedPct / 100);
 
-        // Stock quantity after deductions (Accepted Net Quantity = Moisture-adjusted kg - FM deduction kg)
+        // Step 4: Accepted quantity & Paid bags
         const acceptedNetKg = Math.max(0, moistureAdjustedKg - fmDeductionKg);
+        const paidBags = acceptedNetKg > 0 ? acceptedNetKg / 90 : 0;
 
         const refRate = flt(rateOverride != null ? rateOverride : (lot.negotiated_price || R.defaultRate));
         const bags = cint(lot.bag_count || 0);
 
-        // Net payable = net weight (gross - tare) x reference rate
-        const grossValue = netKg * refRate;
-        const netPayable = grossValue;
+        // Step 5: Payable value = Accepted kg x Reference rate
+        const grossValue = acceptedNetKg * refRate;
+
+        // Step 6: Other charges (KES, deducted from value)
+        const aflatoxinDeduction = flt(lot.aflatoxin_deduction_kes || 0);
+        const dryingDeduction = flt(lot.drying_rate_per_bag != null ? lot.drying_rate_per_bag : 50) * paidBags;
+        const hemaDeduction = flt(lot.hema_rate_per_bag != null ? lot.hema_rate_per_bag : 24.30) * paidBags;
+        const totalOtherDeductions = aflatoxinDeduction + dryingDeduction + hemaDeduction;
+
+        // Step 7: Net payable = Gross value - Aflatoxin - Drying - HEMA
+        const netPayable = Math.max(0, grossValue - totalOtherDeductions);
+
+        // Step 8: Bag Impact
+        const deliveredBags = netKg > 0 ? netKg / 90 : 0;
+        const effectivePricePerBag = deliveredBags > 0 ? netPayable / deliveredBags : 0;
 
         const totalTransport = flt(lot.haulage_kes) + flt(lot.cess_kes) + flt(lot.offloading_kes);
-        const landedCostPerKg = netKg > 0 ? Math.round((netPayable + totalTransport) / netKg) : refRate;
+        const landedCostPerKg = acceptedNetKg > 0 ? (netPayable + totalTransport) / acceptedNetKg : refRate;
 
         return {
             grossKg, tareKg, netKg, moisture, fm, bags,
             moistureStd, moistureExcess, bagSize, moistureAdjustedKg, moistureDeductionKg,
             fmDeductedPct, fmDeductionKg,
-            acceptedNetKg, refRate, grossValue,
-            netPayable, totalTransport, landedCostPerKg
+            acceptedNetKg, paidBags, refRate, grossValue,
+            aflatoxinDeduction, dryingDeduction, hemaDeduction, totalOtherDeductions,
+            netPayable, deliveredBags, effectivePricePerBag,
+            totalTransport, landedCostPerKg
         };
     }
 
@@ -150,7 +165,7 @@ function init_holec_trading_engine() {
         const sellRate = flt(sellRateOverride != null ? sellRateOverride : lot.sell_rate);
         const refRate = p.refRate;
         const revenue = soldKg * sellRate;          // customer net weight x sell rate
-        const landedCost = buyKg * sellRate;         // supplier net weight x reference rate
+        const landedCost = buyKg * refRate;         // supplier net weight x reference rate
         const margin = revenue - landedCost;
         const marginPerTonne = soldKg > 0 ? margin / (soldKg / 1000) : 0;
         return { buyKg, soldKg, sellRate, refRate, revenue, landedCost, margin, marginPerTonne };
