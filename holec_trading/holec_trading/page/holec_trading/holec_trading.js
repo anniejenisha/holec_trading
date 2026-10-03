@@ -171,6 +171,25 @@ function init_holec_trading_engine() {
         return { buyKg, soldKg, sellRate, refRate, revenue, landedCost, margin, marginPerTonne };
     }
 
+    async function autogenerateCustomerId() {
+        try {
+            const list = await frappe.db.get_list('Customer', { fields: ['name', 'alias'], limit: 1000 });
+            let maxNum = 0;
+            (list || []).forEach(c => {
+                const val = c.alias || c.name || '';
+                const match = val.match(/CUST-?(\d+)/i);
+                if (match) {
+                    const num = parseInt(match[1], 10);
+                    if (num > maxNum) maxNum = num;
+                }
+            });
+            const nextNum = String(maxNum + 1).padStart(4, '0');
+            return `CUST-${nextNum}`;
+        } catch (e) {
+            return `CUST-${Math.floor(1000 + Math.random() * 9000)}`;
+        }
+    }
+
     function showToast(msg, indicator = 'green') {
         frappe.show_alert({ message: msg, indicator: indicator });
     }
@@ -1520,8 +1539,8 @@ function init_holec_trading_engine() {
                 ? `<span style="display:inline-flex;align-items:center;gap:6px;background:${bg};color:${color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:${dot};border-radius:50%;"></span>${status}</span>`
                 : '<span style="color:#a0aec0;font-size:13px;">—</span>');
 
-            const locked = status !== 'Manual';
-            $('#nc-pin, #nc-regname').prop('readonly', locked).css('background', locked ? '#f7fafc' : '#fff');
+            // Allow manual typing/editing at all times
+            $('#nc-pin, #nc-regname').prop('readonly', false).css('background', '#fff');
         }
 
         // ---------- PIN VALIDATION ----------
@@ -1597,9 +1616,17 @@ function init_holec_trading_engine() {
         bindDropzone('nc-cr12', (file) => { state.crFile = file; });
 
         $('#nc-name').on('input', () => { state.nameTouched = true; });
-        $('#nc-pin').on('input', function () {
-            this.value = this.value.toUpperCase().replace(/\s/g, '');
-            validatePin(this.value);
+        $('#nc-pin, #nc-regname').on('input', function () {
+            setPinStatus('Manual');
+            const pinVal = str($('#nc-pin').val()).toUpperCase();
+            if (pinVal) validatePin(pinVal);
+        });
+
+        // Autogenerate unique Customer ID
+        autogenerateCustomerId().then(autoId => {
+            if (!$('#nc-id').val()) {
+                $('#nc-id').val(autoId);
+            }
         });
 
         // ---------- DELIVERY POINTS TABLE ----------
@@ -1724,7 +1751,6 @@ function init_holec_trading_engine() {
             const afla = str($('#nc-afla').val());
 
             // 1. KRA
-            if (!state.kraFile) errors.push('KRA PIN Certificate is required.');
             if (!pin) errors.push('KRA PIN is required.');
             else if (!KRA_REGEX.test(pin)) errors.push('KRA PIN format is invalid (A or P, 9 digits, 1 letter).');
             else if (!(await validatePin(pin))) errors.push('This KRA PIN already exists on another customer.');
