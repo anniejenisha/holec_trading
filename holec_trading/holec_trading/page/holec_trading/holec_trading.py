@@ -1027,6 +1027,12 @@ def submit_sale(ticket, customer, sell_rate):
     t.db_set("sell_rate", sell_rate)
     t.db_set("invoice_number", si.name)
 
+    # Initiate Transporter, CESS & Labour payment draft for approval
+    if flt(t.haulage_kes) > 0 or flt(t.cess_kes) > 0 or flt(t.offloading_kes) > 0:
+        if not t.get("transport_payment_status") or t.get("transport_payment_status") in ["", "Draft"]:
+            t.db_set("transport_payment_status", "Pending Approval")
+            t.db_set("transport_payment_requested_by", frappe.session.user)
+
     return {
         "invoice_number": si.name,
         "customer": customer,
