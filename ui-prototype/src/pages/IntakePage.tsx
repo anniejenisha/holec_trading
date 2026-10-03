@@ -2,7 +2,6 @@ import { Truck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Banner } from "@/components/shared/Banner";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { FieldWrapper } from "@/components/shared/FieldWrapper";
 import { FileUpload } from "@/components/shared/FileUpload";
@@ -11,12 +10,9 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useActiveLot } from "@/hooks/useActiveLot";
 import { fmtKg } from "@/lib/format";
 import { useStore } from "@/store/useStore";
-
-const COUNTIES = ["Nakuru", "Uasin Gishu", "Trans Nzoia", "Kitale", "Bungoma"];
 
 export default function IntakePage() {
 	const { id } = useParams<{ id: string }>();
@@ -38,18 +34,12 @@ export default function IntakePage() {
 	const [wbNumber, setWbNumber] = useState("");
 	const [transporterId, setTransporterId] = useState("");
 	const [vehicleReg, setVehicleReg] = useState("");
-	const [moisture, setMoisture] = useState("");
-	const [fm, setFm] = useState("");
-	const [afla, setAfla] = useState("");
-	const [county, setCounty] = useState("");
-	const [area, setArea] = useState("");
-	const [reason, setReason] = useState("");
 	const [errors, setErrors] = useState<Record<string, string>>({});
 
 	if (!targetId) {
 		return (
 			<div>
-				<PageHeader title="Intake & quality capture" />
+				<PageHeader title="Intake capture" />
 				<EmptyState
 					icon={Truck}
 					title="No tickets waiting for intake"
@@ -63,7 +53,7 @@ export default function IntakePage() {
 	if (!lot || lot.state !== "TICKET") {
 		return (
 			<div>
-				<PageHeader title="Intake & quality capture" />
+				<PageHeader title="Intake capture" />
 				<EmptyState title="That ticket has already been weighed" description={ticketLots.length ? "Pick another ticket below." : "No tickets currently waiting."} />
 				{ticketLots.length > 0 && (
 					<div className="mt-3 flex flex-wrap gap-2">
@@ -80,7 +70,6 @@ export default function IntakePage() {
 	const grossNum = Number(gross) || 0;
 	const tareNum = Number(tare) || 0;
 	const netKg = Math.max(0, grossNum - tareNum);
-	const aflaNum = Number(afla) || 0;
 
 	function handleSubmit() {
 		const next: Record<string, string> = {};
@@ -88,11 +77,8 @@ export default function IntakePage() {
 		if (!tare) next.tare = "Required";
 		if (!bags) next.bags = "Required";
 		if (!wbNumber.trim()) next.wbNumber = "Required";
+		if (!transporterId) next.transporterId = "Transporter is required";
 		if (gross && tare && grossNum <= tareNum) next.gross = "Gross weight must exceed tare weight";
-		if (!moisture) next.moisture = "Required";
-		if (fm === "") next.fm = "Required";
-		if (afla === "") next.afla = "Required";
-		if (Number(moisture) > 20 && !reason.trim()) next.reason = "Reason code required for wet buy above 20% moisture";
 		setErrors(next);
 		if (Object.keys(next).length > 0) {
 			toast.error(Object.values(next)[0]);
@@ -101,16 +87,16 @@ export default function IntakePage() {
 
 		submitIntake(lot!.id, {
 			grossKg: grossNum, tareKg: tareNum, bags: Number(bags), wbNumber: wbNumber.trim(),
-			transporterId: transporterId || null, vehicleReg, moisturePct: Number(moisture), fmPct: Number(fm),
-			aflatoxinPpb: aflaNum, county, area, reasonCode: reason,
+			transporterId: transporterId || null, vehicleReg, moisturePct: 0, fmPct: 0,
+			aflatoxinPpb: 0, county: "", area: "", reasonCode: "",
 		});
-		toast.success(`Intake recorded for ${lot!.ticketNo} — lot created`);
+		toast.success(`Intake recorded for ${lot!.ticketNo}`);
 		navigate(`/deductions/${lot!.id}`);
 	}
 
 	return (
 		<div>
-			<PageHeader title="Intake & quality capture" />
+			<PageHeader title="Intake capture" />
 			<p className="mb-4 -mt-3 text-sm text-muted-foreground">{lot.ticketNo} · {sup?.name}</p>
 
 			{ticketLots.length > 1 && (
@@ -138,11 +124,11 @@ export default function IntakePage() {
 					<FieldWrapper label="Weighbridge ticket number" required error={errors.wbNumber}>
 						<Input value={wbNumber} onChange={(e) => setWbNumber(e.target.value)} placeholder="Unique, e.g. WB-88213" />
 					</FieldWrapper>
-					<FieldWrapper label="Transporter">
+					<FieldWrapper label="Transporter" required error={errors.transporterId}>
 						<Select value={transporterId} onValueChange={setTransporterId}>
 							<SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
 							<SelectContent>
-								{suppliers.filter((s) => s.group === "Transporter").map((s) => (
+								{suppliers.filter((s) => s.group === "Transporter" || s.group === "Transporters").map((s) => (
 									<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
 								))}
 							</SelectContent>
@@ -167,55 +153,9 @@ export default function IntakePage() {
 				</div>
 			</SectionCard>
 
-			<div className="mt-4">
-				<SectionCard title="Quality inspection">
-					<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-						<FieldWrapper label="Moisture %" required error={errors.moisture}>
-							<Input type="number" value={moisture} onChange={(e) => setMoisture(e.target.value)} />
-						</FieldWrapper>
-						<FieldWrapper label="Foreign matter %" required error={errors.fm}>
-							<Input type="number" value={fm} onChange={(e) => setFm(e.target.value)} />
-						</FieldWrapper>
-						<FieldWrapper label="Aflatoxin ppb" required error={errors.afla}>
-							<Input type="number" value={afla} onChange={(e) => setAfla(e.target.value)} />
-						</FieldWrapper>
-					</div>
-					<div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-						<FieldWrapper label="County">
-							<Select value={county} onValueChange={setCounty}>
-								<SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
-								<SelectContent>
-									{COUNTIES.map((c) => (
-										<SelectItem key={c} value={c}>{c}</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</FieldWrapper>
-						<FieldWrapper label="Area">
-							<Input value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Njoro" />
-						</FieldWrapper>
-						<FieldWrapper
-							label="Reason code (if foreign matter judgement or wet buy)" span
-							error={errors.reason}
-						>
-							<Textarea value={reason} onChange={(e) => setReason(e.target.value)} />
-						</FieldWrapper>
-					</div>
-				</SectionCard>
-			</div>
-
-			{aflaNum > 10 && (
-				<div className="mt-4">
-					<Banner type="block">
-						Aflatoxin at {aflaNum} ppb exceeds the 10 ppb limit. This lot cannot proceed past intake without an override and reason code.
-					</Banner>
-				</div>
-			)}
-
 			<div className="mt-6 flex items-center gap-2">
 				<Button onClick={handleSubmit}>Submit intake & create lot</Button>
 				<Button variant="ghost" onClick={() => navigate("/lots")}>Cancel</Button>
-			</div>
 		</div>
 	);
 }

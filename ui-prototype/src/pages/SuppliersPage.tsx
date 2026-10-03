@@ -16,7 +16,6 @@ export default function SuppliersPage() {
 		{ key: "id", header: "ID", render: (s) => <span className="font-mono text-xs">{s.id}</span>, sortValue: (s) => s.id },
 		{ key: "name", header: "Name", render: (s) => <span className="font-medium">{s.name}</span>, sortValue: (s) => s.name },
 		{ key: "group", header: "Group", render: (s) => s.group || "—", sortValue: (s) => s.group },
-		{ key: "county", header: "County", render: (s) => s.county || "—", sortValue: (s) => s.county },
 		{ key: "kraPin", header: "KRA PIN", render: (s) => <span className="font-mono text-xs">{s.kraPin || "—"}</span> },
 		{ key: "status", header: "Status", render: (s) => <StatusBadge status={s.status} /> },
 	];

@@ -12,7 +12,7 @@ import frappe
 from frappe import _
 
 KE_PHONE_RE = re.compile(r"^\+254\d{9}$")
-GRAIN_HANDLING_GROUPS = {"Farmer", "Aggregator"}
+GRAIN_HANDLING_GROUPS = {"Farmer", "Farmers", "Aggregator"}
 
 
 def validate_supplier(doc, method=None):

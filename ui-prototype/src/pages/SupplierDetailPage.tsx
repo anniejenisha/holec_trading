@@ -13,8 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useStore } from "@/store/useStore";
 import type { Supplier } from "@/types";
 
-const COUNTIES = ["Nakuru", "Uasin Gishu", "Trans Nzoia", "Kitale", "Bungoma"];
-
 const BLANK: Omit<Supplier, "id" | "status" | "createdBy" | "approvedBy"> = {
 	name: "", group: "", kraPin: "", idNo: "", county: "", address: "",
 	etims: "", vat: "", aflatoxinLicence: false, bank: "", bankLetter: false,
@@ -123,7 +121,7 @@ export default function SupplierDetailPage() {
 						<Select value={form.group} onValueChange={(v) => set("group", v as Supplier["group"])}>
 							<SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
 							<SelectContent>
-								{["Farmer", "Aggregator", "Trader", "Transporter"].map((o) => (
+								{["Farmers", "Transporters", "Cess", "Casual Labour"].map((o) => (
 									<SelectItem key={o} value={o}>{o}</SelectItem>
 								))}
 							</SelectContent>
@@ -140,16 +138,6 @@ export default function SupplierDetailPage() {
 					</FieldWrapper>
 					<FieldWrapper label="National ID / registration document">
 						<FileUpload />
-					</FieldWrapper>
-					<FieldWrapper label="County">
-						<Select value={form.county} onValueChange={(v) => set("county", v)}>
-							<SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
-							<SelectContent>
-								{COUNTIES.map((o) => (
-									<SelectItem key={o} value={o}>{o}</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
 					</FieldWrapper>
 					<FieldWrapper label="Physical address">
 						<Input value={form.address} onChange={(e) => set("address", e.target.value)} />

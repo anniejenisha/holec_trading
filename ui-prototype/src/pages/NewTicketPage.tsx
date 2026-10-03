@@ -16,8 +16,8 @@ export default function NewTicketPage() {
 	const suppliers = useStore((s) => s.suppliers);
 	const createTicket = useStore((s) => s.createTicket);
 
-	const approvedSuppliers = suppliers.filter((s) => s.status === "Approved");
-	const unapprovedCount = suppliers.length - approvedSuppliers.length;
+	const farmerSuppliers = suppliers.filter((s) => s.status === "Approved" && (s.group === "Farmer" || s.group === "Farmers"));
+	const unapprovedCount = suppliers.length - farmerSuppliers.length;
 
 	const [supplierId, setSupplierId] = useState("");
 	const [item, setItem] = useState("Maize");
@@ -27,7 +27,7 @@ export default function NewTicketPage() {
 
 	function handleCreate() {
 		const next: Record<string, string> = {};
-		if (!supplierId) next.supplierId = "Select a supplier";
+		if (!supplierId) next.supplierId = "Select a farmer";
 		const qtyNum = Number(qty);
 		if (!qtyNum || qtyNum <= 0) next.qty = "Enter an expected quantity";
 		setErrors(next);
@@ -47,18 +47,18 @@ export default function NewTicketPage() {
 			{unapprovedCount > 0 && (
 				<div className="mb-4">
 					<Banner type="info">
-						{unapprovedCount} supplier(s) are not yet Approved and won't appear below — check Suppliers to move them forward.
+						{unapprovedCount} supplier(s) are not yet Approved or not Farmers and won't appear below — check Suppliers to move them forward.
 					</Banner>
 				</div>
 			)}
 
 			<SectionCard title="Ticket details">
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					<FieldWrapper label="Supplier" required error={errors.supplierId}>
+					<FieldWrapper label="Farmer" required error={errors.supplierId}>
 						<Select value={supplierId} onValueChange={setSupplierId}>
 							<SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
 							<SelectContent>
-								{approvedSuppliers.map((s) => (
+								{farmerSuppliers.map((s) => (
 									<SelectItem key={s.id} value={s.id}>{s.name} ({s.group})</SelectItem>
 								))}
 							</SelectContent>

@@ -9,6 +9,7 @@ import { FieldWrapper } from "@/components/shared/FieldWrapper";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useActiveLot } from "@/hooks/useActiveLot";
 import { computePayable } from "@/lib/calculations";
 import { fmtKES, fmtKg } from "@/lib/format";
@@ -77,17 +78,33 @@ export default function DeductionsPage() {
 				</div>
 			)}
 
-			<SectionCard title="Deduction breakdown">
-				<CalcRow label="Gross weight" value={fmtKg(lot.grossKg ?? 0)} />
-				<CalcRow label="Tare weight" value={`− ${fmtKg(lot.tareKg ?? 0)}`} neg />
-				<CalcRow label="Net weight" value={fmtKg(p.netKg)} sub="Gross minus tare" />
-				<CalcRow
-					label={`Moisture deduction (${p.band})`} value={`− ${fmtKg(p.moistureDeductionKg)}`} neg
-					sub={`${lot.moisturePct}% recorded vs 13.5% standard`}
-				/>
-				<CalcRow label="Foreign matter deduction" value={`− ${fmtKg(p.fmDeductionKg)}`} neg sub={`${lot.fmPct}% recorded`} />
-				<CalcRow label="Accepted net quantity" value={fmtKg(p.acceptedNetKg)} total sub="This is what lands in the stock ledger — not the gross weight" />
+			<SectionCard title="Quality inspection">
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					<FieldWrapper label="Moisture %" required>
+						<Input type="number" defaultValue={lot.moisturePct ?? 13.5} />
+					</FieldWrapper>
+					<FieldWrapper label="Foreign matter %" required>
+						<Input type="number" defaultValue={lot.fmPct ?? 0} />
+					</FieldWrapper>
+					<FieldWrapper label="Aflatoxin ppb" required>
+						<Input type="number" defaultValue={lot.aflatoxinPpb ?? 0} />
+					</FieldWrapper>
+				</div>
 			</SectionCard>
+
+			<div className="mt-4">
+				<SectionCard title="Deduction breakdown">
+					<CalcRow label="Gross weight" value={fmtKg(lot.grossKg ?? 0)} />
+					<CalcRow label="Tare weight" value={`− ${fmtKg(lot.tareKg ?? 0)}`} neg />
+					<CalcRow label="Net weight" value={fmtKg(p.netKg)} sub="Gross minus tare" />
+					<CalcRow
+						label={`Moisture deduction (${p.band})`} value={`− ${fmtKg(p.moistureDeductionKg)}`} neg
+						sub={`${lot.moisturePct}% recorded vs 13.5% standard`}
+					/>
+					<CalcRow label="Foreign matter deduction" value={`− ${fmtKg(p.fmDeductionKg)}`} neg sub={`${lot.fmPct}% recorded`} />
+					<CalcRow label="Accepted net quantity" value={fmtKg(p.acceptedNetKg)} total sub="This is what lands in the stock ledger — not the gross weight" />
+				</SectionCard>
+			</div>
 
 			<div className="mt-4">
 				<SectionCard title="Payable value">

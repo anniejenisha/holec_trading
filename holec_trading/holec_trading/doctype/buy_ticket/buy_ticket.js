@@ -238,7 +238,7 @@ function render_custom_new_ticket_page(frm) {
 
                 <div class="row mb-4">
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Supplier <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Farmer <span class="text-danger">*</span></label>
                         <select id="custom_supplier_select" class="form-control" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;">
                             <option value="" disabled selected>Select...</option>
                         </select>
@@ -286,7 +286,7 @@ function render_custom_new_ticket_page(frm) {
 
     frappe.call({
         method: 'frappe.client.get_list',
-        args: { doctype: 'Supplier', fields: ['name', 'supplier_name'], limit_page_length: 100 },
+        args: { doctype: 'Supplier', filters: { supplier_group: ['in', ['Farmer', 'Farmers']] }, fields: ['name', 'supplier_name'], limit_page_length: 100 },
         callback: function(r) {
             if (r.message && r.message.length) {
                 const $supplierSelect = $('#custom_supplier_select');
@@ -323,7 +323,7 @@ function render_custom_new_ticket_page(frm) {
         const item = $('#custom_item_select').val();
         const qty = parseFloat($('#custom_qty_input').val()) || 0;
 
-        if (!supplier) { frappe.msgprint(__('Please select a Supplier.')); return; }
+        if (!supplier) { frappe.msgprint(__('Please select a Farmer.')); return; }
         if (!item) { frappe.msgprint(__('Please select an Item.')); return; }
         if (qty <= 0) { frappe.msgprint(__('Please enter a valid Expected Quantity.')); return; }
 
@@ -477,9 +477,9 @@ function render_intake_quality_capture_page(frm) {
                         <input type="text" id="intake_wb_number" value="${wbNumber}" placeholder="Unique, e.g. WB-88213" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Transporter</label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Transporter <span class="text-danger">*</span></label>
                         <select id="intake_transporter_select" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;">
-                            ${transporterOptionsHtml}
+                            <option value="" disabled selected>Select transporter...</option>
                         </select>
                     </div>
                     <div class="col-md-4 mb-3">
@@ -513,43 +513,6 @@ function render_intake_quality_capture_page(frm) {
                 </div>
             </div>
 
-            <div class="bg-white rounded-lg p-4 border mb-4" style="border-color: #e2e8f0; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">
-                <h4 class="font-weight-bold mb-4" style="font-size: 15px; color: #0f172a;">Quality inspection</h4>
-
-                <div class="row mb-3">
-                    <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Moisture % <span class="text-danger">*</span></label>
-                        <input type="number" step="0.1" id="quality_moisture" value="${moisture}" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
-                    </div>
-                    <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Foreign matter % <span class="text-danger">*</span></label>
-                        <input type="number" step="0.1" id="quality_foreign_matter" value="${foreignMatter}" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
-                    </div>
-                    <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Aflatoxin ppb <span class="text-danger">*</span></label>
-                        <input type="number" step="0.1" id="quality_aflatoxin" value="${aflatoxin}" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
-                    </div>
-                </div>
-
-                <div class="row mb-3">
-                    <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">County</label>
-                        <select id="quality_county_select" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;">
-                            <option value="" disabled selected>Select...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Area</label>
-                        <input type="text" id="quality_area" value="${area}" placeholder="e.g. Njoro" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
-                    </div>
-                </div>
-
-                <div class="mb-2">
-                    <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Reason code (if foreign matter judgement or wet buy)</label>
-                    <textarea id="quality_reason_code" rows="3" class="form-control" style="border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;">${reasonCode}</textarea>
-                </div>
-            </div>
-
             <div class="d-flex align-items-center gap-3">
                 <button id="btn_submit_intake_create_lot" class="btn text-white font-weight-bold px-4 py-2" style="background-color: #0f2438; border-radius: 6px; font-size: 13.5px;">
                     Submit intake & create lot
@@ -566,17 +529,15 @@ function render_intake_quality_capture_page(frm) {
 
     frappe.call({
         method: 'frappe.client.get_list',
-        args: { doctype: 'Country', fields: ['name', 'country_name'], limit_page_length: 250, order_by: 'name asc' },
+        args: { doctype: 'Supplier', filters: { supplier_group: ['in', ['Transporter', 'Transporters']] }, fields: ['name', 'supplier_name'], limit_page_length: 250 },
         callback: function(r) {
-            const $countrySelect = $('#quality_county_select');
-            $countrySelect.empty();
-            $countrySelect.append('<option value="" disabled selected>Select...</option>');
+            const $transporterSelect = $('#intake_transporter_select');
+            $transporterSelect.empty();
+            $transporterSelect.append('<option value="" disabled selected>Select transporter...</option>');
             if (r.message && r.message.length) {
-                r.message.forEach(c => {
-                    const val = c.name;
-                    const label = c.country_name || c.name;
-                    const isSelected = (doc.country === val || doc.county === val) ? 'selected' : '';
-                    $countrySelect.append(`<option value="${val}" ${isSelected}>${label}</option>`);
+                r.message.forEach(s => {
+                    const isSelected = (doc.transporter === s.name) ? 'selected' : '';
+                    $transporterSelect.append(`<option value="${s.name}" ${isSelected}>${s.supplier_name || s.name}</option>`);
                 });
             }
         }
@@ -618,9 +579,7 @@ function render_intake_quality_capture_page(frm) {
         if (!tare || tare <= 0) { frappe.msgprint(__('Please enter a valid Tare Weight.')); return; }
         if (!bags || bags <= 0) { frappe.msgprint(__('Please enter a valid Bag Count.')); return; }
         if (!wbNo) { frappe.msgprint(__('Please enter the Weighbridge Ticket Number.')); return; }
-        if (isNaN(moistureVal)) { frappe.msgprint(__('Please enter Moisture %.')); return; }
-        if (isNaN(foreignMatterVal)) { frappe.msgprint(__('Please enter Foreign matter %.')); return; }
-        if (isNaN(aflatoxinVal)) { frappe.msgprint(__('Please enter Aflatoxin ppb.')); return; }
+        if (!selectedTransporter) { frappe.msgprint(__('Please select a Transporter.')); return; }
 
         if (frm.fields_dict['gross_weight_kg']) frm.set_value('gross_weight_kg', gross);
         if (frm.fields_dict['tare_weight_kg']) frm.set_value('tare_weight_kg', tare);

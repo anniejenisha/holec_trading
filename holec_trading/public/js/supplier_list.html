@@ -20,7 +20,7 @@ function load_supplier_table(page, search_term = '') {
         method: 'frappe.client.get_list',
         args: {
             doctype: 'Supplier',
-            fields: ['name', 'supplier_name', 'supplier_group', 'county', 'tax_id', 'disabled', 'is_frozen'],
+            fields: ['name', 'supplier_name', 'supplier_group', 'tax_id', 'disabled', 'is_frozen'],
             filters: search_term ? [
                 ['Supplier', 'supplier_name', 'like', `%${search_term}%`]
             ] : [],
@@ -48,7 +48,6 @@ function render_table_html(page, suppliers, search_term) {
                 <td class="align-middle">${sup.name}</td>
                 <td class="align-middle font-weight-bold">${sup.supplier_name}</td>
                 <td class="align-middle">${sup.supplier_group || '-'}</td>
-                <td class="align-middle">${sup.county || '-'}</td>
                 <td class="align-middle">${sup.tax_id || '-'}</td>
                 <td class="align-middle">${status_badge}</td>
             </tr>
@@ -74,13 +73,12 @@ function render_table_html(page, suppliers, search_term) {
                                 <th>ID</th>
                                 <th>Name</th>
                                 <th>Group</th>
-                                <th>County</th>
                                 <th>KRA PIN</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${rows.length ? rows : '<tr><td colspan="6" class="text-center text-muted py-4">No suppliers found</td></tr>'}
+                            ${rows.length ? rows : '<tr><td colspan="5" class="text-center text-muted py-4">No suppliers found</td></tr>'}
                         </tbody>
                     </table>
                 </div>

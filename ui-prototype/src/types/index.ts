@@ -2,7 +2,7 @@
 
 export type Tier = "N" | "C" | "B";
 
-export type SupplierGroup = "Farmer" | "Aggregator" | "Trader" | "Transporter";
+export type SupplierGroup = "Farmers" | "Transporters" | "Cess" | "Casual Labour" | "Farmer" | "Transporter" | "CESS" | "Aggregator" | "Trader";
 export type PartyStatus = "Draft" | "Verified" | "Approved";
 export type PaymentRail = "Mpesa" | "PesaLink" | "Bank Transfer" | "Cash";
 export type EtimsStatus = "Registered" | "Buyer-Generated" | "Blocked";
