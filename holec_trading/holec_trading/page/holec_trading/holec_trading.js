@@ -103,22 +103,24 @@ function init_holec_trading_engine() {
         const moisture = flt(lot.moisture_ || 0);
         const fm = flt(lot.foreign_matter_ || 0);
 
-        // Moisture: points over standard x a multiplier that grows with wetness
-        const moistureExcess = Math.max(0, moisture - R.moistureStandard);
-        let moistureMultiplier = 0;
-        if (moisture > 20) moistureMultiplier = 1.6;
-        else if (moisture > 14) moistureMultiplier = 1.2;
-        else if (moisture > R.moistureStandard) moistureMultiplier = 1.0;
-        const moisturePenaltyPct = moistureExcess * moistureMultiplier;
-        const moistureDeductionKg = netKg * (moisturePenaltyPct / 100);
+        // Step 2: Moisture (admin types a %)
+        // Excess % = Moisture % - 13.5 (minimum 0)
+        const moistureStd = 13.5;
+        const moistureExcess = Math.max(0, moisture - moistureStd);
+        // Bag size = 90 + Excess (every 1% over adds 1 kg per bag)
+        const bagSize = 90 + moistureExcess;
+        // Moisture-adjusted kg = Net ÷ Bag size x 90
+        const moistureAdjustedKg = (netKg > 0 && bagSize > 0) ? (netKg / bagSize) * 90 : netKg;
+        // Moisture deduction kg = Net - Moisture-adjusted kg
+        const moistureDeductionKg = Math.max(0, netKg - moistureAdjustedKg);
 
-        // Foreign matter: only the part above the allowance counts, times the factor
-        const fmExcess = Math.max(0, fm - R.fmAllowance);
-        const fmPenaltyPct = fmExcess * R.fmFactor;
-        const fmDeductionKg = netKg * (fmPenaltyPct / 100);
+        // Step 3: Foreign matter (dropdown: 0 / 0.5 / 1 / 2 / 3 / 5%)
+        // Deducted % = Foreign matter % - 0.5 (minimum 0)
+        const fmDeductedPct = Math.max(0, fm - 0.5);
+        const fmDeductionKg = netKg * (fmDeductedPct / 100);
 
-        // Stock quantity after deductions (does NOT change the amount paid)
-        const acceptedNetKg = Math.max(0, netKg - moistureDeductionKg - fmDeductionKg);
+        // Stock quantity after deductions (Accepted Net Quantity = Moisture-adjusted kg - FM deduction kg)
+        const acceptedNetKg = Math.max(0, moistureAdjustedKg - fmDeductionKg);
 
         const refRate = flt(rateOverride != null ? rateOverride : (lot.negotiated_price || R.defaultRate));
         const bags = cint(lot.bag_count || 0);
@@ -132,8 +134,8 @@ function init_holec_trading_engine() {
 
         return {
             grossKg, tareKg, netKg, moisture, fm, bags,
-            moistureExcess, moistureMultiplier, moisturePenaltyPct, moistureDeductionKg,
-            fmExcess, fmPenaltyPct, fmDeductionKg,
+            moistureStd, moistureExcess, bagSize, moistureAdjustedKg, moistureDeductionKg,
+            fmDeductedPct, fmDeductionKg,
             acceptedNetKg, refRate, grossValue,
             netPayable, totalTransport, landedCostPerKg
         };
@@ -3599,11 +3601,14 @@ function init_holec_trading_engine() {
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
-                    ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'number', value: l.foreign_matter_ || '', required: true })}
+                    ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'select', value: l.foreign_matter_ != null ? String(l.foreign_matter_) : '0', options: withValue(['0', '0.5', '1', '2', '3', '5'], l.foreign_matter_ != null ? String(l.foreign_matter_) : '0'), required: true })}
                     ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
                 </div>
                 ${field({ label: 'Reason Code (if foreign matter judgement or wet buy)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
             </div>
+
+            <div id="moisture-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
+            <div id="afla-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
 
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
@@ -3663,13 +3668,13 @@ function init_holec_trading_engine() {
 
             $('#d-moist').text('- ' + fmtKg1(p.moistureDeductionKg));
             $('#d-moist-sub').text(p.moistureExcess > 0
-                ? `${p.moisture}% vs ${R.moistureStandard}% standard: ${p.moistureExcess.toFixed(1)} pts over × ${p.moistureMultiplier} = ${p.moisturePenaltyPct.toFixed(2)}% of net weight`
-                : `${p.moisture}% recorded — at or below ${R.moistureStandard}% standard, no deduction`);
+                ? `${p.moisture}% recorded: ${p.moistureExcess.toFixed(1)}% excess → Bag size ${p.bagSize.toFixed(1)} kg → Moisture-adjusted ${fmtKg1(p.moistureAdjustedKg)}`
+                : `${p.moisture}% recorded — at or below 13.5% standard, no deduction`);
 
             $('#d-fm').text('- ' + fmtKg1(p.fmDeductionKg));
-            $('#d-fm-sub').text(p.fmExcess > 0
-                ? `${p.fm}% vs ${R.fmAllowance}% allowance: ${p.fmExcess.toFixed(1)} pts over × ${R.fmFactor} = ${p.fmPenaltyPct.toFixed(2)}% of net weight`
-                : `${p.fm}% recorded — within ${R.fmAllowance}% allowance, no deduction`);
+            $('#d-fm-sub').text(p.fmDeductedPct > 0
+                ? `${p.fm}% recorded: ${p.fmDeductedPct.toFixed(1)}% deducted`
+                : `${p.fm}% recorded — within 0.5% allowance, no deduction`);
 
             $('#d-accepted').text(fmtKg1(p.acceptedNetKg));
 
@@ -3677,9 +3682,21 @@ function init_holec_trading_engine() {
             $('#p-gross-sub').text(`${fmtKg1(p.netKg)} net × KES ${rate}/kg`);
             $('#p-net').text(fmtKES(p.netPayable));
             $('#p-invoice').text(fmtKES(p.netPayable));
+
+            if (p.moisture > 20) {
+                $('#moisture-warn-banner').show().text(`⚠️ Moisture at ${p.moisture}% exceeds the 20% limit (Wet buy block). Reason code / override required.`);
+            } else {
+                $('#moisture-warn-banner').hide();
+            }
+
+            if (p.aflatoxin_ppb > 10) {
+                $('#afla-warn-banner').show().text(`⚠️ Aflatoxin at ${p.aflatoxin_ppb} ppb exceeds the 10 ppb limit.`);
+            } else {
+                $('#afla-warn-banner').hide();
+            }
         };
 
-        $('#f-ref-rate, #f-moisture, #f-fm, #f-afla, #f-reason').on('input', update);
+        $('#f-ref-rate, #f-moisture, #f-fm, #f-afla, #f-reason').on('input change', update);
         update();
 
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));

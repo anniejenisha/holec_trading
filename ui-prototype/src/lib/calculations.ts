@@ -16,9 +16,13 @@ export function computeIntake(lot: Pick<Lot, "grossKg" | "tareKg">): IntakeResul
 
 export interface PayableResult {
 	netKg: number;
-	band: string;
-	moisturePenaltyPct: number;
+	moisturePct: number;
+	moistureExcess: number;
+	bagSize: number;
+	moistureAdjustedKg: number;
 	moistureDeductionKg: number;
+	fmPct: number;
+	fmDeductedPct: number;
 	fmDeductionKg: number;
 	acceptedNetKg: number;
 	refRatePerKg: number;
@@ -39,27 +43,30 @@ export function computePayable(
 	const fmPct = lot.fmPct ?? 0;
 	const bags = lot.bags ?? 0;
 
-	const netKg = grossKg - tareKg;
-	const moistureStd = 13.5;
-	let moisturePenaltyPct = 0;
-	let band = "≤14%";
-	if (moisturePct > 20) {
-		band = ">20% (wet buy)";
-		moisturePenaltyPct = (moisturePct - moistureStd) * 1.6;
-	} else if (moisturePct > 14) {
-		band = "14–20%";
-		moisturePenaltyPct = (moisturePct - moistureStd) * 1.2;
-	} else {
-		moisturePenaltyPct = Math.max(0, (moisturePct - moistureStd) * 1.0);
-	}
-	moisturePenaltyPct = Math.max(0, moisturePenaltyPct);
+	// Step 1: Weight (Net = Gross - Tare)
+	const netKg = Math.max(0, grossKg - tareKg);
 
-	const moistureDeductionKg = netKg * (moisturePenaltyPct / 100);
-	const fmDeductionKg = netKg * (Math.max(0, fmPct - 0.5) / 100) * 1.5;
-	const acceptedNetKg = Math.max(0, netKg - moistureDeductionKg - fmDeductionKg);
+	// Step 2: Moisture
+	// Excess % = Moisture % - 13.5 (minimum 0)
+	const moistureStd = 13.5;
+	const moistureExcess = Math.max(0, moisturePct - moistureStd);
+	// Bag size = 90 + Excess (every 1% over adds 1 kg per bag)
+	const bagSize = 90 + moistureExcess;
+	// Moisture-adjusted kg = Net ÷ Bag size x 90
+	const moistureAdjustedKg = netKg > 0 && bagSize > 0 ? (netKg / bagSize) * 90 : netKg;
+	// Moisture deduction kg = Net - Moisture-adjusted kg
+	const moistureDeductionKg = Math.max(0, netKg - moistureAdjustedKg);
+
+	// Step 3: Foreign matter
+	// Deducted % = Foreign matter % - 0.5 (minimum 0)
+	const fmDeductedPct = Math.max(0, fmPct - 0.5);
+	const fmDeductionKg = netKg * (fmDeductedPct / 100);
+
+	// Stock quantity after deductions
+	const acceptedNetKg = Math.max(0, moistureAdjustedKg - fmDeductionKg);
 
 	const refRatePerKg = 48; // reference rate KES/kg
-	const grossValue = acceptedNetKg * refRatePerKg;
+	const grossValue = netKg * refRatePerKg;
 	const baggingRatePerBag = 25;
 	const baggingDeduction = bags * baggingRatePerBag;
 	const aflatoxinTestFee = lot.aflatoxinTested ? 300 : 0;
@@ -69,9 +76,13 @@ export function computePayable(
 
 	return {
 		netKg,
-		band,
-		moisturePenaltyPct,
+		moisturePct,
+		moistureExcess,
+		bagSize,
+		moistureAdjustedKg,
 		moistureDeductionKg,
+		fmPct,
+		fmDeductedPct,
 		fmDeductionKg,
 		acceptedNetKg,
 		refRatePerKg,

@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useActiveLot } from "@/hooks/useActiveLot";
 import { computePayable } from "@/lib/calculations";
 import { fmtKES, fmtKg } from "@/lib/format";
@@ -84,7 +85,14 @@ export default function DeductionsPage() {
 						<Input type="number" defaultValue={lot.moisturePct ?? 13.5} />
 					</FieldWrapper>
 					<FieldWrapper label="Foreign matter %" required>
-						<Input type="number" defaultValue={lot.fmPct ?? 0} />
+						<Select defaultValue={String(lot.fmPct ?? 0)}>
+							<SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+							<SelectContent>
+								{["0", "0.5", "1", "2", "3", "5"].map((v) => (
+									<SelectItem key={v} value={v}>{v}%</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</FieldWrapper>
 					<FieldWrapper label="Aflatoxin ppb" required>
 						<Input type="number" defaultValue={lot.aflatoxinPpb ?? 0} />
@@ -98,10 +106,13 @@ export default function DeductionsPage() {
 					<CalcRow label="Tare weight" value={`− ${fmtKg(lot.tareKg ?? 0)}`} neg />
 					<CalcRow label="Net weight" value={fmtKg(p.netKg)} sub="Gross minus tare" />
 					<CalcRow
-						label={`Moisture deduction (${p.band})`} value={`− ${fmtKg(p.moistureDeductionKg)}`} neg
-						sub={`${lot.moisturePct}% recorded vs 13.5% standard`}
+						label="Moisture deduction" value={`− ${fmtKg(p.moistureDeductionKg)}`} neg
+						sub={p.moistureExcess > 0 ? `${p.moisturePct}% recorded: ${p.moistureExcess.toFixed(1)}% excess → Bag size ${p.bagSize.toFixed(1)} kg → Moisture-adjusted ${fmtKg(p.moistureAdjustedKg)}` : `${p.moisturePct}% recorded — at or below 13.5% standard, no deduction`}
 					/>
-					<CalcRow label="Foreign matter deduction" value={`− ${fmtKg(p.fmDeductionKg)}`} neg sub={`${lot.fmPct}% recorded`} />
+					<CalcRow
+						label="Foreign matter deduction" value={`− ${fmtKg(p.fmDeductionKg)}`} neg
+						sub={p.fmDeductedPct > 0 ? `${p.fmPct}% recorded: ${p.fmDeductedPct.toFixed(1)}% deducted` : `${p.fmPct}% recorded — within 0.5% allowance, no deduction`}
+					/>
 					<CalcRow label="Accepted net quantity" value={fmtKg(p.acceptedNetKg)} total sub="This is what lands in the stock ledger — not the gross weight" />
 				</SectionCard>
 			</div>
