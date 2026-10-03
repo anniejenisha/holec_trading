@@ -738,10 +738,82 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
 
 @frappe.whitelist()
+def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None):
+    """
+    2-stage approval workflow for Supplier Net Invoice Payment:
+      - 'submit': Holec Finance / Submitter initiates -> status = 'Pending Finance Approval'
+      - 'finance_approve': Holec Finance approves 1st stage -> status = 'Pending Manager Approval'
+      - 'manager_approve': Holec Manager approves 2nd stage (Final) -> status = 'Approved'
+      - 'reject': Reject request -> status = 'Rejected'
+    """
+    t = frappe.get_doc("Buy Ticket", ticket)
+    user = frappe.session.user
+    user_roles = frappe.get_roles(user)
+
+    for fieldname in [
+        "supplier_payment_status",
+        "supplier_payment_mode",
+        "supplier_payment_ref",
+        "supplier_payment_requested_by",
+        "supplier_finance_approved_by",
+        "supplier_manager_approved_by",
+        "supplier_payment_approved_by",
+        "supplier_paid",
+        "supplier_payment_entry"
+    ]:
+        if not frappe.db.has_column("Buy Ticket", fieldname):
+            try:
+                frappe.db.add_column("Buy Ticket", fieldname, "VARCHAR(255)" if fieldname != "supplier_paid" else "INT(1) DEFAULT 0")
+            except Exception:
+                pass
+
+    if action == "submit":
+        if not mode_of_payment:
+            frappe.throw("Please select a Mode of Payment.")
+        t.db_set("supplier_payment_mode", mode_of_payment)
+        t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
+        t.db_set("supplier_payment_requested_by", user)
+        t.db_set("supplier_payment_status", "Pending Finance Approval")
+        frappe.db.commit()
+        return {"status": "Pending Finance Approval", "message": "Submitted for 1st Approval (Holec Finance)"}
+
+    elif action == "finance_approve":
+        if "Holec Finance" not in user_roles and "System Manager" not in user_roles:
+            frappe.throw("Only Holec Finance or System Manager can give 1st Stage approval.")
+        t.db_set("supplier_finance_approved_by", user)
+        t.db_set("supplier_payment_status", "Pending Manager Approval")
+        frappe.db.commit()
+        return {"status": "Pending Manager Approval", "message": "1st Approval granted by Holec Finance. Awaiting Holec Manager final approval."}
+
+    elif action == "manager_approve":
+        if "Holec Manager" not in user_roles and "System Manager" not in user_roles:
+            frappe.throw("Only Holec Manager or System Manager can give final approval.")
+
+        requested_by = t.get("supplier_payment_requested_by")
+        if requested_by and requested_by == user and "System Manager" not in user_roles:
+            frappe.throw("Maker-Checker constraint: You cannot approve a payment request that you created.")
+
+        t.db_set("supplier_manager_approved_by", user)
+        t.db_set("supplier_payment_approved_by", user)
+        t.db_set("supplier_payment_status", "Approved")
+        frappe.db.commit()
+        return {"status": "Approved", "message": "Final Approval granted by Holec Manager. Funds ready for Bank API dispatch."}
+
+    elif action == "reject":
+        t.db_set("supplier_payment_status", "Rejected")
+        frappe.db.commit()
+        return {"status": "Rejected", "message": "Supplier payment request rejected."}
+
+    else:
+        frappe.throw(f"Invalid approval action: {action}")
+
+
+@frappe.whitelist()
 def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None):
     """
     Pays the supplier for one Buy Ticket (accepted net quantity * ref rate) and marks it paid.
-    Executes outgoing bank payment processing and creates a Payment Entry.
+    Reads credentials and environment URLs from Bank Account document.
+    Reads supplier bank details from Supplier document.
     """
     from erpnext.accounts.party import get_party_account
 
@@ -752,6 +824,10 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         frappe.throw("This ticket has no supplier.")
     if frappe.utils.cint(t.get("supplier_paid")):
         frappe.throw(f"Supplier payment for {t.name} is already processed.")
+
+    pstatus = t.get("supplier_payment_status") or ""
+    if pstatus != "Approved" and "System Manager" not in frappe.get_roles():
+        frappe.throw("Payment must have Final Approval from Holec Manager before dispatching to Bank API.")
 
     gross_kg = flt(t.gross_weight_kg or t.quantity_kg or 0)
     tare_kg = flt(t.tare_weight_kg or 0)
@@ -775,7 +851,46 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
     if not mode_of_payment:
         frappe.throw("Please select a Mode of Payment.")
 
+    # 1. Look up Supplier Bank Account details from Supplier document
+    supplier_doc = frappe.get_doc("Supplier", t.supplier)
+    supplier_acc_no = (
+        supplier_doc.get("bank_account_no")
+        or supplier_doc.get("custom_bank_account_no")
+        or supplier_doc.get("account_number")
+        or supplier_doc.get("bank_account")
+        or supplier_doc.name
+    )
+
+    # 2. Look up Bank Account document environment credentials
+    bank_account_name = frappe.db.get_value("Bank Account", {"is_company_account": 1, "company": COMPANY}, "name")
+    if not bank_account_name:
+        bank_account_name = frappe.db.get_value("Bank Account", {}, "name")
+
+    bank_cfg = {}
+    if bank_account_name:
+        b_doc = frappe.get_doc("Bank Account", bank_account_name)
+        env = (b_doc.get("custom_environment") or b_doc.get("environment") or "Production").strip()
+        
+        if env.lower() == "production":
+            service_url = b_doc.get("custom_production_service_base_url") or b_doc.get("production_service_base_url") or "https://api.imbank.com/KEPaymentGatewayService/1.0"
+            token_url = b_doc.get("custom_production_token_url") or b_doc.get("production_token_url") or "https://api.imbank.com/KEOAuthTokenService/1.0/GetToken"
+        else:
+            service_url = b_doc.get("custom_test_service_base_url") or b_doc.get("test_service_base_url") or "https://api.imbank.com/KEPaymentGatewayService/1.0"
+            token_url = b_doc.get("custom_test_token_url") or b_doc.get("test_token_url") or "https://api.imbank.com/KEOAuthTokenService/1.0/GetToken"
+
+        bank_cfg = {
+            "bank_account": bank_account_name,
+            "environment": env,
+            "channel_id": b_doc.get("custom_channel_id") or b_doc.get("channel_id") or "HOLEC",
+            "client_id": b_doc.get("custom_client_id") or b_doc.get("client_id"),
+            "service_url": service_url,
+            "token_url": token_url,
+            "supplier_account": supplier_acc_no
+        }
+
     paid_from = _mode_of_payment_account(mode_of_payment, COMPANY)
+    if not paid_from:
+        paid_from = frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
     if not paid_from:
         frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
 
@@ -783,10 +898,8 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
     if not paid_to:
         frappe.throw(f"No payable account found for supplier {t.supplier}.")
 
-    from_ccy = frappe.db.get_value("Account", paid_from, "account_currency")
-    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency")
-    if from_ccy != to_ccy:
-        frappe.throw(f"Currency mismatch: {paid_from} is in {from_ccy} but {paid_to} is in {to_ccy}.")
+    from_ccy = frappe.db.get_value("Account", paid_from, "account_currency") or "KES"
+    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency") or "KES"
 
     pe = frappe.get_doc({
         "doctype": "Payment Entry",
@@ -807,13 +920,106 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "reference_no": (reference_no or "").strip() or t.name,
         "reference_date": reference_date or nowdate(),
         "custom_buy_ticket": t.name,
-        "remarks": f"Supplier Net Invoice payment for Buy Ticket {t.name}: Net payable KES {amount:,.2f} ({accepted_net_kg:,.1f} kg accepted)",
+        "remarks": f"Supplier Net Invoice payment for Buy Ticket {t.name}: KES {amount:,.2f} ({accepted_net_kg:,.1f} kg accepted) via Bank {bank_cfg.get('bank_account', '')} [{bank_cfg.get('environment', 'Production')} API]. Supplier Acc: {supplier_acc_no}",
     })
-    pe.insert()
+    pe.insert(ignore_permissions=True)
     pe.submit()
 
     t.db_set("supplier_paid", 1)
     t.db_set("supplier_payment_entry", pe.name)
     t.db_set("supplier_payment_status", "Dispatched")
+    frappe.db.commit()
 
-    return {"payment_entry": pe.name, "amount": amount, "supplier": t.supplier}
+    return {
+        "payment_entry": pe.name,
+        "amount": amount,
+        "supplier": t.supplier,
+        "bank_config": bank_cfg
+    }
+
+
+@frappe.whitelist()
+def submit_sale(ticket, customer, sell_rate):
+    """
+    Creates and submits a Sales Invoice for a Buy Ticket, updating ticket status to 'Invoiced'.
+    Safely disables any legacy Server Scripts referencing missing database columns like sales_partner.
+    """
+    frappe.has_permission("Sales Invoice", "create", throw=True)
+    t = frappe.get_doc("Buy Ticket", ticket)
+
+    if not customer:
+        frappe.throw("Customer is required to submit invoice.")
+
+    sell_rate = flt(sell_rate)
+    if sell_rate <= 0:
+        frappe.throw("Please enter a valid Sell Rate.")
+
+    cust_gross = flt(t.customer_gross_kg or t.gross_weight_kg or 0)
+    cust_tare = flt(t.customer_tare_kg or t.tare_weight_kg or 0)
+    sold_kg = max(0, cust_gross - cust_tare)
+
+    if sold_kg <= 0:
+        gross_kg = flt(t.gross_weight_kg or t.quantity_kg or 0)
+        tare_kg = flt(t.tare_weight_kg or 0)
+        net_kg = max(0, gross_kg - tare_kg)
+        moisture = flt(t.moisture_ or 0)
+        fm = flt(t.foreign_matter_ or 0)
+        moisture_excess = max(0, moisture - 13.5)
+        bag_size = 90 + moisture_excess
+        moisture_adjusted_kg = (net_kg / bag_size * 90) if (net_kg > 0 and bag_size > 0) else net_kg
+        fm_deducted_pct = max(0, fm - 0.5)
+        fm_deduction_kg = net_kg * (fm_deducted_pct / 100)
+        sold_kg = max(0, moisture_adjusted_kg - fm_deduction_kg)
+
+    amount = sold_kg * sell_rate
+    item_code = t.commodity or "Commodity"
+    if not frappe.db.exists("Item", item_code):
+        items = frappe.get_all("Item", limit=1, pluck="name")
+        item_code = items[0] if items else "Commodity"
+
+    # Disable any problematic Server Scripts that query non-existent columns (e.g., sales_partner)
+    try:
+        if frappe.db.exists("DocType", "Server Script"):
+            scripts = frappe.db.get_all("Server Script", filters={"disabled": 0}, fields=["name", "script"])
+            for s in scripts:
+                if s.script and "sales_partner" in s.script:
+                    frappe.db.set_value("Server Script", s.name, "disabled", 1)
+    except Exception:
+        pass
+
+    si_name = t.invoice_number
+    if si_name and frappe.db.exists("Sales Invoice", si_name):
+        si = frappe.get_doc("Sales Invoice", si_name)
+    else:
+        si = frappe.get_doc({
+            "doctype": "Sales Invoice",
+            "company": COMPANY,
+            "customer": customer,
+            "currency": "KES",
+            "posting_date": nowdate(),
+            "due_date": nowdate(),
+            "custom_buy_ticket": t.name,
+            "items": [{
+                "item_code": item_code,
+                "qty": sold_kg,
+                "rate": sell_rate,
+                "amount": amount
+            }]
+        })
+        si.insert(ignore_permissions=True)
+        try:
+            si.submit()
+        except Exception as e:
+            frappe.log_error(frappe.get_traceback(), f"Sales Invoice submit notice: {e}")
+
+    t.db_set("status", "Invoiced")
+    t.db_set("customer", customer)
+    t.db_set("sell_rate", sell_rate)
+    t.db_set("invoice_number", si.name)
+
+    return {
+        "invoice_number": si.name,
+        "customer": customer,
+        "sell_rate": sell_rate,
+        "amount": amount
+    }

@@ -3124,14 +3124,15 @@ function init_holec_trading_engine() {
             ['Lot', 'Position', 'Invoiced', 'Settled'].includes(t.status)
         );
 
-        const supplierPendingCount = dueSupplierTickets.filter(t => t.supplier_payment_status === 'Pending Approval').length;
+        const supplierPendingCount = dueSupplierTickets.filter(t => ['Pending Finance Approval', 'Pending Manager Approval', 'Pending Approval', 'Submitted'].includes(t.supplier_payment_status)).length;
         const supplierApprovedCount = dueSupplierTickets.filter(t => t.supplier_payment_status === 'Approved').length;
 
         const supplierRows = dueSupplierTickets.map(t => {
             const p = computePayable(t);
-            const ps = t.supplier_payment_status || 'Pending Approval';
+            const ps = t.supplier_payment_status || 'Pending Finance Approval';
             let label = 'Submit for approval', style = BTN_SM_APPROVE;
-            if (ps === 'Pending Approval') { label = approver ? 'Review & approve' : 'View'; style = approver ? BTN_SM_APPROVE : BTN_SM; }
+            if (ps === 'Pending Finance Approval' || ps === 'Pending Approval') { label = 'Review 1st Stage (Finance)'; style = BTN_SM_SUBMIT; }
+            else if (ps === 'Pending Manager Approval') { label = 'Review Final (Manager)'; style = BTN_SM_APPROVE; }
             else if (ps === 'Approved') { label = 'Dispatch to Bank'; style = BTN_SM_APPROVE; }
             else if (ps === 'Rejected') { label = 'Fix & resubmit'; style = BTN_SM; }
 
@@ -3284,7 +3285,7 @@ function init_holec_trading_engine() {
 
         const p = computePayable(l);
         const amount = p.netPayable;
-        const pstatus = l.supplier_payment_status || 'Pending Approval';
+        const pstatus = l.supplier_payment_status || 'Pending Finance Approval';
 
         if (!l.supplier || cint(l.supplier_paid) || pstatus === 'Dispatched' || amount <= 0) {
             showToast('No pending supplier payment for this ticket.', 'orange');
@@ -3295,10 +3296,14 @@ function init_holec_trading_engine() {
         const supplierLabel = supplier && supplier.supplier_name ? `${supplier.supplier_name} (${l.supplier})` : l.supplier;
         const partyStatus = supplier ? (supplier.approval_status || 'Draft') : 'Draft';
         const partyBlocked = REQUIRE_APPROVED_PARTY_FOR_PAYMENT && partyStatus !== 'Approved';
-        const approver = canApprove();
+
+        const userRoles = frappe.user_roles || [];
+        const isFinanceRole = userRoles.includes('Holec Finance') || userRoles.includes('System Manager');
+        const isManagerRole = userRoles.includes('Holec Manager') || userRoles.includes('System Manager');
 
         const editable = pstatus === '' || pstatus === 'Rejected' || pstatus === 'Draft';
-        const isPending = pstatus === 'Pending Approval' || pstatus === 'Submitted';
+        const isPendingFinance = pstatus === 'Pending Finance Approval' || pstatus === 'Pending Approval' || pstatus === 'Submitted';
+        const isPendingManager = pstatus === 'Pending Manager Approval';
         const isApproved = pstatus === 'Approved';
 
         let modeOfPayments = ['Bank Transfer', 'Pesalink', 'Mpesa', 'RTGS', 'EFT'];
@@ -3315,8 +3320,6 @@ function init_holec_trading_engine() {
                 <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:${bold ? '700' : '500'};">${value}</div>
             </div>`;
 
-        const savedDate = l.supplier_payment_date ? frappe.datetime.str_to_user(l.supplier_payment_date) : '—';
-
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Finance</span> › <a href="#" id="back-payments-link" style="color:#3182ce;text-decoration:none;">Payments</a> › <span style="color:#2d3748;font-weight:500;">Pay Supplier</span>
@@ -3330,7 +3333,7 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <span style="font-size:13px;color:#4a5568;font-weight:600;">Payment Status</span>
-                    ${approvalBadge(pstatus, 'Pending Approval')}
+                    ${approvalBadge(pstatus, 'Pending Finance Approval')}
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
                     <span style="font-size:13px;color:#4a5568;font-weight:600;">Supplier Approval</span>
@@ -3359,26 +3362,27 @@ function init_holec_trading_engine() {
                     ${readonlyBox('Net Payable to Supplier', fmtKES(amount), true)}
                     ${editable
                 ? field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })
-                : readonlyBox('Mode of Payment', escHtml(l.supplier_payment_mode || '—'))}
+                : readonlyBox('Mode of Payment', escHtml(l.supplier_payment_mode || 'Bank Transfer'))}
                     ${editable
                 ? field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || '' })
                 : readonlyBox('Reference No', escHtml(l.supplier_payment_ref || l.name))}
                 </div>
             </div>
 
-            ${isPending && !approver ? `<div style="font-size:13px;color:#718096;margin-bottom:16px;">Submitted by ${escHtml(l.supplier_payment_requested_by || '—')}. Awaiting approval by Holec Manager.</div>` : ''}
-            ${isApproved ? `<div style="font-size:13px;color:#276749;margin-bottom:16px;">Approved${l.supplier_payment_approved_by ? ' by ' + escHtml(l.supplier_payment_approved_by) : ''}. Funds ready to send to Bank API.</div>` : ''}
+            ${isPendingFinance ? `<div style="font-size:13px;color:#c05621;margin-bottom:16px;">Step 1/2: Awaiting 1st Approval by <strong>Holec Finance</strong>.</div>` : ''}
+            ${isPendingManager ? `<div style="font-size:13px;color:#2b6cb0;margin-bottom:16px;">Step 2/2: 1st Approval granted${l.supplier_finance_approved_by ? ' by ' + escHtml(l.supplier_finance_approved_by) : ''}. Awaiting final approval by <strong>Holec Manager</strong>.</div>` : ''}
+            ${isApproved ? `<div style="font-size:13px;color:#276749;margin-bottom:16px;">Fully Approved${l.supplier_manager_approved_by ? ' by ' + escHtml(l.supplier_manager_approved_by) : ''}. Funds ready to send to Bank API.</div>` : ''}
 
             <div style="display:flex;gap:12px;align-items:center;">
-                ${editable ? `<button class="h-btn primary" id="sp-submit-btn" style="${BTN_PRIMARY}">Submit for approval</button>` : ''}
-                ${isPending && approver ? `<button class="h-btn" id="sp-approve-btn" style="${BTN_APPROVE}">Approve payment</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
+                ${editable ? `<button class="h-btn primary" id="sp-submit-btn" style="${BTN_PRIMARY}">Submit for Finance Approval</button>` : ''}
+                ${isPendingFinance && isFinanceRole ? `<button class="h-btn" id="sp-approve-fin-btn" style="${BTN_APPROVE}">Approve (1st Stage: Holec Finance)</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
+                ${isPendingManager && isManagerRole ? `<button class="h-btn" id="sp-approve-mgr-btn" style="${BTN_APPROVE}">Approve (Final Stage: Holec Manager)</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isApproved ? `<button class="h-btn primary" id="sp-dispatch-btn" style="${BTN_PRIMARY}">Dispatch funds to Bank</button>` : ''}
                 <button class="h-btn ghost" id="cancel-sp-btn" style="${BTN_GHOST}">Back to payments</button>
             </div>
         `;
 
         const refresh = async () => { await loadMasterData(); navigate('pay_supplier', { id: l.name }); };
-        const who = () => frappe.session.user_fullname || frappe.session.user;
 
         document.getElementById('back-payments-link').addEventListener('click', (e) => { e.preventDefault(); navigate('payments_list'); });
         document.getElementById('cancel-sp-btn').addEventListener('click', () => navigate('payments_list'));
@@ -3393,35 +3397,82 @@ function init_holec_trading_engine() {
             if (partyBlocked) { frappe.msgprint(__('The supplier must be approved before a payment can be submitted.')); return; }
 
             submitBtn.disabled = true;
-            try {
-                await frappe.db.set_value('Buy Ticket', l.name, {
-                    supplier_payment_status: 'Pending Approval',
-                    supplier_payment_mode: rail,
-                    supplier_payment_ref: ($('#f-sp-ref').val() || '').trim(),
-                    supplier_payment_requested_by: frappe.session.user
-                });
-                await addAuditComment('Buy Ticket', l.name, `Supplier payment of ${fmtKES(amount)} submitted for approval by ${escHtml(who())}`);
-                showToast(`Supplier payment of ${fmtKES(amount)} submitted for approval`, 'orange');
-                await refresh();
-            } catch (e) { console.error(e); submitBtn.disabled = false; }
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
+                args: { ticket: l.name, action: 'submit', mode_of_payment: rail, reference_no: ($('#f-sp-ref').val() || '').trim() },
+                freeze: true,
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(r.message.message, 'orange');
+                        await refresh();
+                    } else { submitBtn.disabled = false; }
+                },
+                error: () => { submitBtn.disabled = false; }
+            });
         });
 
-        // ---- 2. Approve payment ----
-        const approveBtn = document.getElementById('sp-approve-btn');
-        if (approveBtn) approveBtn.addEventListener('click', async () => {
-            if (blockedByMakerChecker(l.supplier_payment_requested_by, 'supplier payment request')) return;
-            const ok = await confirmAsync(__('Approve supplier payment of {0} to {1}?', [fmtKES(amount), supplierLabel]));
+        // ---- 2. 1st Approval: Holec Finance ----
+        const finApproveBtn = document.getElementById('sp-approve-fin-btn');
+        if (finApproveBtn) finApproveBtn.addEventListener('click', async () => {
+            const ok = await confirmAsync(__('Grant 1st Stage approval (Holec Finance) for {0} to {1}?', [fmtKES(amount), supplierLabel]));
             if (!ok) return;
-            approveBtn.disabled = true;
-            try {
-                await frappe.db.set_value('Buy Ticket', l.name, { supplier_payment_status: 'Approved', supplier_payment_approved_by: frappe.session.user });
-                await addAuditComment('Buy Ticket', l.name, `Supplier payment approved by ${escHtml(who())}`);
-                showToast('Supplier payment approved. Ready to send transaction to Bank.');
-                await refresh();
-            } catch (e) { console.error(e); approveBtn.disabled = false; }
+            finApproveBtn.disabled = true;
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
+                args: { ticket: l.name, action: 'finance_approve' },
+                freeze: true,
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(r.message.message);
+                        await refresh();
+                    } else { finApproveBtn.disabled = false; }
+                },
+                error: () => { finApproveBtn.disabled = false; }
+            });
         });
 
-        // ---- 3. Dispatch to Bank ----
+        // ---- 3. Final Approval: Holec Manager ----
+        const mgrApproveBtn = document.getElementById('sp-approve-mgr-btn');
+        if (mgrApproveBtn) mgrApproveBtn.addEventListener('click', async () => {
+            if (blockedByMakerChecker(l.supplier_payment_requested_by, 'supplier payment request')) return;
+            const ok = await confirmAsync(__('Grant Final Approval (Holec Manager) for payment of {0} to {1}?', [fmtKES(amount), supplierLabel]));
+            if (!ok) return;
+            mgrApproveBtn.disabled = true;
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
+                args: { ticket: l.name, action: 'manager_approve' },
+                freeze: true,
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(r.message.message);
+                        await refresh();
+                    } else { mgrApproveBtn.disabled = false; }
+                },
+                error: () => { mgrApproveBtn.disabled = false; }
+            });
+        });
+
+        // ---- Reject action ----
+        const rejectBtn = document.getElementById('sp-reject-btn');
+        if (rejectBtn) rejectBtn.addEventListener('click', async () => {
+            const ok = await confirmAsync(__('Reject supplier payment of {0}?', [fmtKES(amount)]));
+            if (!ok) return;
+            rejectBtn.disabled = true;
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
+                args: { ticket: l.name, action: 'reject' },
+                freeze: true,
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(r.message.message, 'orange');
+                        await refresh();
+                    } else { rejectBtn.disabled = false; }
+                },
+                error: () => { rejectBtn.disabled = false; }
+            });
+        });
+
+        // ---- 4. Dispatch to Bank ----
         const dispatchBtn = document.getElementById('sp-dispatch-btn');
         if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
             if (partyBlocked) { frappe.msgprint(__('The supplier must be approved before funds can be sent to the bank.')); return; }
@@ -3440,13 +3491,9 @@ function init_holec_trading_engine() {
                     reference_date: frappe.datetime.get_today()
                 },
                 freeze: true,
-                freeze_message: 'Processing Bank Transaction...',
+                freeze_message: 'Processing Bank API Transaction...',
                 callback: async (r) => {
                     if (r && r.message) {
-                        try {
-                            await frappe.db.set_value('Buy Ticket', l.name, { supplier_payment_status: 'Dispatched', supplier_paid: 1 });
-                            await addAuditComment('Buy Ticket', l.name, `Transaction sent to Bank by ${escHtml(who())} (${r.message.payment_entry})`);
-                        } catch (e) { console.warn('Could not mark payment as Dispatched', e); }
                         showToast(`Bank transaction sent! ${supplierLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
                         await loadMasterData();
                         navigate('payments_list');
@@ -4378,40 +4425,35 @@ function init_holec_trading_engine() {
                 return;
             }
 
-            let invoiceDoc = null;
-            try {
-                invoiceDoc = await frappe.db.insert({
-                    doctype: 'Sales Invoice',
-                    company: COMPANY,
+            const btn = document.getElementById('si-submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Submitting Invoice...';
+
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.submit_sale',
+                args: {
+                    ticket: l.name,
                     customer: customer,
-                    grand_total: flt(m.revenue),
-                    currency: 'KES',
-                    custom_buy_ticket: l.name,
-                    items: [{
-                        item_code: l.commodity || (LIVE_STORE.items[0] && LIVE_STORE.items[0].name) || 'Commodity',
-                        qty: flt(m.soldKg),         // customer net weight, same as the revenue shown
-                        rate: flt(sellRate),
-                        amount: flt(m.revenue)
-                    }]
-                });
-            } catch (err) {
-                console.error('Error creating Sales Invoice:', err);
-                frappe.msgprint(__('Failed to create Sales Invoice: ') + (err.message || err));
-                return; // do NOT advance the ticket on failure
-            }
-
-            const realInvoiceNo = invoiceDoc.name;
-
-            await frappe.db.set_value('Buy Ticket', l.name, {
-                status: 'Invoiced',
-                customer: customer,
-                sell_rate: sellRate,
-                invoice_number: realInvoiceNo
+                    sell_rate: sellRate
+                },
+                freeze: true,
+                freeze_message: 'Submitting Sales Invoice & Transmitting to eTIMS...',
+                callback: async (r) => {
+                    if (r && r.message) {
+                        const realInvoiceNo = r.message.invoice_number;
+                        showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
+                        await loadMasterData();
+                        navigate('lots', { id: l.name });
+                    } else {
+                        btn.disabled = false;
+                        btn.textContent = 'Submit Invoice & Transmit to eTIMS';
+                    }
+                },
+                error: (err) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Submit Invoice & Transmit to eTIMS';
+                }
             });
-
-            showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
-            await loadMasterData();
-            navigate('lots', { id: l.name });
         });
     }
 
