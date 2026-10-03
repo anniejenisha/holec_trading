@@ -1,5 +1,5 @@
 import { ScrollText } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Banner } from "@/components/shared/Banner";
@@ -29,6 +29,11 @@ export default function DeductionsPage() {
 
 	useActiveLot(lot?.id);
 
+	const [moisturePct, setMoisturePct] = useState<number>(lot?.moisturePct ?? 13.5);
+	const [fmPct, setFmPct] = useState<number>(lot?.fmPct ?? 0);
+	const [aflatoxinPpb, setAflatoxinPpb] = useState<number>(lot?.aflatoxinPpb ?? 0);
+	const [reasonCode, setReasonCode] = useState<string>(lot?.reasonCodes?.[0] ?? "");
+
 	if (!targetId) {
 		return (
 			<div>
@@ -55,10 +60,18 @@ export default function DeductionsPage() {
 	}
 
 	const sup = findSupplier(lot.supplierId);
-	const p = computePayable(lot);
+	const activeLot = { ...lot, moisturePct, fmPct, aflatoxinPpb };
+	const p = computePayable(activeLot);
+
+	const isMoistureHigh = moisturePct > 20;
+	const isMoistureBlocked = isMoistureHigh && !reasonCode.trim();
 
 	function handlePost() {
 		if (!lot) return;
+		if (isMoistureBlocked) {
+			toast.error("Moisture exceeds 20%. Reason code / override required.");
+			return;
+		}
 		postDeductions(lot.id);
 		toast.success(`Lot ${lot.id} created — ${fmtKES(p.netPayable)} invoiced to ${sup?.name ?? ""}`);
 		navigate(`/lots/${lot.id}`);
@@ -67,6 +80,7 @@ export default function DeductionsPage() {
 	return (
 		<div>
 			<PageHeader title="Deductions & payable engine" />
+			<p className="mb-4 -mt-3 text-sm text-muted-foreground">{lot.ticketNo} · {sup?.name}</p>
 
 			{intakeLots.length > 1 && (
 				<div className="mb-4 flex flex-wrap items-center gap-1.5">
@@ -81,11 +95,15 @@ export default function DeductionsPage() {
 
 			<SectionCard title="Quality inspection">
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					<FieldWrapper label="Moisture %" required>
-						<Input type="number" defaultValue={lot.moisturePct ?? 13.5} />
+					<FieldWrapper label="Step 2: Moisture %" required>
+						<Input
+							type="number"
+							value={moisturePct}
+							onChange={(e) => setMoisturePct(Number(e.target.value) || 0)}
+						/>
 					</FieldWrapper>
-					<FieldWrapper label="Foreign matter %" required>
-						<Select defaultValue={String(lot.fmPct ?? 0)}>
+					<FieldWrapper label="Step 3: Foreign matter %" required>
+						<Select value={String(fmPct)} onValueChange={(v) => setFmPct(Number(v))}>
 							<SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
 							<SelectContent>
 								{["0", "0.5", "1", "2", "3", "5"].map((v) => (
@@ -95,23 +113,44 @@ export default function DeductionsPage() {
 						</Select>
 					</FieldWrapper>
 					<FieldWrapper label="Aflatoxin ppb" required>
-						<Input type="number" defaultValue={lot.aflatoxinPpb ?? 0} />
+						<Input
+							type="number"
+							value={aflatoxinPpb}
+							onChange={(e) => setAflatoxinPpb(Number(e.target.value) || 0)}
+						/>
+					</FieldWrapper>
+				</div>
+				<div className="mt-4">
+					<FieldWrapper label="Reason code (required if wet buy > 20% or FM judgement)" span>
+						<Input
+							value={reasonCode}
+							onChange={(e) => setReasonCode(e.target.value)}
+							placeholder="Enter reason code or override justification"
+						/>
 					</FieldWrapper>
 				</div>
 			</SectionCard>
 
+			{isMoistureHigh && (
+				<div className="mt-4">
+					<Banner type="warn">
+						⚠️ Moisture at {moisturePct}% exceeds the 20% limit (Wet buy block). Reason code / override required to proceed.
+					</Banner>
+				</div>
+			)}
+
 			<div className="mt-4">
 				<SectionCard title="Deduction breakdown">
-					<CalcRow label="Gross weight" value={fmtKg(lot.grossKg ?? 0)} />
+					<CalcRow label="Step 1: Weight — Gross weight" value={fmtKg(lot.grossKg ?? 0)} />
 					<CalcRow label="Tare weight" value={`− ${fmtKg(lot.tareKg ?? 0)}`} neg />
 					<CalcRow label="Net weight" value={fmtKg(p.netKg)} sub="Gross minus tare" />
 					<CalcRow
-						label="Moisture deduction" value={`− ${fmtKg(p.moistureDeductionKg)}`} neg
-						sub={p.moistureExcess > 0 ? `${p.moisturePct}% recorded: ${p.moistureExcess.toFixed(1)}% excess → Bag size ${p.bagSize.toFixed(1)} kg → Moisture-adjusted ${fmtKg(p.moistureAdjustedKg)}` : `${p.moisturePct}% recorded — at or below 13.5% standard, no deduction`}
+						label="Step 2: Moisture deduction" value={`− ${fmtKg(p.moistureDeductionKg)}`} neg
+						sub={p.moistureExcess > 0 ? `${moisturePct}% recorded: ${p.moistureExcess.toFixed(1)}% excess → Bag size ${p.bagSize.toFixed(1)} kg → Moisture-adjusted ${fmtKg(p.moistureAdjustedKg)}` : `${moisturePct}% recorded — at or below 13.5% standard, no deduction`}
 					/>
 					<CalcRow
-						label="Foreign matter deduction" value={`− ${fmtKg(p.fmDeductionKg)}`} neg
-						sub={p.fmDeductedPct > 0 ? `${p.fmPct}% recorded: ${p.fmDeductedPct.toFixed(1)}% deducted` : `${p.fmPct}% recorded — within 0.5% allowance, no deduction`}
+						label="Step 3: Foreign matter deduction" value={`− ${fmtKg(p.fmDeductionKg)}`} neg
+						sub={p.fmDeductedPct > 0 ? `${fmPct}% recorded: ${p.fmDeductedPct.toFixed(1)}% deducted` : `${fmPct}% recorded — within 0.5% allowance, no deduction`}
 					/>
 					<CalcRow label="Accepted net quantity" value={fmtKg(p.acceptedNetKg)} total sub="This is what lands in the stock ledger — not the gross weight" />
 				</SectionCard>
@@ -121,7 +160,7 @@ export default function DeductionsPage() {
 				<SectionCard title="Payable value">
 					<CalcRow label="Reference rate" value={`${fmtKES(p.refRatePerKg)} /kg`} />
 					<CalcRow label="Gross value" value={fmtKES(p.grossValue)} sub={`${fmtKg(p.acceptedNetKg)} × rate`} />
-					<CalcRow label="Bagging deduction" value={`− ${fmtKES(p.baggingDeduction)}`} neg sub={`${lot.bags} bags × KES 25`} />
+					<CalcRow label="Bagging deduction" value={`− ${fmtKES(p.baggingDeduction)}`} neg sub={`${lot.bags ?? 0} bags × KES 25`} />
 					<CalcRow label="Aflatoxin test fee" value={`− ${fmtKES(p.aflatoxinTestFee)}`} neg />
 					<CalcRow label="Net payable to supplier" value={fmtKES(p.netPayable)} total />
 				</SectionCard>
@@ -142,9 +181,10 @@ export default function DeductionsPage() {
 			</div>
 
 			<div className="mt-6 flex items-center gap-2">
-				<Button disabled={!p.aflatoxinPass} onClick={handlePost}>Post net invoice & create lot</Button>
+				<Button disabled={!p.aflatoxinPass || isMoistureBlocked} onClick={handlePost}>Post net invoice & create lot</Button>
 				<Button variant="ghost" onClick={() => navigate("/lots")}>Back to lots</Button>
 			</div>
 		</div>
 	);
 }
+

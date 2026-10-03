@@ -398,13 +398,13 @@ function init_holec_trading_engine() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
                 frappe.db.get_list('Supplier', {
-                    filters: { supplier_group: ['in', ['Transporter', 'Transporters', 'Farmer', 'Farmers', 'CESS', 'Cess', 'Casual Labour']], custom_status: 'Approved' },
-                    fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id'],
+                    filters: { supplier_group: ['in', ['Transporter', 'Transporters', 'Farmer', 'Farmers', 'CESS', 'Cess', 'Casual Labour']] },
+                    fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id', SUPPLIER_STATUS_FIELD, 'owner'],
                     limit: 500
                 }),
                 frappe.db.get_list('Customer', {
-                    filters: { customer_group: 'Holec Trading', custom_approval_status: 'Approved' },
-                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled'],
+                    filters: { customer_group: 'Holec Trading' },
+                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled', CUSTOMER_STATUS_FIELD, 'owner'],
                     limit: 500
                 }),
                 frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc', limit: 500 }),
@@ -491,13 +491,13 @@ function init_holec_trading_engine() {
 
         LIVE_STORE.suppliers.forEach(s => {
             const r = sup[s.name];
-            s.approval_status = (r && r[SUPPLIER_STATUS_FIELD]) || 'Draft';
-            s.owner = r && r.owner;
+            s.approval_status = (r && r[SUPPLIER_STATUS_FIELD]) || s[SUPPLIER_STATUS_FIELD] || 'Draft';
+            s.owner = (r && r.owner) || s.owner;
         });
         LIVE_STORE.customers.forEach(c => {
             const r = cus[c.name];
-            c.approval_status = (r && r[CUSTOMER_STATUS_FIELD]) || 'Draft';
-            c.owner = r && r.owner;
+            c.approval_status = (r && r[CUSTOMER_STATUS_FIELD]) || c[CUSTOMER_STATUS_FIELD] || 'Draft';
+            c.owner = (r && r.owner) || c.owner;
         });
         LIVE_STORE.lots.forEach(l => {
             const r = tkt[l.name] || {};
@@ -3600,11 +3600,11 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
-                    ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'select', value: l.foreign_matter_ != null ? String(l.foreign_matter_) : '0', options: withValue(['0', '0.5', '1', '2', '3', '5'], l.foreign_matter_ != null ? String(l.foreign_matter_) : '0'), required: true })}
+                    ${field({ label: 'Step 2: Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
+                    ${field({ label: 'Step 3: Foreign Matter % *', id: 'f-fm', type: 'select', value: l.foreign_matter_ != null ? String(l.foreign_matter_) : '0', options: withValue(['0', '0.5', '1', '2', '3', '5'], l.foreign_matter_ != null ? String(l.foreign_matter_) : '0'), required: true })}
                     ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
                 </div>
-                ${field({ label: 'Reason Code (if foreign matter judgement or wet buy)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
+                ${field({ label: 'Reason Code (required if wet buy > 20% or FM judgement)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
             </div>
 
             <div id="moisture-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
@@ -3612,11 +3612,11 @@ function init_holec_trading_engine() {
 
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
-                ${row('Gross Weight', null, 'd-gross')}
+                ${row('Step 1: Gross Weight', null, 'd-gross')}
                 ${row('Tare Weight', null, 'd-tare', '#e53e3e')}
                 ${row('Net Weight', 'Gross minus tare', 'd-net')}
-                ${row('Moisture Deduction', '', 'd-moist', '#e53e3e')}
-                ${row('Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
+                ${row('Step 2: Moisture Deduction', '', 'd-moist', '#e53e3e')}
+                ${row('Step 3: Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:14px;">
                     <div>
                         <strong style="color:#1a202c;display:block;">Accepted Net Quantity</strong>
@@ -3705,10 +3705,16 @@ function init_holec_trading_engine() {
             const moisture = $('#f-moisture').val();
             const fm = $('#f-fm').val();
             const afla = $('#f-afla').val();
+            const reason = $('#f-reason').val() || '';
 
             if (rate <= 0) { frappe.msgprint(__('Please enter a valid Reference Rate.')); return; }
             if (moisture === '' || fm === '' || afla === '') {
                 frappe.msgprint(__('Please fill all mandatory Quality Inspection fields (Moisture, Foreign Matter, Aflatoxin).'));
+                return;
+            }
+
+            if (flt(moisture) > 20 && !reason.trim()) {
+                frappe.msgprint(__('Moisture at {0}% exceeds 20% limit. Reason code / override is required to proceed.', [moisture]));
                 return;
             }
 
