@@ -3599,8 +3599,8 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Step 2: Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
-                    ${field({ label: 'Step 3: Foreign Matter % *', id: 'f-fm', type: 'select', value: l.foreign_matter_ != null ? String(l.foreign_matter_) : '0', options: withValue(['0', '0.5', '1', '2', '3', '5'], l.foreign_matter_ != null ? String(l.foreign_matter_) : '0'), required: true })}
+                    ${field({ label: 'Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
+                    ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'select', value: l.foreign_matter_ != null ? String(l.foreign_matter_) : '0', options: withValue(['0', '0.5', '1', '2', '3', '5'], l.foreign_matter_ != null ? String(l.foreign_matter_) : '0'), required: true })}
                     ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
                 </div>
                 ${field({ label: 'Reason Code (required if wet buy > 20% or FM judgement)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
@@ -3611,11 +3611,11 @@ function init_holec_trading_engine() {
 
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
-                ${row('Step 1: Gross Weight', null, 'd-gross')}
+                ${row('Gross Weight', null, 'd-gross')}
                 ${row('Tare Weight', null, 'd-tare', '#e53e3e')}
                 ${row('Net Weight', 'Gross minus tare', 'd-net')}
-                ${row('Step 2: Moisture Deduction', '', 'd-moist', '#e53e3e')}
-                ${row('Step 3: Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
+                ${row('Moisture Deduction', '', 'd-moist', '#e53e3e')}
+                ${row('Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:14px;">
                     <div>
                         <strong style="color:#1a202c;display:block;">Accepted Net Quantity</strong>
