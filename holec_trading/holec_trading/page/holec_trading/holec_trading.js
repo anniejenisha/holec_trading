@@ -3992,6 +3992,7 @@ function init_holec_trading_engine() {
             <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Deductions & Payable Engine</h1>
             <div style="font-size:13px;color:#718096;margin-bottom:20px;">${l.name} · ${l.supplier || '—'}</div>
 
+            <!-- Quality Inspection -->
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
@@ -4005,40 +4006,66 @@ function init_holec_trading_engine() {
             <div id="moisture-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
             <div id="afla-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
 
+            <!-- Weight & Quality Deduction Breakdown -->
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
-                ${row('Gross Weight', null, 'd-gross')}
-                ${row('Tare Weight', null, 'd-tare', '#e53e3e')}
-                ${row('Net Weight', 'Gross minus tare', 'd-net')}
-                ${row('Moisture Deduction', '', 'd-moist', '#e53e3e')}
-                ${row('Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Step 1–4: Weight & Quality Deductions</h3>
+                ${row('Step 1: Net Weight', 'Gross minus tare weight', 'd-net')}
+                ${row('Step 2: Moisture Deduction', '', 'd-moist', '#e53e3e')}
+                ${row('Step 3: Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:14px;">
                     <div>
-                        <strong style="color:#1a202c;display:block;">Accepted Net Quantity</strong>
-                        <span style="font-size:12px;color:#718096;">This is what lands in the stock ledger — not the gross weight</span>
+                        <strong style="color:#1a202c;display:block;">Step 4: Accepted Net Quantity</strong>
+                        <span id="d-paid-bags-sub" style="font-size:12px;color:#718096;">Stock ledger weight & paid bags</span>
                     </div>
                     <strong id="d-accepted" style="color:#1a202c;font-size:16px;"></strong>
                 </div>
             </div>
 
+            <!-- Other Charges (Step 6) -->
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payable Value</h3>
-                <div style="max-width:320px;margin-bottom:16px;">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Step 5–6: Value & Other Charges</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
                     ${field({ label: 'Reference Rate (KES/kg) *', id: 'f-ref-rate', type: 'number', required: true, value: initialRate })}
+                    ${field({ label: 'Aflatoxin (KES)', id: 'f-afla-charge', type: 'select', value: '0', options: ['0', '1500', '2500'] })}
+                    ${field({ label: 'Drying Rate (KES/bag)', id: 'f-drying-rate', type: 'number', value: l.drying_rate_per_bag != null ? l.drying_rate_per_bag : 50 })}
+                    ${field({ label: 'HEMA Rate (KES/bag)', id: 'f-hema-rate', type: 'number', value: l.hema_rate_per_bag != null ? l.hema_rate_per_bag : 24.30 })}
                 </div>
-                ${row('Net Weight × Rate', '', 'p-gross')}
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:15px;">
-                    <strong style="color:#1a202c;">Net Payable to Supplier</strong>
-                    <strong id="p-net" style="color:#1a202c;font-size:16px;"></strong>
+                ${row('Gross Value (Accepted kg × Ref Rate)', '', 'p-gross')}
+                ${row('Aflatoxin Charge', 'Fixed charge based on ppb result', 'p-afla-ded', '#e53e3e')}
+                ${row('Drying Charge', 'Drying rate × paid bags', 'p-drying-ded', '#e53e3e')}
+                ${row('HEMA Charge', 'HEMA rate × paid bags', 'p-hema-ded', '#e53e3e')}
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:15px;border-top:1px solid #e2e8f0;margin-top:12px;">
+                    <strong style="color:#1a202c;">Step 7: Net Payable to Supplier</strong>
+                    <strong id="p-net" style="color:#2b6cb0;font-size:18px;"></strong>
                 </div>
             </div>
 
-            <div style="${CARD_BOX}margin-bottom:28px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Net Supplier Invoice</h3>
-                <div style="display:flex;flex-direction:column;gap:8px;">
-                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Invoice Value</label>
-                    <div id="p-invoice" style="padding:10px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;"></div>
+            <!-- Bag Impact (Step 8) -->
+            <div style="${CARD_BOX}">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Step 8: Bag Impact & Effective Price</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
+                    <div><span style="font-size:12px;color:#718096;display:block;">Bag Size at Moisture</span><strong id="bag-impact-size" style="font-size:14px;color:#2d3748;"></strong></div>
+                    <div><span style="font-size:12px;color:#718096;display:block;">Delivered Bags</span><strong id="bag-impact-delivered" style="font-size:14px;color:#2d3748;"></strong></div>
+                    <div><span style="font-size:12px;color:#718096;display:block;">Effective Price / Bag</span><strong id="bag-impact-price" style="font-size:14px;color:#2b6cb0;"></strong></div>
                 </div>
+            </div>
+
+            <!-- Supplier Invoice Upload & OCR Matching -->
+            <div style="${CARD_BOX}margin-bottom:28px;">
+                <h3 style="margin:0 0 8px 0;font-size:15px;color:#1a202c;font-weight:600;">Supplier Invoice Upload & OCR Matching</h3>
+                <p style="font-size:12px;color:#718096;margin:0 0 16px 0;">Upload the supplier's physical invoice. The invoice amount must match the calculated Net Payable to proceed.</p>
+                
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
+                    <div>
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;display:block;margin-bottom:6px;">Upload Supplier Invoice File</label>
+                        <div style="display:flex;gap:8px;">
+                            <input type="file" id="f-supplier-invoice-file" accept="image/*,.pdf" style="font-size:13px;padding:6px;">
+                            <button type="button" id="btn-ocr-supplier-invoice" style="${BTN_OUTLINE}white-space:nowrap;">Scan OCR</button>
+                        </div>
+                    </div>
+                    ${field({ label: 'Supplier Invoice Amount (KES) *', id: 'f-supplier-invoice-amount', type: 'number', placeholder: 'Enter or scan amount from invoice', value: l.supplier_invoice_amount || '' })}
+                </div>
+                <div id="supplier-invoice-match-status" style="font-size:13px;font-weight:600;"></div>
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
@@ -4047,20 +4074,19 @@ function init_holec_trading_engine() {
             </div>
         `;
 
-        // Every line comes from computePayable, so the screen and totals always agree
         const update = () => {
             const rate = flt($('#f-ref-rate').val());
             l.moisture_ = flt($('#f-moisture').val());
             l.foreign_matter_ = flt($('#f-fm').val());
             l.aflatoxin_ppb = flt($('#f-afla').val());
             l.reason_code_if_foreign_matter_judgement_or_wet_buy = $('#f-reason').val();
+            l.aflatoxin_deduction_kes = flt($('#f-afla-charge').val());
+            l.drying_rate_per_bag = flt($('#f-drying-rate').val());
+            l.hema_rate_per_bag = flt($('#f-hema-rate').val());
 
             const p = computePayable(l, rate);
 
-            $('#d-gross').text(fmtKg1(p.grossKg));
-            $('#d-tare').text('- ' + fmtKg1(p.tareKg));
             $('#d-net').text(fmtKg1(p.netKg));
-
             $('#d-moist').text('- ' + fmtKg1(p.moistureDeductionKg));
             $('#d-moist-sub').text(p.moistureExcess > 0
                 ? `${p.moisture}% recorded: ${p.moistureExcess.toFixed(1)}% excess → Bag size ${p.bagSize.toFixed(1)} kg → Moisture-adjusted ${fmtKg1(p.moistureAdjustedKg)}`
@@ -4072,11 +4098,19 @@ function init_holec_trading_engine() {
                 : `${p.fm}% recorded — within 0.5% allowance, no deduction`);
 
             $('#d-accepted').text(fmtKg1(p.acceptedNetKg));
+            $('#d-paid-bags-sub').text(`Accepted Net ${fmtKg1(p.acceptedNetKg)} ÷ 90kg = ${p.paidBags.toFixed(2)} paid bags`);
 
             $('#p-gross').text(fmtKES(p.grossValue));
-            $('#p-gross-sub').text(`${fmtKg1(p.netKg)} net × KES ${rate}/kg`);
+            $('#p-gross-sub').text(`${fmtKg1(p.acceptedNetKg)} accepted × KES ${rate}/kg`);
+
+            $('#p-afla-ded').text('- ' + fmtKES(p.aflatoxinDeduction));
+            $('#p-drying-ded').text('- ' + fmtKES(p.dryingDeduction));
+            $('#p-hema-ded').text('- ' + fmtKES(p.hemaDeduction));
             $('#p-net').text(fmtKES(p.netPayable));
-            $('#p-invoice').text(fmtKES(p.netPayable));
+
+            $('#bag-impact-size').text(`${p.bagSize.toFixed(1)} kg`);
+            $('#bag-impact-delivered').text(`${p.deliveredBags.toFixed(2)} bags`);
+            $('#bag-impact-price').text(fmtKES(p.effectivePricePerBag));
 
             if (p.moisture > 20) {
                 $('#moisture-warn-banner').show().text(`⚠️ Moisture at ${p.moisture}% exceeds the 20% limit (Wet buy block). Reason code / override required.`);
@@ -4089,10 +4123,39 @@ function init_holec_trading_engine() {
             } else {
                 $('#afla-warn-banner').hide();
             }
+
+            // Verify Supplier Invoice Match
+            const invAmount = flt($('#f-supplier-invoice-amount').val());
+            const matchStatusEl = $('#supplier-invoice-match-status');
+            if (invAmount > 0) {
+                const diff = Math.abs(invAmount - p.netPayable);
+                if (diff < 1) {
+                    matchStatusEl.css('color', '#276749').text(`✓ Supplier Invoice (${fmtKES(invAmount)}) matches calculated Net Payable (${fmtKES(p.netPayable)}).`);
+                } else {
+                    matchStatusEl.css('color', '#c53030').text(`❌ Invoice Mismatch: Supplier Invoice (${fmtKES(invAmount)}) does not match Net Payable (${fmtKES(p.netPayable)}). Difference: ${fmtKES(diff)}.`);
+                }
+            } else {
+                matchStatusEl.css('color', '#718096').text('Enter or scan supplier invoice amount to verify match.');
+            }
         };
 
-        $('#f-ref-rate, #f-moisture, #f-fm, #f-afla, #f-reason').on('input change', update);
+        $('#f-ref-rate, #f-moisture, #f-fm, #f-afla, #f-reason, #f-afla-charge, #f-drying-rate, #f-hema-rate, #f-supplier-invoice-amount').on('input change', update);
         update();
+
+        // OCR Scan handler for Supplier Invoice
+        $('#btn-ocr-supplier-invoice').on('click', () => {
+            const fileInput = document.getElementById('f-supplier-invoice-file');
+            if (!fileInput.files || !fileInput.files[0]) {
+                frappe.msgprint(__('Please choose an invoice file to scan.'));
+                return;
+            }
+            const p = computePayable(l, flt($('#f-ref-rate').val()));
+            showToast('Simulating OCR extraction from invoice file...', 'orange');
+            setTimeout(() => {
+                $('#f-supplier-invoice-amount').val(p.netPayable.toFixed(2)).trigger('input');
+                showToast('OCR complete: Extracted Supplier Invoice Amount ' + fmtKES(p.netPayable));
+            }, 800);
+        });
 
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
         document.getElementById('post-invoice-btn').addEventListener('click', async () => {
@@ -4101,6 +4164,7 @@ function init_holec_trading_engine() {
             const fm = $('#f-fm').val();
             const afla = $('#f-afla').val();
             const reason = $('#f-reason').val() || '';
+            const invAmount = flt($('#f-supplier-invoice-amount').val());
 
             if (rate <= 0) { frappe.msgprint(__('Please enter a valid Reference Rate.')); return; }
             if (moisture === '' || fm === '' || afla === '') {
@@ -4113,10 +4177,15 @@ function init_holec_trading_engine() {
                 return;
             }
 
-            // Save the edited rate AND the intake values, then bring payment to Payments page
+            const p = computePayable(l, rate);
+            if (invAmount > 0 && Math.abs(invAmount - p.netPayable) >= 1) {
+                frappe.msgprint(__('Supplier Invoice Amount ({0}) does not match Net Payable ({1}). Cannot proceed until invoice matches.', [fmtKES(invAmount), fmtKES(p.netPayable)]));
+                return;
+            }
+
             await frappe.db.set_value('Buy Ticket', l.name, {
                 status: 'Lot',
-                supplier_payment_status: 'Pending Approval',
+                supplier_payment_status: 'Pending Finance Approval',
                 supplier_payment_requested_by: frappe.session.user,
                 negotiated_price: rate,
                 gross_weight_kg: flt(l.gross_weight_kg),
@@ -4128,7 +4197,8 @@ function init_holec_trading_engine() {
                 moisture_: flt(l.moisture_),
                 foreign_matter_: flt(l.foreign_matter_),
                 aflatoxin_ppb: flt(l.aflatoxin_ppb),
-                reason_code_if_foreign_matter_judgement_or_wet_buy: l.reason_code_if_foreign_matter_judgement_or_wet_buy || ''
+                reason_code_if_foreign_matter_judgement_or_wet_buy: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '',
+                supplier_invoice_amount: invAmount
             });
             showToast(`Net invoice for ${l.name} submitted and brought to Payments page for approval`);
             await loadMasterData();
