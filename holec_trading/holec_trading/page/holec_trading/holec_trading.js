@@ -441,7 +441,8 @@ function init_holec_trading_engine() {
                         'county', 'reason_code_if_foreign_matter_judgement_or_wet_buy',
                         'haulage_kes', 'cess_kes', 'offloading_kes', 'delivered_quantity_kg',
                         'sell_rate', 'invoice_number', 'delivery_gross_kg', 'delivery_tare_kg',
-                        'transport_paid'
+                        'transport_paid', 'transport_payment_status', 'transport_payment_mode', 'transport_payment_ref', 'transport_payment_requested_by', 'transport_payment_approved_by',
+                        'supplier_paid', 'supplier_payment_status', 'supplier_payment_mode', 'supplier_payment_ref', 'supplier_payment_requested_by', 'supplier_finance_approved_by', 'supplier_manager_approved_by', 'supplier_payment_approved_by', 'supplier_payment_entry'
                     ],
                     order_by: 'creation desc',
                     limit: 500
@@ -4440,9 +4441,11 @@ function init_holec_trading_engine() {
                 return;
             }
 
-            const btn = document.getElementById('si-submit-btn');
-            btn.disabled = true;
-            btn.textContent = 'Submitting Invoice...';
+            const btn = document.getElementById('submit-etims-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Submitting Invoice...';
+            }
 
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.submit_sale',
@@ -4459,14 +4462,16 @@ function init_holec_trading_engine() {
                         showToast(`Invoice ${realInvoiceNo} transmitted to eTIMS and ${l.name} moved to Invoiced`);
                         await loadMasterData();
                         navigate('lots', { id: l.name });
-                    } else {
+                    } else if (btn) {
                         btn.disabled = false;
                         btn.textContent = 'Submit Invoice & Transmit to eTIMS';
                     }
                 },
                 error: (err) => {
-                    btn.disabled = false;
-                    btn.textContent = 'Submit Invoice & Transmit to eTIMS';
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = 'Submit Invoice & Transmit to eTIMS';
+                    }
                 }
             });
         });
