@@ -767,11 +767,12 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
             except Exception:
                 pass
 
-    if action == "submit":
-        if not mode_of_payment:
-            frappe.throw("Please select a Mode of Payment.")
+    if mode_of_payment:
         t.db_set("supplier_payment_mode", mode_of_payment)
+    if reference_no is not None:
         t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
+
+    if action == "submit":
         t.db_set("supplier_payment_requested_by", user)
         t.db_set("supplier_payment_status", "Pending Finance Approval")
         frappe.db.commit()
@@ -819,6 +820,10 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
 
     frappe.has_permission("Payment Entry", "create", throw=True)
     t = frappe.get_doc("Buy Ticket", ticket)
+    if mode_of_payment:
+        t.db_set("supplier_payment_mode", mode_of_payment)
+    if reference_no is not None:
+        t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
 
     if not t.supplier:
         frappe.throw("This ticket has no supplier.")

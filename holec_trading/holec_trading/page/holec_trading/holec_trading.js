@@ -3375,12 +3375,8 @@ function init_holec_trading_engine() {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${readonlyBox('Reference Rate', `KES ${p.refRate}/kg`)}
                     ${readonlyBox('Net Payable to Supplier', fmtKES(amount), true)}
-                    ${editable
-                ? field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })
-                : readonlyBox('Mode of Payment', escHtml(l.supplier_payment_mode || 'Bank Transfer'))}
-                    ${editable
-                ? field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || '' })
-                : readonlyBox('Reference No', escHtml(l.supplier_payment_ref || l.name))}
+                    ${field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
+                    ${field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || l.name })}
                 </div>
             </div>
 
@@ -3431,10 +3427,12 @@ function init_holec_trading_engine() {
         if (finApproveBtn) finApproveBtn.addEventListener('click', async () => {
             const ok = await confirmAsync(__('Grant 1st Stage approval (Holec Finance) for {0} to {1}?', [fmtKES(amount), supplierLabel]));
             if (!ok) return;
+            const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
+            const refNo = ($('#f-sp-ref').val() || l.supplier_payment_ref || l.name).trim();
             finApproveBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'finance_approve' },
+                args: { ticket: l.name, action: 'finance_approve', mode_of_payment: rail, reference_no: refNo },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3452,10 +3450,12 @@ function init_holec_trading_engine() {
             if (blockedByMakerChecker(l.supplier_payment_requested_by, 'supplier payment request')) return;
             const ok = await confirmAsync(__('Grant Final Approval (Holec Manager) for payment of {0} to {1}?', [fmtKES(amount), supplierLabel]));
             if (!ok) return;
+            const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
+            const refNo = ($('#f-sp-ref').val() || l.supplier_payment_ref || l.name).trim();
             mgrApproveBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'manager_approve' },
+                args: { ticket: l.name, action: 'manager_approve', mode_of_payment: rail, reference_no: refNo },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3495,14 +3495,17 @@ function init_holec_trading_engine() {
             const ok = await confirmAsync(__('Send payment transaction of {0} to Bank API for {1}?', [fmtKES(amount), supplierLabel]));
             if (!ok) return;
 
+            const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
+            const refNo = ($('#f-sp-ref').val() || l.supplier_payment_ref || l.name).trim();
+
             dispatchBtn.disabled = true;
             dispatchBtn.textContent = 'Sending to Bank...';
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.pay_supplier',
                 args: {
                     ticket: l.name,
-                    mode_of_payment: l.supplier_payment_mode || 'Bank Transfer',
-                    reference_no: (l.supplier_payment_ref || '').trim(),
+                    mode_of_payment: rail,
+                    reference_no: refNo,
                     reference_date: frappe.datetime.get_today()
                 },
                 freeze: true,
@@ -3596,14 +3599,10 @@ function init_holec_trading_engine() {
                     ${readonlyBox('Haulage', fmtKES(haulage))}
                     ${readonlyBox('Cess', fmtKES(cess))}
                     ${readonlyBox('Total payable', fmtKES(amount), true)}
-                    ${editable
-                ? field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })
-                : readonlyBox('Mode of Payment', escHtml(l.transport_payment_mode || '—'))}
+                    ${field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-                    ${editable
-                ? field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)', value: l.transport_payment_ref || '' })
-                : readonlyBox('Reference No', escHtml(l.transport_payment_ref || l.name))}
+                    ${field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)', value: l.transport_payment_ref || l.name })}
                     ${editable
                 ? field({ label: 'Reference Date', id: 'f-tp-date', type: 'date', value: l.transport_payment_date || frappe.datetime.get_today() })
                 : readonlyBox('Reference Date', escHtml(savedDate))}
