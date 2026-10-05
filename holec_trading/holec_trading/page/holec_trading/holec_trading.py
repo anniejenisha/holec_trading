@@ -960,6 +960,11 @@ def submit_sale(ticket, customer, sell_rate):
     if not customer:
         frappe.throw("Customer is required to submit invoice.")
 
+    cust_doc = frappe.get_doc("Customer", customer)
+    cust_status = cust_doc.get("custom_approval_status") or cust_doc.get("approval_status") or "Draft"
+    if cust_status != "Approved":
+        frappe.throw(f"Customer '{cust_doc.customer_name or customer}' is not approved. Only approved customers can be selected when selling.")
+
     sell_rate = flt(sell_rate)
     if sell_rate <= 0:
         frappe.throw("Please enter a valid Sell Rate.")

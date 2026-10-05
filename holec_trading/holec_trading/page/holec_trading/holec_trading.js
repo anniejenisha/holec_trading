@@ -1030,7 +1030,6 @@ function init_holec_trading_engine() {
                     <td style="padding:14px 16px;color:#2d3748;font-weight:500;">${escHtml(c.customer_name || '—')}</td>
                     <td style="padding:14px 16px;color:#718096;">${escHtml(c.customer_group || '—')}</td>
                     <td style="padding:14px 16px;color:#2d3748;text-align:right;">${creditLimitStr}</td>
-                    <td style="padding:14px 16px;color:#718096;">${escHtml(c.payment_terms || '—')}</td>
                     <td style="padding:14px 20px;">${approvalBadge(st)}</td>
                     <td style="padding:14px 20px;text-align:right;white-space:nowrap;">
                         ${(st === 'Draft' || st === 'Rejected') && submitter ? `<button type="button" class="cus-submit" data-id="${escHtml(c.name)}" style="${BTN_SM_SUBMIT}margin-right:6px;">Submit</button>` : ''}
@@ -1070,13 +1069,12 @@ function init_holec_trading_engine() {
                             <th style="padding:12px 16px;">Name ↕</th>
                             <th style="padding:12px 16px;">Group ↕</th>
                             <th style="padding:12px 16px;text-align:right;">Credit Limit ↕</th>
-                            <th style="padding:12px 16px;">Terms</th>
                             <th style="padding:12px 20px;">Status</th>
                             <th style="padding:12px 20px;text-align:right;">Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows || `<tr><td colspan="7" style="padding:30px;text-align:center;color:#718096;">No customers found.</td></tr>`}
+                        ${rows || `<tr><td colspan="6" style="padding:30px;text-align:center;color:#718096;">No customers found.</td></tr>`}
                     </tbody>
                 </table>
             </div>
@@ -1166,6 +1164,7 @@ function init_holec_trading_engine() {
             const ctRows = (doc.custom_holec_contacts || doc.holec_contacts || []).map((r, i) => `
                 <tr style="border-bottom:1px solid #edf2f7;">
                     <td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.contact_name || r.name || '')}</td><td style="${TD}">${escHtml(r.role || '')}</td>
+                    <td style="${TD}">${escHtml(r.area || '')}</td>
                     <td style="${TD}">${escHtml(r.phone || '')}</td><td style="${TD}">${escHtml(r.whatsapp || '')}</td><td style="${TD}">${escHtml(r.email || '')}</td>
                     <td style="${TD}">${cint(r.is_primary) ? 'Yes' : ''}</td>
                 </tr>`).join('');
@@ -1219,9 +1218,9 @@ function init_holec_trading_engine() {
                     <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
                         <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px;">
                             <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                                <th style="${TH}width:50px;">No.</th><th style="${TH}">Name</th><th style="${TH}">Role</th><th style="${TH}">Phone</th><th style="${TH}">WhatsApp</th><th style="${TH}">Email</th><th style="${TH}">Primary</th>
+                                <th style="${TH}width:50px;">No.</th><th style="${TH}">Name</th><th style="${TH}">Role</th><th style="${TH}">Area</th><th style="${TH}">Phone</th><th style="${TH}">WhatsApp</th><th style="${TH}">Email</th><th style="${TH}">Primary</th>
                             </tr></thead>
-                            <tbody>${ctRows || `<tr><td colspan="7" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
+                            <tbody>${ctRows || `<tr><td colspan="8" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
                         </table>
                     </div>
                 </div>
@@ -1229,9 +1228,7 @@ function init_holec_trading_engine() {
                 <div style="${CARD_BOX}">
                     <div style="${SEC}">COMMERCIAL TERMS & QUALITY SPEC</div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                        ${kv('Payment Terms', doc.payment_terms)}
                         ${kv('Offloading Borne By', doc.custom_offloading_borne_by)}
-                        <div></div>
                         ${kv('Moisture Max (%)', doc.custom_moisture_max)}
                         ${kv('Foreign Matter Max (%)', doc.custom_foreign_matter_max)}
                         ${kv('Aflatoxin Max (ppb)', doc.custom_aflatoxin_max)}
@@ -1361,7 +1358,7 @@ function init_holec_trading_engine() {
             nameTouched: false,
             pinDuplicate: false,
             deliveryPoints: [{ name: '', address: '' }],
-            contacts: [{ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: true }]
+            contacts: [{ name: '', role: '', area: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: true }]
         };
 
         // ---------- STYLE HELPERS ----------
@@ -1381,7 +1378,7 @@ function init_holec_trading_engine() {
             <div style="display:flex;flex-direction:column;gap:8px;">
                 <label for="${id}" style="${LABEL}">${label}${required ? req : ''}${optional ? opt : ''}</label>
                 <input type="${type}" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}"
-                    ${step ? `step="${step}"` : ''} ${readonly ? 'readonly' : ''} style="${INPUT}${readonly ? 'background:#f7fafc;' : ''}">
+                    ${step ? `step="${step}"` : ''} ${readonly ? 'readonly' : ''} style="${INPUT}${readonly ? 'background:#edf2f7;color:#4a5568;cursor:not-allowed;' : ''}">
                 ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
             </div>`;
 
@@ -1418,10 +1415,10 @@ function init_holec_trading_engine() {
 
             <div style="${CARD}">
                 <div style="${SECTION}margin-bottom:16px;">KRA VERIFICATION</div>
-                <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', true)}</div>
+                <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', false)}</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled on certificate upload', hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
-                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled on certificate upload or edit manually' })}
+                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled via OCR or enter manually', hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
+                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled via OCR or enter manually' })}
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="${LABEL}">PIN Status</label>
                         <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
@@ -1432,7 +1429,7 @@ function init_holec_trading_engine() {
             <div style="${CARD}">
                 <div style="${SECTION}margin-bottom:16px;">CUSTOMER DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                    ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Enter customer ID' })}
+                    ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Autogenerated...', hint: 'Autogenerated unique Customer ID (non-editable)', readonly: true })}
                     ${fld({ label: 'Customer Name', id: 'nc-name', required: true, placeholder: 'Enter customer name' })}
                     ${dropzone('nc-cr12', 'Business Registration / CR12', false)}
                 </div>
@@ -1459,11 +1456,12 @@ function init_holec_trading_engine() {
                 <div style="${SECTION}margin-bottom:2px;">CONTACT PERSONS</div>
                 <div style="${HELP}margin-bottom:14px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
                 <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:1000px;">
                         <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
                             <th style="${TH}width:50px;">No.</th>
                             <th style="${TH}">Name</th>
                             <th style="${TH}">Role</th>
+                            <th style="${TH}">Area</th>
                             <th style="${TH}">Phone</th>
                             <th style="${TH}width:90px;text-align:center;">Same as WA</th>
                             <th style="${TH}">WhatsApp</th>
@@ -1478,16 +1476,9 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="${CARD}">
-                <div style="${SECTION}margin-bottom:16px;">COMMERCIAL TERMS</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
-                    ${selectFld({ label: 'Payment Terms', id: 'nc-terms', required: true, hint: 'Invoice due date = invoice date + payment terms.' })}
+                <div style="${SECTION}margin-bottom:16px;">COMMERCIAL TERMS & QUALITY SPEC</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:24px;align-items:start;">
                     ${selectFld({ label: 'Offloading Borne By', id: 'nc-offload', required: true, options: [{ value: 'Holec', label: 'Holec' }, { value: 'Customer', label: 'Customer' }], hint: "Who pays the labour to unload at the customer's site." })}
-                </div>
-            </div>
-
-            <div style="${CARD}">
-                <div style="${SECTION}margin-bottom:16px;">QUALITY SPEC</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
                     ${fld({ label: 'Moisture Max (%)', id: 'nc-moist', required: true, type: 'number', value: '13.5', step: '0.1' })}
                     ${fld({ label: 'Foreign Matter Max (%)', id: 'nc-fm', required: true, type: 'number', value: '2.0', step: '0.1' })}
                     ${fld({ label: 'Aflatoxin Max (ppb)', id: 'nc-afla', required: true, type: 'number', value: '10', step: '1' })}
@@ -1624,7 +1615,7 @@ function init_holec_trading_engine() {
 
         // Autogenerate unique Customer ID
         autogenerateCustomerId().then(autoId => {
-            if (!$('#nc-id').val()) {
+            if (!$('#nc-id').val() || $('#nc-id').val() === 'Autogenerated...') {
                 $('#nc-id').val(autoId);
             }
         });
@@ -1655,11 +1646,19 @@ function init_holec_trading_engine() {
 
         // ---------- CONTACT PERSONS TABLE ----------
         function renderContacts() {
-            $('#nc-ct-tbody').html(state.contacts.map((c, i) => `
+            $('#nc-ct-tbody').html(state.contacts.map((c, i) => {
+                const areaOpts = (LIVE_STORE.origin_area || []).map(a => `<option value="${esc(a.name)}" ${c.area === a.name ? 'selected' : ''}>${esc(a.area_name || a.name)}</option>`).join('');
+                return `
                 <tr style="border-bottom:1px solid #edf2f7;">
                     <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
                     <td style="padding:8px 12px;"><input class="ct" data-k="name" data-i="${i}" value="${esc(c.name)}" style="${CELL_INPUT}"></td>
                     <td style="padding:8px 12px;"><input class="ct" data-k="role" data-i="${i}" value="${esc(c.role)}" style="${CELL_INPUT}"></td>
+                    <td style="padding:8px 12px;">
+                        <select class="ct" data-k="area" data-i="${i}" style="${CELL_INPUT}">
+                            <option value="">Select Area</option>
+                            ${areaOpts}
+                        </select>
+                    </td>
                     <td style="padding:8px 12px;"><input class="ct" data-k="phone" data-i="${i}" value="${esc(c.phone)}" placeholder="07XX XXX XXX" style="${CELL_INPUT}"></td>
                     <td style="padding:8px 12px;text-align:center;"><input type="checkbox" class="ct-wa" data-i="${i}" ${c.same_as_wa ? 'checked' : ''}></td>
                     <td style="padding:8px 12px;">${c.same_as_wa
@@ -1668,9 +1667,10 @@ function init_holec_trading_engine() {
                     <td style="padding:8px 12px;"><input class="ct" data-k="email" data-i="${i}" value="${esc(c.email)}" style="${CELL_INPUT}"></td>
                     <td style="padding:8px 12px;text-align:center;"><input type="radio" name="nc-primary" class="ct-primary" data-i="${i}" ${c.is_primary ? 'checked' : ''}></td>
                     <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="ct-del" data-i="${i}">${state.contacts.length > 1 ? '🗑' : ''}</td>
-                </tr>`).join(''));
+                </tr>`;
+            }).join(''));
         }
-        $('#nc-ct-tbody').on('input', '.ct', function () { state.contacts[this.dataset.i][this.dataset.k] = this.value; });
+        $('#nc-ct-tbody').on('input change', '.ct', function () { state.contacts[this.dataset.i][this.dataset.k] = this.value; });
         $('#nc-ct-tbody').on('change', '.ct-wa', function () {
             state.contacts[this.dataset.i].same_as_wa = this.checked;
             renderContacts();
@@ -1688,7 +1688,7 @@ function init_holec_trading_engine() {
         });
         $('#nc-ct-add').on('click', () => {
             if (state.contacts.length >= MAX_CONTACTS) return showToast(`Maximum ${MAX_CONTACTS} contact persons allowed.`, 'orange');
-            state.contacts.push({ name: '', role: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: false });
+            state.contacts.push({ name: '', role: '', area: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: false });
             renderContacts();
         });
 
@@ -1744,7 +1744,6 @@ function init_holec_trading_engine() {
             const name = str($('#nc-name').val());
             const pin = str($('#nc-pin').val()).toUpperCase();
             const regName = str($('#nc-regname').val());
-            const terms = str($('#nc-terms').val());
             const offload = str($('#nc-offload').val());
             const moist = str($('#nc-moist').val());
             const fm = str($('#nc-fm').val());
@@ -1787,7 +1786,6 @@ function init_holec_trading_engine() {
             });
 
             // 5. Commercial terms
-            if (!terms) errors.push('Payment Terms is required.');
             if (!offload) errors.push('Offloading Borne By is required.');
 
             // 6. Quality spec
@@ -1810,7 +1808,6 @@ function init_holec_trading_engine() {
                 custom_vat_registered: 0,
                 custom_kra_pin: pin,
                 custom_registered_name_per_kra: regName,
-                payment_terms: terms,
                 custom_offloading_borne_by: offload,
                 custom_moisture_max: flt(moist),
                 custom_foreign_matter_max: flt(fm),
@@ -1824,6 +1821,7 @@ function init_holec_trading_engine() {
                 custom_holec_contacts: state.contacts.map(c => ({
                     contact_name: str(c.name),
                     role: str(c.role),
+                    area: str(c.area),
                     phone: toIntl(c.phone),
                     same_as_phone: c.same_as_wa ? 1 : 0,
                     whatsapp: toIntl(c.same_as_wa ? c.phone : c.whatsapp),
@@ -2114,13 +2112,13 @@ function init_holec_trading_engine() {
                 <div style="${SEC}margin-bottom:16px;">COMPLIANCE</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">KRA PIN Certificate</label>
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">KRA PIN Certificate <span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span></label>
                         <div style="display:flex;align-items:center;gap:12px;">
                             <button type="button" id="upload-kra-btn" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload</button>
                             <span id="kra-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
                         </div>
                     </div>
-                    ${field({ label: 'KRA PIN *', id: 'ns-krapin', required: true, placeholder: 'Auto-filled on certificate upload', value: d.tax_id || d.kra_pin || '' })}
+                    ${field({ label: 'KRA PIN *', id: 'ns-krapin', required: true, placeholder: 'Auto-filled on certificate upload or enter manually', value: d.tax_id || d.kra_pin || '' })}
                     ${field({ label: 'VAT Status', id: 'ns-vat', type: 'select', options: withValue(['Registered', 'Exempt', 'Not Registered'], d.custom_vat_status), value: d.custom_vat_status || '' })}
                 </div>
                 <div style="max-width:320px;">
@@ -4429,7 +4427,11 @@ function init_holec_trading_engine() {
         if (!l) return navigate('lots');
 
         const positionLots = LIVE_STORE.lots.filter(x => (x.status || 'Position') === 'Position');
-        const customerOptions = LIVE_STORE.customers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name }));
+        const approvedCustomers = (LIVE_STORE.customers || []).filter(c => {
+            const st = cint(c.disabled) === 1 ? 'Disabled' : (c.approval_status || c.custom_approval_status || 'Draft');
+            return st === 'Approved';
+        });
+        const customerOptions = approvedCustomers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name }));
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
@@ -4642,6 +4644,12 @@ function init_holec_trading_engine() {
 
                 if (!customer) {
                     frappe.msgprint(__('Please select a Customer.'));
+                    return;
+                }
+                const selectedCustomer = (LIVE_STORE.customers || []).find(c => c.name === customer);
+                const custSt = selectedCustomer ? (cint(selectedCustomer.disabled) === 1 ? 'Disabled' : (selectedCustomer.approval_status || selectedCustomer.custom_approval_status || 'Draft')) : 'Draft';
+                if (custSt !== 'Approved') {
+                    frappe.msgprint(__('Selected customer is not approved. Only approved customers can be selected when selling.'));
                     return;
                 }
                 if (sellRate <= 0) {
