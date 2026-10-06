@@ -15,25 +15,32 @@ import re
 UNIDENTIFIED_CUSTOMER = "Unidentified Customer"  # adjust to your actual placeholder Customer name
 
 # --- paymentType -> Mode of Payment -------------------------------------------------
-# 1:1 map - each paymentType has its own dedicated Mode of Payment record in
-# ERPNext (create these under Accounting > Mode of Payment before going live).
-#
-# PesalinkPayment is intentionally NOT in this map - it resolves to one of
-# two modes (account vs mobile destination) via _resolve_pesalink_mode()
-# below, since a single paymentType covers both subtypes.
 PAYMENT_TYPE_MODE_MAP = {
-    "WithinBankAccountTransfer": "Bank Transfer",
-    "RTGSPayment": "RTGS",
-    "EFTPayment": "EFT",
-    "ITAXPayment": "iTax",
-    "SWIFTPayment": "SWIFT",
-    "MpesaPayment": "M-PESA",
-    "MPESA": "M-PESA",  # Added alias matching your Bruno test payload
-    "AirtelPayment": "Airtel",
-    "UtilityPayment": "Utility Payment",
-    "OTG" : "OTG",
-    "Branch":"Branch",
-    "PesaLink":"PesaLink"
+    "WITHINBANKACCOUNTTRANSFER": "Bank Transfer",
+    "WITHINBANKTRANSFER": "Bank Transfer",
+    "RTGSPAYMENT": "RTGS",
+    "RTGS": "RTGS",
+    "EFTPAYMENT": "EFT",
+    "EFT": "EFT",
+    "ITAXPAYMENT": "iTax",
+    "ITAX": "iTax",
+    "SWIFTPAYMENT": "SWIFT",
+    "SWIFT": "SWIFT",
+    "MPESAPAYMENT": "M-PESA",
+    "MPESA": "M-PESA",
+    "AIRTELPAYMENT": "Airtel",
+    "AIRTEL": "Airtel",
+    "UTILITYPAYMENT": "Utility Payment",
+    "UTILITY": "Utility Payment",
+    "OTG": "OTG",
+    "BRANCH": "Branch",
+    "PESALINK": "Pesalink",
+    "PESALINKPAYMENT": "Pesalink",
+    "BANKDRAFT": "Bank Draft",
+    "WIRETRANSFER": "Wire Transfer",
+    "CHEQUE": "Cheque",
+    "CASH": "Cash",
+    "CREDITCARD": "Credit Card"
 }
 
 # Pesalink destination subtype -> Mode of Payment.
@@ -63,34 +70,71 @@ def _resolve_pesalink_subtype(additions):
     return None, None
 
 
+def _ensure_mode_of_payment(mode_name):
+    """Ensure the Mode of Payment exists in ERPNext DB; auto-create if missing."""
+    if not mode_name:
+        return None
+    if frappe.db.exists("Mode of Payment", mode_name):
+        return mode_name
+
+    # Try creating the Mode of Payment doc in ERPNext
+    try:
+        doc = frappe.get_doc({
+            "doctype": "Mode of Payment",
+            "mode_of_payment": mode_name,
+            "type": "Bank"
+        })
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        return mode_name
+    except Exception:
+        pass
+
+    # Fallback to standard existing Bank Mode of Payment in ERPNext
+    for fallback in ("Wire Transfer", "Bank Draft", "Bank Transfer", "Cheque", "M-PESA"):
+        if frappe.db.exists("Mode of Payment", fallback):
+            return fallback
+
+    return mode_name
+
+
 def _resolve_mode_of_payment(payment_type, additions, bank_acc_doc):
     """
     Resolve the Mode of Payment for this transaction.
 
     Priority:
-      1. An explicit override configured on the Bank Account
-         (custom_mode_of_payment) - lets a specific channel/Bank Account
-         force a particular Mode of Payment without a code change (e.g. if
-         a new dedicated Mpesa paybill is added later).
+      1. An explicit override configured on the Bank Account (custom_mode_of_payment).
       2. Pesalink special-case: resolved via account/mobile subtype.
-      3. The static PAYMENT_TYPE_MODE_MAP for everything else.
+      3. The normalized PAYMENT_TYPE_MODE_MAP for everything else.
+      4. Case-insensitive / exact match in ERPNext DB.
+      5. Intelligent fallback to standard bank modes.
 
     Returns (mode_of_payment, pesalink_note_or_None).
     """
-    override = bank_acc_doc.get("custom_mode_of_payment")
-    if override:
-        return override, None
+    if not payment_type:
+        return None, None
 
-    if payment_type == "PesalinkPayment":
-        subtype, identifier = _resolve_pesalink_subtype(additions)
+    override = bank_acc_doc.get("custom_mode_of_payment") if bank_acc_doc else None
+    if override:
+        return _ensure_mode_of_payment(override), None
+
+    normalized_pt = (payment_type or "").upper().replace(" ", "").replace("-", "").replace("_", "")
+
+    if normalized_pt in ("PESALINKPAYMENT", "PESALINK"):
+        subtype, identifier = _resolve_pesalink_subtype(additions or {})
         mode = PESALINK_MODE_MAP.get(subtype)
-        if subtype:
+        if subtype and mode:
             note = f"Pesalink via {subtype}" + (f" ({identifier})" if identifier else "")
+            return _ensure_mode_of_payment(mode), note
         else:
             note = "Pesalink - destination subtype (account/mobile) not provided by bank"
-        return mode, note
+            return _ensure_mode_of_payment("Pesalink"), note
 
-    return PAYMENT_TYPE_MODE_MAP.get(payment_type), None
+    # Map via dictionary
+    mapped_mode = PAYMENT_TYPE_MODE_MAP.get(normalized_pt) or PAYMENT_TYPE_MODE_MAP.get(payment_type) or payment_type
+
+    resolved_mode = _ensure_mode_of_payment(mapped_mode)
+    return resolved_mode, None
 
 
 @frappe.whitelist(allow_guest=True)
