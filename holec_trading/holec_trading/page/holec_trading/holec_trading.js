@@ -173,18 +173,21 @@ function init_holec_trading_engine() {
 
     async function autogenerateCustomerId() {
         try {
-            const list = await frappe.db.get_list('Customer', { fields: ['name', 'alias'], limit: 1000 });
+            const list = await frappe.db.get_list('Customer', { fields: ['name', 'alias'], limit: 5000 });
             let maxNum = 0;
             (list || []).forEach(c => {
-                const val = c.alias || c.name || '';
-                const match = val.match(/CUST-?(\d+)/i);
-                if (match) {
-                    const num = parseInt(match[1], 10);
-                    if (num > maxNum) maxNum = num;
-                }
+                [c.alias, c.name].forEach(val => {
+                    if (!val) return;
+                    const match = String(val).match(/(?:CUST|CUS|C)-?(\d+)/i);
+                    if (match) {
+                        const num = parseInt(match[1], 10);
+                        if (!isNaN(num) && num > maxNum) maxNum = num;
+                    }
+                });
             });
-            const nextNum = String(maxNum + 1).padStart(4, '0');
-            return `CUST-${nextNum}`;
+            const nextNum = maxNum > 0 ? maxNum + 1 : 1;
+            const padded = String(nextNum).length >= 4 ? String(nextNum) : String(nextNum).padStart(4, '0');
+            return `CUST-${padded}`;
         } catch (e) {
             return `CUST-${Math.floor(1000 + Math.random() * 9000)}`;
         }
@@ -244,6 +247,40 @@ function init_holec_trading_engine() {
             input = `<input type="${type}" id="${id}" value="${escHtml(value)}" placeholder="${escHtml(placeholder)}" style="width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;">`;
         }
         return `<div style="${span ? 'grid-column: span 2;' : ''}display:flex;flex-direction:column;gap:8px;"><label for="${id}" style="font-size:13px;font-weight:500;color:#4a5568;">${cleanLabel} ${reqMark}</label>${input}</div>`;
+    }
+
+    function selectFld({ label, id, required = false, options = [], hint = '' }) {
+        const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
+        const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
+        const HELP = 'font-size:12px;color:#718096;';
+        const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+        const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        return `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label for="${id}" style="${LABEL}">${label}${required ? req : ''}</label>
+                <select id="${id}" style="${INPUT}">
+                    <option value="">Select</option>
+                    ${options.map(o => `<option value="${esc(typeof o === 'object' ? o.value : o)}">${esc(typeof o === 'object' ? o.label : o)}</option>`).join('')}
+                </select>
+                ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
+            </div>`;
+    }
+
+    function fld({ label, id, required = false, optional = false, type = 'text', value = '', placeholder = '', hint = '', step, readonly = false }) {
+        const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
+        const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
+        const HELP = 'font-size:12px;color:#718096;';
+        const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+        const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
+        const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+        return `
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label for="${id}" style="${LABEL}">${label}${required ? req : ''}${optional ? opt : ''}</label>
+                <input type="${type}" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}"
+                    ${step ? `step="${step}"` : ''} ${readonly ? 'readonly' : ''} style="${INPUT}${readonly ? 'background:#edf2f7;color:#4a5568;cursor:not-allowed;' : ''}">
+                ${hint ? `<div style="${HELP}">${hint}</div>` : ''}
+            </div>`;
     }
 
     // =====================================================================
@@ -438,7 +475,7 @@ function init_holec_trading_engine() {
                 }),
                 frappe.db.get_list('Customer', {
                     filters: { customer_group: 'Holec Trading' },
-                    fields: ['name', 'customer_name', 'customer_group', 'payment_terms', 'disabled', CUSTOMER_STATUS_FIELD, 'owner'],
+                    fields: ['name', 'customer_name', 'customer_group', 'disabled', CUSTOMER_STATUS_FIELD, 'owner', 'custom_kra_pin', 'custom_registered_name_per_kra', 'custom_offloading_borne_by', 'custom_moisture_max', 'custom_foreign_matter_max', 'custom_aflatoxin_max', 'custom_kra_certificate', 'tax_id'],
                     limit: 500
                 }),
                 frappe.db.get_list('Customer Group', { fields: ['name', 'customer_group_name'], order_by: 'name asc', limit: 500 }),
@@ -1127,9 +1164,17 @@ function init_holec_trading_engine() {
 
         let doc = null;
         try {
-            doc = await frappe.db.get_doc('Customer', id);
+            const res = await frappe.call({
+                method: 'frappe.client.get',
+                args: { doctype: 'Customer', name: id }
+            });
+            doc = res && res.message;
         } catch (e) {
-            console.warn('Customer get_doc failed, using LIVE_STORE fallback:', e);
+            console.warn('frappe.client.get failed for Customer:', e);
+        }
+
+        if (!doc) {
+            try { doc = await frappe.db.get_doc('Customer', id); } catch (e) { }
         }
 
         if (!doc) {
@@ -1150,32 +1195,39 @@ function init_holec_trading_engine() {
                     <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
                     <strong style="font-size:14px;color:#2d3748;">${escHtml((value === 0 || value) ? value : '—')}</strong>
                 </div>`;
-            const fileLink = (label, url) => `
-                <div>
-                    <span style="display:block;font-size:12px;color:#718096;margin-bottom:4px;">${label}</span>
-                    ${url ? `<a href="${escHtml(url)}" target="_blank" style="font-size:14px;color:#3182ce;font-weight:600;text-decoration:none;">View file ↗</a>` : '<strong style="font-size:14px;color:#a0aec0;">—</strong>'}
-                </div>`;
             const SEC = 'font-size:11px;font-weight:700;color:#a0aec0;letter-spacing:0.05em;margin-bottom:16px;';
             const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
-            const TD = 'padding:10px 12px;color:#2d3748;';
+            const CELL_INPUT = 'width:100%;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;background:#fff;box-sizing:border-box;';
 
-            const dpRows = (doc.custom_holec_delivery_points || []).map((r, i) => `
-                <tr style="border-bottom:1px solid #edf2f7;"><td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.delivery_point_name || r.name || '')}</td><td style="${TD}">${escHtml(r.location || '')}</td></tr>`).join('');
-            const ctRows = (doc.custom_holec_contacts || doc.holec_contacts || []).map((r, i) => `
-                <tr style="border-bottom:1px solid #edf2f7;">
-                    <td style="${TD}">${i + 1}</td><td style="${TD}">${escHtml(r.contact_name || r.name || '')}</td><td style="${TD}">${escHtml(r.role || '')}</td>
-                    <td style="${TD}">${escHtml(r.area || '')}</td>
-                    <td style="${TD}">${escHtml(r.phone || '')}</td><td style="${TD}">${escHtml(r.whatsapp || '')}</td><td style="${TD}">${escHtml(r.email || '')}</td>
-                    <td style="${TD}">${cint(r.is_primary) ? 'Yes' : ''}</td>
-                </tr>`).join('');
+            // Extract initial state from doc
+            const cdDeliveryPoints = (doc.custom_holec_delivery_points || []).map(r => ({
+                name: r.delivery_point_name || r.name || '',
+                address: r.location || r.address || ''
+            }));
+            if (!cdDeliveryPoints.length) cdDeliveryPoints.push({ name: '', address: '' });
+
+            const cdContacts = (doc.custom_holec_contacts || doc.holec_contacts || []).map(r => ({
+                name: r.contact_name || r.name || '',
+                role: r.role || '',
+                area: r.area || '',
+                phone: r.phone || '',
+                same_as_wa: cint(r.same_as_phone) === 1 || r.same_as_wa === true,
+                whatsapp: r.whatsapp || '',
+                email: r.email || '',
+                is_primary: cint(r.is_primary) === 1
+            }));
+            if (!cdContacts.length) cdContacts.push({ name: '', role: '', area: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: true });
 
             container.innerHTML = `
                 <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                     <span>Holec Trading</span> › <a href="#" id="back-customers-link" style="color:#3182ce;text-decoration:none;">Customers</a> › <span style="color:#2d3748;font-weight:500;">${escHtml(doc.customer_name || doc.name)}</span>
                 </div>
-                <div style="margin-bottom:20px;">
-                    <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">${escHtml(doc.customer_name || doc.name)}</h1>
-                    <span style="font-size:13px;color:#718096;">${escHtml(doc.name)}</span>
+                <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start;">
+                    <div>
+                        <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">${escHtml(doc.customer_name || doc.name)}</h1>
+                        <span style="font-size:13px;color:#718096;">${escHtml(doc.name)}</span>
+                    </div>
+                    <button type="button" id="cd-save-top-btn" style="${BTN_PRIMARY}">Save Changes</button>
                 </div>
 
                 ${approvalBarHtml(status, 'customer')}
@@ -1183,9 +1235,9 @@ function init_holec_trading_engine() {
                 <div style="${CARD_BOX}">
                     <div style="${SEC}">CUSTOMER DETAILS & KRA VERIFICATION</div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:16px;">
-                        ${kv('Customer ID', doc[CUSTOMER_ID_FIELD] || doc.alias || '')}
-                        ${kv('Customer Name', doc.customer_name)}
-                        ${kv('Customer Group', doc.customer_group)}
+                        ${kv('Customer ID', doc[CUSTOMER_ID_FIELD] || doc.alias || doc.name || '')}
+                        ${kv('Customer Name', doc.customer_name || doc.name)}
+                        ${kv('Customer Group', doc.customer_group || 'Holec Trading')}
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:16px;align-items:end;">
                         <div>
@@ -1198,50 +1250,114 @@ function init_holec_trading_engine() {
                         ${field({ label: 'KRA PIN *', id: 'cd-krapin', required: true, placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_kra_pin || doc.tax_id || '' })}
                         ${field({ label: 'Registered Name (per KRA)', id: 'cd-regname', placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_registered_name_per_kra || '' })}
                     </div>
-                    <div style="display:flex;justify-content:flex-end;">
-                        <button type="button" id="cd-save-kra-btn" style="${BTN_SM_SUBMIT}">Save KRA Details</button>
-                    </div>
+                    <div style="font-size:12px;color:#3182ce;">ℹ Edit any field directly and click "Save Changes" to update this document.</div>
                 </div>
 
                 <div style="${CARD_BOX}">
                     <div style="${SEC}">DELIVERY POINTS</div>
                     <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
                         <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                            <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><th style="${TH}width:60px;">No.</th><th style="${TH}">Delivery Point Name</th><th style="${TH}">Location / Address</th></tr></thead>
-                            <tbody>${dpRows || `<tr><td colspan="3" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
+                            <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                                <th style="${TH}width:60px;">No.</th><th style="${TH}">Delivery Point Name</th><th style="${TH}">Location / Address</th><th style="${TH}width:40px;"></th>
+                            </tr></thead>
+                            <tbody id="cd-dp-tbody"></tbody>
                         </table>
                     </div>
+                    <button type="button" id="cd-dp-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
                 </div>
 
                 <div style="${CARD_BOX}">
                     <div style="${SEC}">CONTACT PERSONS</div>
                     <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
-                        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px;">
                             <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                                <th style="${TH}width:50px;">No.</th><th style="${TH}">Name</th><th style="${TH}">Role</th><th style="${TH}">Area</th><th style="${TH}">Phone</th><th style="${TH}">WhatsApp</th><th style="${TH}">Email</th><th style="${TH}">Primary</th>
+                                <th style="${TH}width:50px;">No.</th><th style="${TH}">Name</th><th style="${TH}">Role</th><th style="${TH}">Area</th><th style="${TH}">Phone</th><th style="${TH}width:90px;text-align:center;">Same as WA</th><th style="${TH}">WhatsApp</th><th style="${TH}">Email</th><th style="${TH}width:70px;text-align:center;">Primary</th><th style="${TH}width:40px;"></th>
                             </tr></thead>
-                            <tbody>${ctRows || `<tr><td colspan="8" style="padding:16px;text-align:center;color:#718096;">None.</td></tr>`}</tbody>
+                            <tbody id="cd-ct-tbody"></tbody>
                         </table>
                     </div>
+                    <button type="button" id="cd-ct-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
                 </div>
 
-                <div style="${CARD_BOX}">
-                    <div style="${SEC}">COMMERCIAL TERMS & QUALITY SPEC</div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                        ${kv('Offloading Borne By', doc.custom_offloading_borne_by)}
-                        ${kv('Moisture Max (%)', doc.custom_moisture_max)}
-                        ${kv('Foreign Matter Max (%)', doc.custom_foreign_matter_max)}
-                        ${kv('Aflatoxin Max (ppb)', doc.custom_aflatoxin_max)}
-                    </div>
-                </div>
 
                 <div style="display:flex;gap:12px;align-items:center;">
+                    <button class="h-btn primary" id="cd-save-bottom-btn" style="${BTN_PRIMARY}">Save Changes</button>
                     <button class="h-btn ghost" id="back-customers-btn" style="${BTN_GHOST}">Back to customers</button>
                 </div>
             `;
 
             document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
             document.getElementById('back-customers-btn').addEventListener('click', () => navigate('customers'));
+
+            function renderCdDp() {
+                $('#cd-dp-tbody').html(cdDeliveryPoints.map((d, i) => `
+                    <tr style="border-bottom:1px solid #edf2f7;">
+                        <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
+                        <td style="padding:8px 12px;"><input class="cd-dp" data-k="name" data-i="${i}" value="${escHtml(d.name)}" style="${CELL_INPUT}"></td>
+                        <td style="padding:8px 12px;"><input class="cd-dp" data-k="address" data-i="${i}" value="${escHtml(d.address)}" style="${CELL_INPUT}"></td>
+                        <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="cd-dp-del" data-i="${i}">${cdDeliveryPoints.length > 1 ? '🗑' : ''}</td>
+                    </tr>`).join(''));
+            }
+            $('#cd-dp-tbody').on('input', '.cd-dp', function () { cdDeliveryPoints[this.dataset.i][this.dataset.k] = this.value; });
+            $('#cd-dp-tbody').on('click', '.cd-dp-del', function () {
+                if (cdDeliveryPoints.length > 1) { cdDeliveryPoints.splice(this.dataset.i, 1); renderCdDp(); }
+            });
+            $('#cd-dp-add').on('click', () => { cdDeliveryPoints.push({ name: '', address: '' }); renderCdDp(); });
+
+            function renderCdCt() {
+                const rawAreas = (LIVE_STORE.origin_area || []).map(a => (typeof a === 'object' ? (a.name || a.area_name) : a)).filter(Boolean);
+                $('#cd-ct-tbody').html(cdContacts.map((c, i) => {
+                    let areas = [].concat(rawAreas);
+                    if (c.area && !areas.includes(c.area)) areas.unshift(c.area);
+                    const areaOpts = areas.map(a => `<option value="${escHtml(a)}" ${c.area === a ? 'selected' : ''}>${escHtml(a)}</option>`).join('');
+                    return `
+                    <tr style="border-bottom:1px solid #edf2f7;">
+                        <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
+                        <td style="padding:8px 12px;"><input class="cd-ct" data-k="name" data-i="${i}" value="${escHtml(c.name)}" style="${CELL_INPUT}"></td>
+                        <td style="padding:8px 12px;"><input class="cd-ct" data-k="role" data-i="${i}" value="${escHtml(c.role)}" style="${CELL_INPUT}"></td>
+                        <td style="padding:8px 12px;">
+                            <select class="cd-ct" data-k="area" data-i="${i}" style="${CELL_INPUT}">
+                                <option value="">Select Area</option>
+                                ${areaOpts}
+                            </select>
+                        </td>
+                        <td style="padding:8px 12px;"><input class="cd-ct" data-k="phone" data-i="${i}" value="${escHtml(c.phone)}" placeholder="07XX XXX XXX" style="${CELL_INPUT}"></td>
+                        <td style="padding:8px 12px;text-align:center;"><input type="checkbox" class="cd-ct-wa" data-i="${i}" ${c.same_as_wa ? 'checked' : ''}></td>
+                        <td style="padding:8px 12px;">${c.same_as_wa
+                            ? '<span style="color:#a0aec0;font-size:12px;">— same as phone</span>'
+                            : `<input class="cd-ct" data-k="whatsapp" data-i="${i}" value="${escHtml(c.whatsapp)}" style="${CELL_INPUT}">`}</td>
+                        <td style="padding:8px 12px;"><input class="cd-ct" data-k="email" data-i="${i}" value="${escHtml(c.email)}" style="${CELL_INPUT}"></td>
+                        <td style="padding:8px 12px;text-align:center;"><input type="radio" name="cd-primary" class="cd-ct-primary" data-i="${i}" ${c.is_primary ? 'checked' : ''}></td>
+                        <td style="padding:8px 12px;text-align:center;color:#a0aec0;cursor:pointer;" class="cd-ct-del" data-i="${i}">${cdContacts.length > 1 ? '🗑' : ''}</td>
+                    </tr>`;
+                }).join(''));
+            }
+            $('#cd-ct-tbody').on('input change', '.cd-ct', function () { cdContacts[this.dataset.i][this.dataset.k] = this.value; });
+            $('#cd-ct-tbody').on('change', '.cd-ct-wa', function () {
+                cdContacts[this.dataset.i].same_as_wa = this.checked;
+                renderCdCt();
+            });
+            $('#cd-ct-tbody').on('change', '.cd-ct-primary', function () {
+                cdContacts.forEach((c, i) => c.is_primary = (i == this.dataset.i));
+            });
+            $('#cd-ct-tbody').on('click', '.cd-ct-del', function () {
+                if (cdContacts.length > 1) {
+                    const wasPrimary = cdContacts[this.dataset.i].is_primary;
+                    cdContacts.splice(this.dataset.i, 1);
+                    if (wasPrimary) cdContacts[0].is_primary = true;
+                    renderCdCt();
+                }
+            });
+            $('#cd-ct-add').on('click', () => {
+                cdContacts.push({ name: '', role: '', area: '', phone: '', same_as_wa: true, whatsapp: '', email: '', is_primary: false });
+                renderCdCt();
+            });
+
+            renderCdDp();
+            renderCdCt();
+
+            // Set select values
+            if (doc.custom_offloading_borne_by) $('#cd-offload').val(doc.custom_offloading_borne_by);
 
             let cdKraFile = null;
             document.getElementById('cd-upload-kra-btn').addEventListener('click', () => {
@@ -1283,21 +1399,35 @@ function init_holec_trading_engine() {
                 fileInput.click();
             });
 
-            document.getElementById('cd-save-kra-btn').addEventListener('click', async () => {
-                const newPin = String($('#cd-krapin').val() || '').trim().toUpperCase();
-                const newRegName = String($('#cd-regname').val() || '').trim();
-                if (!newPin) {
-                    frappe.msgprint(__('Please enter a valid KRA PIN.'));
-                    return;
-                }
-                const btn = document.getElementById('cd-save-kra-btn');
-                btn.disabled = true;
+            async function saveAllCustomerDetails() {
+                const pin = String($('#cd-krapin').val() || '').trim().toUpperCase();
+                const regName = String($('#cd-regname').val() || '').trim();
+                const offload = String($('#cd-offload').val() || '').trim();
+                const moist = $('#cd-moist').val();
+                const fm = $('#cd-fm').val();
+                const afla = $('#cd-afla').val();
+
+                const dps = cdDeliveryPoints.map(d => ({ delivery_point_name: String(d.name || '').trim(), location: String(d.address || '').trim() })).filter(d => d.delivery_point_name || d.location);
+                const cts = cdContacts.map(c => ({ contact_name: String(c.name || '').trim(), role: String(c.role || '').trim(), area: String(c.area || '').trim(), phone: String(c.phone || '').trim(), same_as_wa: c.same_as_wa, whatsapp: String(c.whatsapp || '').trim(), email: String(c.email || '').trim(), is_primary: c.is_primary })).filter(c => c.contact_name);
+
+                $('#cd-save-top-btn, #cd-save-bottom-btn').prop('disabled', true).text('Saving...');
+
                 try {
-                    await frappe.db.set_value('Customer', doc.name, {
-                        tax_id: newPin,
-                        custom_kra_pin: newPin,
-                        custom_registered_name_per_kra: newRegName
+                    const res = await frappe.call({
+                        method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_customer_details',
+                        args: {
+                            docname: doc.name,
+                            kra_pin: pin,
+                            reg_name: regName,
+                            offloading: offload,
+                            moisture: moist,
+                            fm: fm,
+                            aflatoxin: afla,
+                            delivery_points: JSON.stringify(dps),
+                            contacts: JSON.stringify(cts)
+                        }
                     });
+
                     if (cdKraFile) {
                         const fd = new FormData();
                         fd.append('file', cdKraFile, cdKraFile.name);
@@ -1311,16 +1441,19 @@ function init_holec_trading_engine() {
                             body: fd
                         });
                     }
-                    showToast('KRA PIN and details updated successfully');
+
+                    showToast('Customer details updated successfully');
                     await loadMasterData();
                     navigate('customer_detail', { id: doc.name });
                 } catch (e) {
-                    console.error('Failed to save KRA details:', e);
-                    showToast('Could not save KRA details.', 'red');
+                    console.error('Failed to update customer details:', e);
+                    showToast('Could not update customer details.', 'red');
                 } finally {
-                    btn.disabled = false;
+                    $('#cd-save-top-btn, #cd-save-bottom-btn').prop('disabled', false).text('Save Changes');
                 }
-            });
+            }
+
+            $('#cd-save-top-btn, #cd-save-bottom-btn').on('click', saveAllCustomerDetails);
 
             bindApprovalBar({
                 onSubmit: async () => { if (await submitCustomer(id)) navigate('customer_detail', { id }); },
@@ -1424,6 +1557,7 @@ function init_holec_trading_engine() {
                         <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
                     </div>
                 </div>
+                <div style="${HELP}margin-top:12px;color:#2b6cb0;">ℹ All fields mapped by OCR (KRA PIN, Registered Name, Customer Name) can be manually edited or overwritten.</div>
             </div>
 
             <div style="${CARD}">
@@ -1454,7 +1588,7 @@ function init_holec_trading_engine() {
 
             <div style="${CARD}">
                 <div style="${SECTION}margin-bottom:2px;">CONTACT PERSONS</div>
-                <div style="${HELP}margin-bottom:14px;">At least 1, at most 3. Exactly one must be marked Primary Contact.</div>
+                <div style="${HELP}margin-bottom:14px;">At least 1, at most 3. Exactly one must be marked Primary Contact. Select area for each contact person.</div>
                 <div style="border:1px solid #e2e8f0;border-radius:6px;overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:1000px;">
                         <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
@@ -1475,16 +1609,6 @@ function init_holec_trading_engine() {
                 <button type="button" id="nc-ct-add" style="margin-top:14px;padding:6px 12px;border:1px solid #cbd5e0;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:#3182ce;">+ Add row</button>
             </div>
 
-            <div style="${CARD}">
-                <div style="${SECTION}margin-bottom:16px;">COMMERCIAL TERMS & QUALITY SPEC</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:24px;align-items:start;">
-                    ${selectFld({ label: 'Offloading Borne By', id: 'nc-offload', required: true, options: [{ value: 'Holec', label: 'Holec' }, { value: 'Customer', label: 'Customer' }], hint: "Who pays the labour to unload at the customer's site." })}
-                    ${fld({ label: 'Moisture Max (%)', id: 'nc-moist', required: true, type: 'number', value: '13.5', step: '0.1' })}
-                    ${fld({ label: 'Foreign Matter Max (%)', id: 'nc-fm', required: true, type: 'number', value: '2.0', step: '0.1' })}
-                    ${fld({ label: 'Aflatoxin Max (ppb)', id: 'nc-afla', required: true, type: 'number', value: '10', step: '1' })}
-                </div>
-            </div>
-
             <div style="display:flex;gap:12px;align-items:center;">
                 <button class="h-btn primary" id="nc-save-btn" style="${BTN_PRIMARY}">Save as Draft</button>
                 <button class="h-btn ghost" id="nc-cancel-btn" style="${BTN_GHOST}">Cancel</button>
@@ -1494,13 +1618,6 @@ function init_holec_trading_engine() {
         // ---------- NAV ----------
         document.getElementById('back-customers-link').addEventListener('click', (e) => { e.preventDefault(); navigate('customers'); });
         document.getElementById('nc-cancel-btn').addEventListener('click', () => navigate('customers'));
-
-        // ---------- PAYMENT TERMS ----------
-        frappe.db.get_list('Payment Terms Template', { fields: ['name'], order_by: 'name asc', limit: 100 })
-            .then(rows => {
-                $('#nc-terms').append((rows || []).map(r => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join(''));
-            })
-            .catch(() => showToast('Could not load Payment Terms', 'orange'));
 
         // ---------- FILE PICKER ----------
         function bindDropzone(id, onFile) {
@@ -1646,8 +1763,11 @@ function init_holec_trading_engine() {
 
         // ---------- CONTACT PERSONS TABLE ----------
         function renderContacts() {
+            const rawAreas = (LIVE_STORE.origin_area || []).map(a => (typeof a === 'object' ? (a.name || a.area_name) : a)).filter(Boolean);
             $('#nc-ct-tbody').html(state.contacts.map((c, i) => {
-                const areaOpts = (LIVE_STORE.origin_area || []).map(a => `<option value="${esc(a.name)}" ${c.area === a.name ? 'selected' : ''}>${esc(a.area_name || a.name)}</option>`).join('');
+                let areas = [].concat(rawAreas);
+                if (c.area && !areas.includes(c.area)) areas.unshift(c.area);
+                const areaOpts = areas.map(a => `<option value="${esc(a)}" ${c.area === a ? 'selected' : ''}>${esc(a)}</option>`).join('');
                 return `
                 <tr style="border-bottom:1px solid #edf2f7;">
                     <td style="padding:8px 12px;color:#4a5568;">${i + 1}</td>
@@ -1907,7 +2027,6 @@ function init_holec_trading_engine() {
         // ---------- OPTIONS (current saved value is always kept in the list) ----------
         const countryOptions = withValue((LIVE_STORE.countries || []).map(c => ({ value: c.name, label: c.country_name || c.name })), d.country);
         const areaOptions = withValue((LIVE_STORE.origin_area || []).map(a => ({ value: a.name, label: a.area_name || a.name })), d.area);
-        const originCountyOptions = withValue((LIVE_STORE.origin_county || []).map(a => ({ value: a.name, label: a.area_name || a.name })), d.origin_county);
         const bankBase = (LIVE_STORE.banks || []).map(b => ({ value: b.name, label: b.bank_name ? `${b.bank_name} (${b.name})` : b.name }));
         const bankOptions1 = withValue(bankBase, d.bank);
         const bankOptions2 = withValue(bankBase, d.custom_secondary_bank);

@@ -21,6 +21,12 @@
       "in_list_view": 1
     },
     {
+      "fieldname": "area",
+      "label": "Area",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    },
+    {
       "fieldname": "phone",
       "label": "Phone",
       "fieldtype": "Data",

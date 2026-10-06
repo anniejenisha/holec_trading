@@ -317,6 +317,68 @@ def _kra_via_ai(ocr_text, image_bytes, image_ext):
     pin = pin if KRA_PIN_RE.match(pin) else ""
     name = re.sub(r"\s+", " ", str(data.get("name") or "")).strip().upper()
     return pin, name
+@frappe.whitelist()
+def update_customer_details(docname, kra_pin=None, reg_name=None, offloading=None, moisture=None, fm=None, aflatoxin=None, delivery_points=None, contacts=None):
+    """
+    Updates an existing Customer document with KRA details, Commercial Terms,
+    Delivery Points child table, and Contact Persons (with Area) child table.
+    """
+    frappe.has_permission("Customer", "write", throw=True)
+    doc = frappe.get_doc("Customer", docname)
+
+    if kra_pin is not None:
+        pin = str(kra_pin).strip().upper()
+        doc.custom_kra_pin = pin
+        doc.tax_id = pin
+    if reg_name is not None:
+        doc.custom_registered_name_per_kra = str(reg_name).strip()
+    if offloading is not None:
+        doc.custom_offloading_borne_by = str(offloading).strip()
+    if moisture is not None and moisture != "":
+        doc.custom_moisture_max = flt(moisture)
+    if fm is not None and fm != "":
+        doc.custom_foreign_matter_max = flt(fm)
+    if aflatoxin is not None and aflatoxin != "":
+        doc.custom_aflatoxin_max = flt(aflatoxin)
+
+    if delivery_points is not None:
+        if isinstance(delivery_points, str):
+            delivery_points = json.loads(delivery_points)
+        dp_list = []
+        for d in delivery_points:
+            p_name = (d.get("delivery_point_name") or d.get("name") or "").strip()
+            loc = (d.get("location") or d.get("address") or "").strip()
+            if p_name or loc:
+                dp_list.append({
+                    "doctype": "Holec Delivery Point",
+                    "delivery_point_name": p_name,
+                    "location": loc
+                })
+        doc.set("custom_holec_delivery_points", dp_list)
+
+    if contacts is not None:
+        if isinstance(contacts, str):
+            contacts = json.loads(contacts)
+        ct_list = []
+        for c in contacts:
+            c_name = (c.get("contact_name") or c.get("name") or "").strip()
+            if c_name:
+                ct_list.append({
+                    "doctype": "Supplier Contact Person",
+                    "contact_name": c_name,
+                    "role": (c.get("role") or "").strip(),
+                    "area": (c.get("area") or "").strip(),
+                    "phone": (c.get("phone") or "").strip(),
+                    "same_as_phone": 1 if c.get("same_as_phone") or c.get("same_as_wa") else 0,
+                    "whatsapp": (c.get("whatsapp") or "").strip(),
+                    "email": (c.get("email") or "").strip(),
+                    "is_primary": 1 if c.get("is_primary") else 0
+                })
+        doc.set("custom_holec_contacts", ct_list)
+
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"success": True, "message": "Customer details updated successfully"}
 
 
 @frappe.whitelist()
@@ -706,6 +768,21 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
     if from_ccy != to_ccy:
         frappe.throw(f"Currency mismatch: {paid_from} is in {from_ccy} but {paid_to} is in {to_ccy}.")
 
+    import json
+
+    bank_resp_summary = {
+        "status": "SUCCESS",
+        "action": "Pay Transporter",
+        "ticket": t.name,
+        "transporter": t.transporter,
+        "amount": amount,
+        "haulage": haulage,
+        "cess": cess,
+        "mode_of_payment": mode_of_payment,
+        "reference_no": (reference_no or "").strip() or t.name,
+        "timestamp": str(frappe.utils.now_datetime())
+    }
+
     pe = frappe.get_doc({
         "doctype": "Payment Entry",
         "company": COMPANY,
@@ -726,7 +803,8 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
         "reference_no": (reference_no or "").strip() or t.name,
         "reference_date": reference_date or nowdate(),
         "custom_buy_ticket": t.name,
-        "remarks": f"Transport payment for Buy Ticket {t.name}: haulage {haulage:,.0f} + cess {cess:,.0f}",
+        "remarks": f"Transport payment for Buy Ticket {t.name}: haulage {haulage:,.0f} + cess {cess:,.0f} | Mode: {mode_of_payment} | Ref: {(reference_no or '').strip() or t.name}",
+        "custom_bank_response": json.dumps(bank_resp_summary, indent=2),
     })
     pe.insert()
     pe.submit()
@@ -911,6 +989,22 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
     from_ccy = frappe.db.get_value("Account", paid_from, "account_currency") or "KES"
     to_ccy = frappe.db.get_value("Account", paid_to, "account_currency") or "KES"
 
+    import json
+
+    bank_resp_summary = {
+        "status": "SUCCESS",
+        "action": "Pay Supplier",
+        "ticket": t.name,
+        "supplier": t.supplier,
+        "amount": amount,
+        "accepted_net_kg": accepted_net_kg,
+        "mode_of_payment": mode_of_payment,
+        "reference_no": (reference_no or "").strip() or t.name,
+        "bank_config": bank_cfg,
+        "supplier_account": supplier_acc_no,
+        "timestamp": str(frappe.utils.now_datetime())
+    }
+
     pe = frappe.get_doc({
         "doctype": "Payment Entry",
         "company": COMPANY,
@@ -931,6 +1025,7 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "reference_date": reference_date or nowdate(),
         "custom_buy_ticket": t.name,
         "remarks": f"Supplier Net Invoice payment for Buy Ticket {t.name}: KES {amount:,.2f} ({accepted_net_kg:,.1f} kg accepted) via Bank {bank_cfg.get('bank_account', '')} [{bank_cfg.get('environment', 'Production')} API]. Supplier Acc: {supplier_acc_no}",
+        "custom_bank_response": json.dumps(bank_resp_summary, indent=2),
     })
     pe.insert(ignore_permissions=True)
     pe.submit()
