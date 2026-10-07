@@ -469,7 +469,6 @@ function init_holec_trading_engine() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
                 frappe.db.get_list('Supplier', {
-                    filters: { supplier_group: ['in', ['Transporter', 'Transporters', 'Farmer', 'Farmers', 'CESS', 'Cess', 'Casual Labour']] },
                     fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id', SUPPLIER_STATUS_FIELD, 'owner'],
                     limit: 500
                 }),
@@ -495,7 +494,7 @@ function init_holec_trading_engine() {
                         'weighbridge_ticket_number', 'transporter', 'vehicle_registration',
                         'moisture_', 'foreign_matter_', 'aflatoxin_ppb',
                         'county', 'reason_code_if_foreign_matter_judgement_or_wet_buy',
-                        'haulage_kes', 'cess_kes', 'offloading_kes', 'delivered_quantity_kg',
+                        'haulage_kes', 'cess_kes', 'offloading_kes', 'delivered_quantity_kg', 'transport_batch',
                         'sell_rate', 'invoice_number', 'delivery_gross_kg', 'delivery_tare_kg',
                         'transport_paid', 'transport_payment_status', 'transport_payment_mode', 'transport_payment_ref', 'transport_payment_requested_by', 'transport_payment_approved_by',
                         'supplier_paid', 'supplier_payment_status', 'supplier_payment_mode', 'supplier_payment_ref', 'supplier_payment_requested_by', 'supplier_finance_approved_by', 'supplier_manager_approved_by', 'supplier_payment_approved_by', 'supplier_payment_entry'
@@ -539,7 +538,6 @@ function init_holec_trading_engine() {
     async function loadApprovalStatuses() {
         const [supRows, custRows, tktRows] = await Promise.all([
             frappe.db.get_list('Supplier', {
-                filters: { supplier_group: ['in', ['Transporter', 'Transporters', 'Farmer', 'Farmers', 'CESS', 'Cess', 'Casual Labour']] },
                 fields: ['name', SUPPLIER_STATUS_FIELD, 'owner'],
                 limit: 500
             }).catch((e) => { console.warn('Supplier approval field not available:', SUPPLIER_STATUS_FIELD, e); return []; }),
@@ -3312,7 +3310,7 @@ function init_holec_trading_engine() {
             </tr>`;
         }).join('');
 
-        // 2. Transporter Payments
+        // 2. Transporter Payments (Grouped by Transporter)
         const dueTickets = LIVE_STORE.lots.filter(t =>
             t.transporter &&
             !cint(t.transport_paid) &&
@@ -3321,27 +3319,46 @@ function init_holec_trading_engine() {
             (flt(t.haulage_kes) > 0 || flt(t.cess_kes) > 0)
         );
 
+        const transporterGroups = {};
+        dueTickets.forEach(t => {
+            const key = t.transport_batch ? `${t.transporter} || ${t.transport_batch}` : t.transporter;
+            if (!transporterGroups[key]) transporterGroups[key] = [];
+            transporterGroups[key].push(t);
+        });
+
         const pendingCount = dueTickets.filter(t => t.transport_payment_status === 'Pending Approval').length;
         const approvedCount = dueTickets.filter(t => t.transport_payment_status === 'Approved').length;
 
-        const transporterRows = dueTickets.map(t => {
-            const ps = t.transport_payment_status || '';
-            let label = 'Submit for approval', style = BTN_SM_APPROVE;
-            if (ps === 'Pending Approval') { label = approver ? 'Review & approve' : 'View'; style = approver ? BTN_SM_APPROVE : BTN_SM; }
+        const transporterRows = Object.keys(transporterGroups).map(key => {
+            const groupLots = transporterGroups[key];
+            const tName = groupLots[0].transporter;
+            const batchId = groupLots[0].transport_batch || '';
+            const lotNamesStr = groupLots.map(x => x.name).join(', ');
+            const totalHaulage = groupLots.reduce((a, x) => a + flt(x.haulage_kes), 0);
+            const totalCess = groupLots.reduce((a, x) => a + flt(x.cess_kes), 0);
+            const totalPayable = totalHaulage + totalCess;
+
+            const ps = groupLots[0].transport_payment_status || '';
+            let label = 'Pay transporter', style = BTN_SM_APPROVE;
+            if (ps === 'Pending Approval') { label = approver ? 'Review & approve' : 'View batch'; style = approver ? BTN_SM_APPROVE : BTN_SM; }
             else if (ps === 'Approved') { label = 'Dispatch to Bank'; style = BTN_SM_APPROVE; }
             else if (ps === 'Rejected') { label = 'Fix & resubmit'; style = BTN_SM; }
-            const total = flt(t.haulage_kes) + flt(t.cess_kes);
+
+            const idsParam = groupLots.map(x => x.name).join(',');
 
             return `
             <tr style="border-bottom:1px solid #edf2f7;">
-                <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${escHtml(t.name)}</td>
-                <td style="padding:12px 16px;color:#2d3748;">${escHtml(t.transporter)}</td>
-                <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.haulage_kes)}</td>
-                <td style="padding:12px 16px;color:#2d3748;">${fmtKES(t.cess_kes)}</td>
-                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(total)}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">
+                    ${escHtml(tName)}
+                    ${batchId ? `<br><span style="font-size:11px;color:#4a5568;font-weight:normal;background:#e2e8f0;padding:1px 6px;border-radius:4px;display:inline-block;margin-top:2px;">Batch: ${escHtml(batchId)}</span>` : ''}
+                </td>
+                <td style="padding:12px 16px;font-family:monospace;font-size:12px;color:#4a5568;">${escHtml(lotNamesStr)} <span style="background:#edf2f7;color:#4a5568;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:600;margin-left:4px;">${groupLots.length} lot(s)</span></td>
+                <td style="padding:12px 16px;color:#2d3748;">${fmtKES(totalHaulage)}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${fmtKES(totalCess)}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:700;">${fmtKES(totalPayable)}</td>
                 <td style="padding:12px 16px;">${approvalBadge(ps, 'Not submitted')}</td>
                 <td style="padding:12px 16px;text-align:right;">
-                    <button class="h-btn sm pay-transporter-btn" data-id="${escHtml(t.name)}" style="${style}">${label}</button>
+                    <button class="h-btn sm pay-transporter-btn" data-id="${escHtml(idsParam)}" style="${style}">${label}</button>
                 </td>
             </tr>`;
         }).join('');
@@ -3395,8 +3412,8 @@ function init_holec_trading_engine() {
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc;text-align:left;color:#718096;font-weight:600;">
-                            <th style="padding:12px 16px;">Ticket</th>
                             <th style="padding:12px 16px;">Transporter</th>
+                            <th style="padding:12px 16px;">Lots / Tickets</th>
                             <th style="padding:12px 16px;">Haulage</th>
                             <th style="padding:12px 16px;">Cess</th>
                             <th style="padding:12px 16px;">Total</th>
@@ -3670,16 +3687,18 @@ function init_holec_trading_engine() {
     }
 
     async function renderPayTransporter(container, params) {
-        const l = LIVE_STORE.lots.find(x => x.name === params.id);
-        if (!l) return navigate('payments_list');
+        const ticketIds = (params.id || '').split(',').map(x => x.trim()).filter(Boolean);
+        const lots = LIVE_STORE.lots.filter(x => ticketIds.includes(x.name));
+        if (!lots.length) return navigate('payments_list');
 
-        const haulage = flt(l.haulage_kes);
-        const cess = flt(l.cess_kes);
+        const l = lots[0];
+        const haulage = lots.reduce((a, x) => a + flt(x.haulage_kes), 0);
+        const cess = lots.reduce((a, x) => a + flt(x.cess_kes), 0);
         const amount = haulage + cess;
         const pstatus = l.transport_payment_status || '';
 
         if (!l.transporter || cint(l.transport_paid) || pstatus === 'Dispatched' || amount <= 0) {
-            showToast('Nothing payable to a transporter for this ticket.', 'orange');
+            showToast('Nothing payable to a transporter for this batch.', 'orange');
             return navigate('payments_list');
         }
 
@@ -3709,6 +3728,7 @@ function init_holec_trading_engine() {
             </div>`;
 
         const savedDate = l.transport_payment_date ? frappe.datetime.str_to_user(l.transport_payment_date) : '—';
+        const lotNamesDisplay = lots.map(x => x.name).join(', ');
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
@@ -3716,8 +3736,8 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Pay transporter</h1>
-                <span style="font-size:13px;color:#718096;">${escHtml(l.name)} · ${escHtml(transporterLabel)}</span>
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Pay Transporter Batch</h1>
+                <span style="font-size:13px;color:#718096;">${escHtml(transporterLabel)} · ${lots.length} lot(s): [${escHtml(lotNamesDisplay)}]</span>
             </div>
 
             <div style="${CARD_BOX}padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
@@ -3726,7 +3746,7 @@ function init_holec_trading_engine() {
                     ${approvalBadge(pstatus, 'Not submitted')}
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
-                    <span style="font-size:13px;color:#4a5568;font-weight:600;">Supplier approval</span>
+                    <span style="font-size:13px;color:#4a5568;font-weight:600;">Transporter approval</span>
                     ${approvalBadge(partyStatus)}
                 </div>
             </div>
@@ -3738,11 +3758,11 @@ function init_holec_trading_engine() {
             </div>` : ''}
 
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport payment</h3>
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Batch Transport Payment Breakdown</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${readonlyBox('Haulage', fmtKES(haulage))}
-                    ${readonlyBox('Cess', fmtKES(cess))}
-                    ${readonlyBox('Total payable', fmtKES(amount), true)}
+                    ${readonlyBox('Total Haulage', fmtKES(haulage))}
+                    ${readonlyBox('Total Cess', fmtKES(cess))}
+                    ${readonlyBox('Total Payable', fmtKES(amount), true)}
                     ${field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
@@ -3765,7 +3785,7 @@ function init_holec_trading_engine() {
             </div>
         `;
 
-        const refresh = async () => { await loadMasterData(); navigate('payments_form', { id: l.name }); };
+        const refresh = async () => { await loadMasterData(); navigate('payments_form', { id: params.id }); };
         const who = () => frappe.session.user_fullname || frappe.session.user;
         const failMsg = (e) => {
             console.error('Payment approval update failed', e);
@@ -3790,16 +3810,18 @@ function init_holec_trading_engine() {
 
             submitBtn.disabled = true;
             try {
-                await frappe.db.set_value('Buy Ticket', l.name, {
-                    transport_payment_status: 'Pending Approval',
-                    transport_payment_mode: rail,
-                    transport_payment_ref: ($('#f-tp-ref').val() || '').trim(),
-                    transport_payment_date: $('#f-tp-date').val() || frappe.datetime.get_today(),
-                    transport_payment_requested_by: frappe.session.user,
-                    transport_payment_approved_by: ''
-                });
-                await addAuditComment('Buy Ticket', l.name, `Transport payment of ${fmtKES(amount)} to ${escHtml(transporterLabel)} submitted for approval by ${escHtml(who())}`);
-                showToast(`Payment of ${fmtKES(amount)} submitted for approval`, 'orange');
+                for (const lot of lots) {
+                    await frappe.db.set_value('Buy Ticket', lot.name, {
+                        transport_payment_status: 'Pending Approval',
+                        transport_payment_mode: rail,
+                        transport_payment_ref: ($('#f-tp-ref').val() || '').trim(),
+                        transport_payment_date: $('#f-tp-date').val() || frappe.datetime.get_today(),
+                        transport_payment_requested_by: frappe.session.user,
+                        transport_payment_approved_by: ''
+                    });
+                    await addAuditComment('Buy Ticket', lot.name, `Transport payment batch of ${fmtKES(amount)} to ${escHtml(transporterLabel)} submitted for approval by ${escHtml(who())}`);
+                }
+                showToast(`Batch payment of ${fmtKES(amount)} submitted for approval`, 'orange');
                 await refresh();
             } catch (e) { failMsg(e); submitBtn.disabled = false; }
         });
@@ -3808,13 +3830,15 @@ function init_holec_trading_engine() {
         const approveBtn = document.getElementById('tp-approve-btn');
         if (approveBtn) approveBtn.addEventListener('click', async () => {
             if (blockedByMakerChecker(l.transport_payment_requested_by, 'payment request')) return;
-            const ok = await confirmAsync(__('Approve payment of {0} to {1}?', [fmtKES(amount), transporterLabel]));
+            const ok = await confirmAsync(__('Approve batch payment of {0} to {1}?', [fmtKES(amount), transporterLabel]));
             if (!ok) return;
             approveBtn.disabled = true;
             try {
-                await frappe.db.set_value('Buy Ticket', l.name, { transport_payment_status: 'Approved', transport_payment_approved_by: frappe.session.user });
-                await addAuditComment('Buy Ticket', l.name, `Transport payment approved by ${escHtml(who())}`);
-                showToast('Payment approved. Funds can now be dispatched.');
+                for (const lot of lots) {
+                    await frappe.db.set_value('Buy Ticket', lot.name, { transport_payment_status: 'Approved', transport_payment_approved_by: frappe.session.user });
+                    await addAuditComment('Buy Ticket', lot.name, `Transport payment approved by ${escHtml(who())}`);
+                }
+                showToast('Batch payment approved. Funds can now be dispatched.');
                 await refresh();
             } catch (e) { failMsg(e); approveBtn.disabled = false; }
         });
@@ -3825,8 +3849,10 @@ function init_holec_trading_engine() {
                 [{ fieldname: 'reason', label: __('Reason for rejection'), fieldtype: 'Small Text', reqd: 1 }],
                 async (v) => {
                     try {
-                        await frappe.db.set_value('Buy Ticket', l.name, { transport_payment_status: 'Rejected', transport_payment_approved_by: '' });
-                        await addAuditComment('Buy Ticket', l.name, `Transport payment rejected by ${escHtml(who())}: ${escHtml(v.reason)}`);
+                        for (const lot of lots) {
+                            await frappe.db.set_value('Buy Ticket', lot.name, { transport_payment_status: 'Rejected', transport_payment_approved_by: '' });
+                            await addAuditComment('Buy Ticket', lot.name, `Transport payment rejected by ${escHtml(who())}: ${escHtml(v.reason)}`);
+                        }
                         showToast('Payment rejected', 'orange');
                         await refresh();
                     } catch (e) { failMsg(e); }
@@ -3841,7 +3867,6 @@ function init_holec_trading_engine() {
         if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
             if (partyBlocked) { frappe.msgprint(__('The transporter must be approved before funds can be dispatched.')); return; }
 
-            // Re-read from the database so a stale screen cannot dispatch an unapproved payment
             let f;
             try {
                 const r = await frappe.db.get_value('Buy Ticket', l.name, ['transport_payment_status', 'transport_payment_mode', 'transport_payment_ref', 'transport_payment_date', 'transport_paid']);
@@ -3853,15 +3878,15 @@ function init_holec_trading_engine() {
                 return;
             }
 
-            const ok = await confirmAsync(__('Dispatch {0} to {1} now?', [fmtKES(amount), transporterLabel]));
+            const ok = await confirmAsync(__('Dispatch {0} to {1} for {2} lot(s) now?', [fmtKES(amount), transporterLabel, lots.length]));
             if (!ok) return;
 
             dispatchBtn.disabled = true;
-            dispatchBtn.textContent = 'Dispatching...';
+            dispatchBtn.textContent = 'Dispatching batch...';
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.pay_transporter',
                 args: {
-                    ticket: l.name,
+                    ticket: lots.map(x => x.name).join(','),
                     mode_of_payment: f.transport_payment_mode,
                     reference_no: (f.transport_payment_ref || '').trim(),
                     reference_date: f.transport_payment_date || frappe.datetime.get_today()
@@ -3870,10 +3895,6 @@ function init_holec_trading_engine() {
                 freeze_message: 'Dispatching funds...',
                 callback: async (r) => {
                     if (r && r.message) {
-                        try {
-                            await frappe.db.set_value('Buy Ticket', l.name, { transport_payment_status: 'Dispatched' });
-                            await addAuditComment('Buy Ticket', l.name, `Funds dispatched by ${escHtml(who())} (${r.message.payment_entry})`);
-                        } catch (e) { console.warn('Could not mark payment as Dispatched', e); }
                         showToast(`${transporterLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
                         await loadMasterData();
                         navigate('payments_list');
@@ -3955,9 +3976,7 @@ function init_holec_trading_engine() {
         if (!l) return navigate('lots');
 
         const waitingTickets = LIVE_STORE.lots.filter(x => (x.status || 'Ticket') === 'Ticket');
-        // Transporters are Suppliers with group 'Transporter' or 'Transporters'
-        const transporterOptions = LIVE_STORE.suppliers
-            .filter(s => s.supplier_group === 'Transporter' || s.supplier_group === 'Transporters')
+        const transporterOptions = (LIVE_STORE.suppliers || [])
             .map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name }));
 
         container.innerHTML = `
@@ -4308,7 +4327,7 @@ function init_holec_trading_engine() {
 
             $('#bag-impact-size').text(`${p.bagSize.toFixed(1)} kg`);
             $('#bag-impact-size-sub').text(`Standard bag: 90 kg (${p.moistureExcess > 0 ? `+${p.moistureExcess.toFixed(1)} kg` : '0 kg'})`);
-            
+
             $('#bag-impact-delivered-sub').text(`Delivered bags: ${p.deliveredBags.toFixed(2)} (${p.netKg} kg ÷ 90)`);
             $('#bag-impact-price').text(fmtKES(p.effectivePricePerBag));
             $('#p-hema-ded').text('- ' + fmtKES(p.hemaDeduction));
@@ -4416,137 +4435,279 @@ function init_holec_trading_engine() {
     // TRANSPORT & LOSS
     // =====================================================================
     function renderTransportLoss(container, params) {
-        const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots.filter(x => (x.status || 'Lot') === 'Lot')[0];
-        if (!l) return navigate('lots');
-
         const readyLots = LIVE_STORE.lots.filter(x => (x.status || 'Lot') === 'Lot');
-        const bagsCount = l.bags || l.bag_count || Math.round((flt(l.gross_weight_kg) - flt(l.tare_weight_kg)) / 90) || 520;
-        const haulageRatePerBag = flt(l.haulage_rate || 180);
-        const haulageTotal = haulageRatePerBag * bagsCount;
 
-        const defaultCess = l.cess_kes !== undefined && l.cess_kes !== null && l.cess_kes !== '' ? l.cess_kes : 1250;
-        const defaultOffloadingRate = l.offloading_rate !== undefined && l.offloading_rate !== null && l.offloading_rate !== '' ? l.offloading_rate : 35;
-        const initialOffloadingTotal = flt(defaultOffloadingRate) * bagsCount;
+        const transporterOptions = (LIVE_STORE.suppliers || [])
+            .map(s => ({
+                value: s.name,
+                label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name
+            }));
+
+        if (!readyLots.length) {
+            container.innerHTML = `
+                <div style="font-
+                size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
+                    <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport Costs</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                    <div>
+                        <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport Costs</h1>
+                        <span style="font-size:13px;color:#718096;">Group ready lots by transporter, allocate transport charges, and move batch to Position.</span>
+                    </div>
+                    <div style="display:flex;gap:10px;">
+                        <button class="h-btn outline" id="add-supplier-top-btn" style="${BTN_OUTLINE}">+ Add Supplier / Transporter</button>
+                        <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
+                    </div>
+                </div>
+                <div style="${CARD_BOX}text-align:center;padding:40px 24px;color:#718096;">
+                    No lots currently in 'Lot' stage ready for transport processing.
+                </div>
+            `;
+            document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
+            document.getElementById('add-supplier-top-btn').addEventListener('click', () => renderNewSupplier(container));
+            return;
+        }
+
+        // Group ready lots by transporter
+        const groupsByTransporter = {};
+        readyLots.forEach(l => {
+            const tName = l.transporter || 'Unassigned Transporter';
+            if (!groupsByTransporter[tName]) groupsByTransporter[tName] = [];
+            groupsByTransporter[tName].push(l);
+        });
+
+        const transporterNames = Object.keys(groupsByTransporter);
+
+        const groupCardsHtml = transporterNames.map((tName, idx) => {
+            const lots = groupsByTransporter[tName];
+            const safeId = 'tr-' + idx;
+            const firstLot = lots[0] || {};
+            const defaultHaulageRate = firstLot.haulage_rate !== undefined && firstLot.haulage_rate !== null && firstLot.haulage_rate !== '' ? flt(firstLot.haulage_rate) : 180;
+            const defaultOffloadingRate = firstLot.offloading_rate !== undefined && firstLot.offloading_rate !== null && firstLot.offloading_rate !== '' ? flt(firstLot.offloading_rate) : 35;
+            const defaultCess = firstLot.cess_kes !== undefined && firstLot.cess_kes !== null && firstLot.cess_kes !== '' ? flt(firstLot.cess_kes) : 1250;
+
+            const lotRows = lots.map((lot, lIdx) => {
+                const bags = lot.bag_count || Math.round((flt(lot.gross_weight_kg) - flt(lot.tare_weight_kg)) / 90) || 520;
+                const netKg = Math.max(0, flt(lot.gross_weight_kg) - flt(lot.tare_weight_kg)) || flt(lot.quantity_kg || 0);
+
+                const transpSelectHtml = `
+                    <select class="lot-transp-sel-${safeId}" data-lot="${escHtml(lot.name)}" style="padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:12px;background:#fff;max-width:180px;">
+                        <option value="">Select Transporter...</option>
+                        ${transporterOptions.map(o => `<option value="${escHtml(o.value)}" ${o.value === lot.transporter ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
+                    </select>
+                `;
+
+                return `
+                    <tr style="border-bottom:1px solid #edf2f7;">
+                        <td style="padding:10px 14px;text-align:center;width:40px;">
+                            <input type="checkbox" class="t-chk-${safeId}" data-lot="${escHtml(lot.name)}" data-bags="${bags}" data-haulage-rate="${defaultHaulageRate}" checked style="width:16px;height:16px;cursor:pointer;">
+                        </td>
+                        <td style="padding:10px 14px;font-family:monospace;font-weight:600;color:#2d3748;">${escHtml(lot.name)}</td>
+                        <td style="padding:10px 14px;color:#2d3748;">${escHtml(lot.supplier || '—')}</td>
+                        <td style="padding:10px 14px;">${transpSelectHtml}</td>
+                        <td style="padding:10px 14px;color:#2d3748;">${fmtKg1(netKg)}</td>
+                        <td style="padding:10px 14px;color:#2d3748;font-weight:600;">${bags} bags</td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <div style="${CARD_BOX}margin-bottom:32px;" id="card-${safeId}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e2e8f0;">
+                        <div>
+                            <h3 style="margin:0 0 2px 0;font-size:16px;color:#1a202c;font-weight:700;">Transporter: ${escHtml(tName)}</h3>
+                            <span style="font-size:12px;color:#718096;">${lots.length} ready lot(s) for this transporter</span>
+                        </div>
+                        <span style="background:#ebf8ff;color:#2b6cb0;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;border:1px solid #bee3f8;">Ready Batch</span>
+                    </div>
+
+                    <!-- Lot selection table -->
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:20px;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;text-align:left;color:#718096;font-weight:600;">
+                                    <th style="padding:10px 14px;text-align:center;width:40px;">
+                                        <input type="checkbox" id="select-all-${safeId}" checked style="width:16px;height:16px;cursor:pointer;">
+                                    </th>
+                                    <th style="padding:10px 14px;">Lot / Ticket</th>
+                                    <th style="padding:10px 14px;">Farmer</th>
+                                    <th style="padding:10px 14px;">Transporter / Supplier</th>
+                                    <th style="padding:10px 14px;">Net Weight</th>
+                                    <th style="padding:10px 14px;">Bags</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${lotRows}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Selection Summary -->
+                    <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#2d3748;display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                        <div>
+                            <strong>Selected:</strong> <span id="sel-summary-${safeId}" style="font-weight:700;color:#2b6cb0;">0 lots · 0 bags</span>
+                        </div>
+                        <div style="font-size:12px;color:#718096;">Check/uncheck lots above to include in batch</div>
+                    </div>
+
+                    <!-- Batch Inputs (entered once per transporter) -->
+                    <h4 style="margin:0 0 12px 0;font-size:14px;color:#1a202c;font-weight:600;">Batch Transport Charges</h4>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:20px;">
+                        <div>
+                            ${field({ label: 'HAULAGE RATE / BAG (KES)', id: `f-haulage-rate-${safeId}`, type: 'number', value: defaultHaulageRate, placeholder: '180' })}
+                            <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Haulage = Rate × Lot Bags</span>
+                        </div>
+                        <div>
+                            ${field({ label: 'OFFLOADING RATE / BAG (KES)', id: `f-offloading-rate-${safeId}`, type: 'number', value: defaultOffloadingRate, placeholder: '35' })}
+                            <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Offloading = Rate × Lot Bags</span>
+                        </div>
+                        <div>
+                            ${field({ label: 'CESS ONCE (KES TOTAL)', id: `f-cess-${safeId}`, type: 'number', value: defaultCess, placeholder: '1,250' })}
+                            <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Pro-rated among selected lots by bag ratio</span>
+                        </div>
+                    </div>
+
+                    <!-- Batch Totals & Share Preview -->
+                    <div style="background:#edf2f7;border-radius:6px;padding:16px;margin-bottom:20px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;color:#2d3748;margin-bottom:8px;">
+                            <span>Batch Total Haulage: <span id="tot-haulage-${safeId}">KES 0</span></span>
+                            <span>Batch Total Offloading: <span id="tot-offloading-${safeId}">KES 0</span></span>
+                            <span>Batch Cess: <span id="tot-cess-${safeId}">KES 0</span></span>
+                        </div>
+                        <div style="font-size:12px;color:#4a5568;border-top:1px solid #cbd5e0;padding-top:8px;display:flex;justify-content:space-between;">
+                            <span>Combined Batch Transport Cost: <strong id="tot-combined-${safeId}" style="color:#1a202c;font-size:13px;">KES 0</strong></span>
+                            <span>Each lot gets its share automatically.</span>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:12px;align-items:center;">
+                        <button class="h-btn primary batch-move-btn" data-safeid="${safeId}" data-transporter="${escHtml(tName)}" style="${BTN_PRIMARY}">Move Selected Batch to Position</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport Costs</span>
             </div>
 
-            <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport Costs</h1>
-                <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || '—'}</span>
-            </div>
-
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px;color:#4a5568;">
-                <span>${readyLots.length} lots ready:</span>
-                <div style="display:flex;gap:6px;">
-                    ${readyLots.map(t => `
-                        <button class="h-btn sm" data-lot="${t.name}" style="padding:4px 10px;border-radius:6px;border:1px solid #cbd5e0;background:${t.name === l.name ? '#1a202c' : '#fff'};color:${t.name === l.name ? '#fff' : '#2d3748'};cursor:pointer;font-weight:500;font-size:12px;">${t.name}</button>
-                    `).join('')}
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <div>
+                    <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport Costs & Batch Allocation</h1>
+                    <span style="font-size:13px;color:#718096;">${readyLots.length} ready lot(s) grouped by transporter</span>
+                </div>
+                <div style="display:flex;gap:10px;">
+                    <button class="h-btn outline" id="add-supplier-top-btn" style="${BTN_OUTLINE}">+ Add Supplier / Transporter</button>
+                    <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
                 </div>
             </div>
 
-            <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 20px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport Charges</h3>
-                <div style="display:flex;flex-direction:column;gap:20px;">
-                    <!-- Haulage (Read-only allocated at Lot stage) -->
-                    <div>
-                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                            <span style="font-weight:600;color:#1a202c;font-size:14px;">Haulage</span>
-                            <span style="background:#ebf8ff;color:#2b6cb0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid #bee3f8;">Allocated at Lot</span>
-                        </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
-                            <div>
-                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">RATE / BAG</label>
-                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:600;font-size:13px;color:#2d3748;height:38px;display:flex;align-items:center;">KES ${haulageRatePerBag.toLocaleString('en-KE')}</div>
-                                <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Transporter charge already allocated at Lot stage.</span>
-                            </div>
-                            <div>
-                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">BAGS</label>
-                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:600;font-size:13px;color:#2d3748;height:38px;display:flex;align-items:center;">${bagsCount}</div>
-                            </div>
-                            <div>
-                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">TOTAL</label>
-                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:700;font-size:13px;color:#1a202c;height:38px;display:flex;align-items:center;">KES ${haulageTotal.toLocaleString('en-KE')}</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <hr style="border:0;border-top:1px solid #edf2f7;margin:4px 0;" />
-
-                    <!-- Cess -->
-                    <div>
-                        <span style="font-weight:600;color:#1a202c;font-size:14px;display:block;margin-bottom:8px;">Cess</span>
-                        <div style="max-width:400px;">
-                            ${field({ label: 'AMOUNT (KES)', id: 'f-cess', type: 'number', value: defaultCess, placeholder: '1,250' })}
-                        </div>
-                    </div>
-
-                    <hr style="border:0;border-top:1px solid #edf2f7;margin:4px 0;" />
-
-                    <!-- Offloading (casuals) -->
-                    <div>
-                        <span style="font-weight:600;color:#1a202c;font-size:14px;display:block;margin-bottom:8px;">Offloading (casuals)</span>
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
-                            <div>
-                                ${field({ label: 'RATE / BAG', id: 'f-offloading-rate', type: 'number', value: defaultOffloadingRate, placeholder: '35' })}
-                                <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Rate × bags. Bags are pre-filled from the lot.</span>
-                            </div>
-                            <div>
-                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">BAGS</label>
-                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:600;font-size:13px;color:#2d3748;height:38px;display:flex;align-items:center;">${bagsCount}</div>
-                            </div>
-                            <div>
-                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">TOTAL</label>
-                                <div id="offloading-total-box" style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:700;font-size:13px;color:#1a202c;height:38px;display:flex;align-items:center;">KES ${initialOffloadingTotal.toLocaleString('en-KE')}</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Banner -->
-                    <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#4a5568;display:flex;align-items:center;gap:10px;margin-top:8px;">
-                        <span style="color:#3182ce;font-weight:bold;font-size:14px;">ℹ</span>
-                        <span>Offloading is borne by customer. It will be recharged on the invoice, not added to landed cost.</span>
-                    </div>
-                </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;margin-top:24px;">
-                <button class="h-btn primary" id="capitalise-btn" style="${BTN_PRIMARY}">Capitalise Costs & Move to Position</button>
-                <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
-            </div>
+            ${groupCardsHtml}
         `;
 
-        const updateOffloadingTotal = () => {
-            const rate = flt($('#f-offloading-rate').val() || 0);
-            const total = rate * bagsCount;
-            $('#offloading-total-box').text(`KES ${total.toLocaleString('en-KE')}`);
-        };
-
-        $('#f-offloading-rate').on('input', updateOffloadingTotal);
-
-        container.querySelectorAll('[data-lot]').forEach(btn => {
-            btn.addEventListener('click', () => navigate('transport', { id: btn.dataset.lot }));
-        });
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
+        document.getElementById('add-supplier-top-btn').addEventListener('click', () => renderNewSupplier(container));
 
-        document.getElementById('capitalise-btn').addEventListener('click', async () => {
-            const cess = flt($('#f-cess').val());
-            const offloadingRate = flt($('#f-offloading-rate').val());
-            const offloadingTotal = offloadingRate * bagsCount;
+        // Wire event logic for each transporter card
+        transporterNames.forEach((tName, idx) => {
+            const safeId = 'tr-' + idx;
+            const lots = groupsByTransporter[tName];
 
-            await frappe.db.set_value('Buy Ticket', l.name, {
-                status: 'Position',
-                haulage_kes: haulageTotal,
-                cess_kes: cess,
-                offloading_kes: offloadingTotal,
-                offloading_rate: offloadingRate
+            const recalculate = () => {
+                const checkedChks = Array.from(document.querySelectorAll(`.t-chk-${safeId}:checked`));
+                const selCount = checkedChks.length;
+                let selBags = 0;
+                checkedChks.forEach(chk => { selBags += flt(chk.dataset.bags || 0); });
+
+                $(`#sel-summary-${safeId}`).text(`${selCount} lots · ${selBags.toLocaleString('en-KE')} bags`);
+
+                const haulageRate = flt($(`#f-haulage-rate-${safeId}`).val() || 0);
+                const offloadingRate = flt($(`#f-offloading-rate-${safeId}`).val() || 0);
+                const cessTotal = flt($(`#f-cess-${safeId}`).val() || 0);
+
+                const totHaulage = haulageRate * selBags;
+                const totOffloading = offloadingRate * selBags;
+                const totCombined = totHaulage + totOffloading + cessTotal;
+
+                $(`#tot-haulage-${safeId}`).text(`KES ${totHaulage.toLocaleString('en-KE')}`);
+                $(`#tot-offloading-${safeId}`).text(`KES ${totOffloading.toLocaleString('en-KE')}`);
+                $(`#tot-cess-${safeId}`).text(`KES ${cessTotal.toLocaleString('en-KE')}`);
+                $(`#tot-combined-${safeId}`).text(`KES ${totCombined.toLocaleString('en-KE')}`);
+            };
+
+            $(`#select-all-${safeId}`).on('change', function () {
+                const isChecked = $(this).is(':checked');
+                $(`.t-chk-${safeId}`).prop('checked', isChecked);
+                recalculate();
             });
 
-            showToast(`Costs capitalised and ${l.name} moved to Position`);
-            await loadMasterData();
-            navigate('lots', { id: l.name });
+            $(`.t-chk-${safeId}`).on('change', recalculate);
+            $(`#f-haulage-rate-${safeId}, #f-offloading-rate-${safeId}, #f-cess-${safeId}`).on('input', recalculate);
+
+            recalculate();
+        });
+
+        // Batch Move button handler
+        container.querySelectorAll('.batch-move-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const safeId = btn.dataset.safeid;
+                const tName = btn.dataset.transporter;
+                const checkedChks = Array.from(document.querySelectorAll(`.t-chk-${safeId}:checked`));
+
+                if (!checkedChks.length) {
+                    frappe.msgprint(__('Please select at least one lot in this batch.'));
+                    return;
+                }
+
+                let totalSelBags = 0;
+                checkedChks.forEach(chk => { totalSelBags += flt(chk.dataset.bags || 0); });
+
+                const haulageRate = flt($(`#f-haulage-rate-${safeId}`).val() || 0);
+                const offloadingRate = flt($(`#f-offloading-rate-${safeId}`).val() || 0);
+                const cessTotal = flt($(`#f-cess-${safeId}`).val() || 0);
+
+                btn.disabled = true;
+                btn.textContent = 'Moving batch to Position...';
+
+                const batchId = 'TBATCH-' + Date.now().toString().slice(-6);
+
+                try {
+                    for (const chk of checkedChks) {
+                        const lotName = chk.dataset.lot;
+                        const lotBags = flt(chk.dataset.bags || 0);
+                        const selTransporter = $(`.lot-transp-sel-${safeId}[data-lot="${lotName}"]`).val() || tName;
+
+                        const lotHaulage = haulageRate * lotBags;
+                        const lotOffloading = offloadingRate * lotBags;
+                        const lotCess = totalSelBags > 0 ? Math.round((cessTotal * lotBags) / totalSelBags) : Math.round(cessTotal / checkedChks.length);
+
+                        const updateVals = {
+                            status: 'Position',
+                            transport_batch: batchId,
+                            haulage_rate: haulageRate,
+                            haulage_kes: lotHaulage,
+                            cess_kes: lotCess,
+                            offloading_kes: lotOffloading,
+                            offloading_rate: offloadingRate
+                        };
+                        if (selTransporter && selTransporter !== 'Unassigned Transporter') {
+                            updateVals.transporter = selTransporter;
+                        }
+
+                        await frappe.db.set_value('Buy Ticket', lotName, updateVals);
+                    }
+
+                    showToast(`Batch of ${checkedChks.length} lot(s) moved to Position`);
+                    await loadMasterData();
+                    navigate('lots');
+                } catch (e) {
+                    console.error('Error moving batch to Position:', e);
+                    frappe.msgprint(__('Failed to move batch to Position: ') + (e.message || e));
+                    btn.disabled = false;
+                    btn.textContent = 'Move Selected Batch to Position';
+                }
+            });
         });
     }
 

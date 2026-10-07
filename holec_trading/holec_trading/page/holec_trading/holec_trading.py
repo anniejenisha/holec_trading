@@ -727,9 +727,9 @@ def _mode_of_payment_account(mode_of_payment, company):
 @frappe.whitelist()
 def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=None):
     """
-    Pays the transporter for one Buy Ticket (haulage + cess) and marks it paid.
+    Pays the transporter for one or a batch of Buy Tickets (haulage + cess) in ONE Payment Entry.
 
-    Condition (same as the UI prototype): the ticket must have a transporter,
+    Condition (same as the UI prototype): the tickets must have a transporter,
     must not already be paid (transport_paid = 0) and must have haulage or cess > 0.
     Everything runs in one request, so if any step fails nothing is saved.
     """
@@ -737,31 +737,46 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
     frappe.has_permission("Payment Entry", "create", throw=True)
 
-    t = frappe.get_doc("Buy Ticket", ticket)
+    if isinstance(ticket, str):
+        if ticket.startswith("["):
+            import json
+            ticket_list = json.loads(ticket)
+        else:
+            ticket_list = [t.strip() for t in ticket.split(",") if t.strip()]
+    elif isinstance(ticket, list):
+        ticket_list = ticket
+    else:
+        ticket_list = [ticket]
 
-    if not t.transporter:
-        frappe.throw("This ticket has no transporter.")
-    if frappe.utils.cint(t.get("transport_paid")):
-        frappe.throw(f"Transport for {t.name} is already paid.")
+    tickets = [frappe.get_doc("Buy Ticket", tn) for tn in ticket_list]
+    if not tickets:
+        frappe.throw("No tickets specified for transporter payment.")
 
-    haulage = flt(t.get("haulage_kes"))
-    cess = flt(t.get("cess_kes"))
-    amount = haulage + cess
+    transporter = tickets[0].transporter
+    for t in tickets:
+        if not t.transporter:
+            frappe.throw(f"Ticket {t.name} has no transporter.")
+        if t.transporter != transporter:
+            frappe.throw(f"All tickets in a batch payment must have the same transporter ({transporter} vs {t.transporter}).")
+        if frappe.utils.cint(t.get("transport_paid")):
+            frappe.throw(f"Transport for {t.name} is already paid.")
+
+    total_haulage = sum(flt(t.get("haulage_kes")) for t in tickets)
+    total_cess = sum(flt(t.get("cess_kes")) for t in tickets)
+    amount = total_haulage + total_cess
     if amount <= 0:
         frappe.throw("Haulage and cess are both zero - nothing to pay.")
 
     if not mode_of_payment:
         frappe.throw("Please select a Mode of Payment.")
 
-    # Money leaves this account (bank / cash of the chosen mode of payment)
     paid_from = _mode_of_payment_account(mode_of_payment, COMPANY)
     if not paid_from:
         frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
 
-    # ...and reduces what we owe the transporter (the transporter's payable account)
-    paid_to = get_party_account("Supplier", t.transporter, COMPANY)
+    paid_to = get_party_account("Supplier", transporter, COMPANY)
     if not paid_to:
-        frappe.throw(f"No payable account found for transporter {t.transporter}.")
+        frappe.throw(f"No payable account found for transporter {transporter}.")
 
     from_ccy = frappe.db.get_value("Account", paid_from, "account_currency")
     to_ccy = frappe.db.get_value("Account", paid_to, "account_currency")
@@ -770,16 +785,19 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
     import json
 
+    ticket_names_str = ", ".join(t.name for t in tickets)
+    ref = (reference_no or "").strip() or tickets[0].name
+
     bank_resp_summary = {
         "status": "SUCCESS",
-        "action": "Pay Transporter",
-        "ticket": t.name,
-        "transporter": t.transporter,
+        "action": "Pay Transporter Batch",
+        "tickets": [t.name for t in tickets],
+        "transporter": transporter,
         "amount": amount,
-        "haulage": haulage,
-        "cess": cess,
+        "haulage": total_haulage,
+        "cess": total_cess,
         "mode_of_payment": mode_of_payment,
-        "reference_no": (reference_no or "").strip() or t.name,
+        "reference_no": ref,
         "timestamp": str(frappe.utils.now_datetime())
     }
 
@@ -789,7 +807,7 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
         "payment_type": "Pay",
         "posting_date": nowdate(),
         "party_type": "Supplier",
-        "party": t.transporter,
+        "party": transporter,
         "mode_of_payment": mode_of_payment,
         "paid_from": paid_from,
         "paid_to": paid_to,
@@ -799,20 +817,21 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
         "received_amount": amount,
         "source_exchange_rate": 1,
         "target_exchange_rate": 1,
-        # mandatory when the paid-from account is a Bank account
-        "reference_no": (reference_no or "").strip() or t.name,
+        "reference_no": ref,
         "reference_date": reference_date or nowdate(),
-        "custom_buy_ticket": t.name,
-        "remarks": f"Transport payment for Buy Ticket {t.name}: haulage {haulage:,.0f} + cess {cess:,.0f} | Mode: {mode_of_payment} | Ref: {(reference_no or '').strip() or t.name}",
+        "custom_buy_ticket": tickets[0].name,
+        "remarks": f"Transport payment for {len(tickets)} Buy Ticket(s) [{ticket_names_str}]: haulage {total_haulage:,.0f} + cess {total_cess:,.0f} | Mode: {mode_of_payment} | Ref: {ref}",
         "custom_bank_response": json.dumps(bank_resp_summary, indent=2),
     })
     pe.insert()
     pe.submit()
 
-    t.db_set("transport_paid", 1)
-    t.db_set("transport_payment_entry", pe.name)
+    for t in tickets:
+        t.db_set("transport_paid", 1)
+        t.db_set("transport_payment_entry", pe.name)
+        t.db_set("transport_payment_status", "Dispatched")
 
-    return {"payment_entry": pe.name, "amount": amount, "transporter": t.transporter}
+    return {"payment_entry": pe.name, "amount": amount, "transporter": transporter, "tickets": [t.name for t in tickets]}
 
 
 @frappe.whitelist()
@@ -837,7 +856,8 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         "supplier_manager_approved_by",
         "supplier_payment_approved_by",
         "supplier_paid",
-        "supplier_payment_entry"
+        "supplier_payment_entry",
+        "transport_batch"
     ]:
         if not frappe.db.has_column("Buy Ticket", fieldname):
             try:
@@ -1041,6 +1061,92 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "supplier": t.supplier,
         "bank_config": bank_cfg
     }
+
+
+@frappe.whitelist()
+def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=None):
+    from erpnext.accounts.party import get_party_account
+
+    frappe.has_permission("Payment Entry", "create", throw=True)
+    if isinstance(ticket, str):
+        ticket_names = [x.strip() for x in ticket.split(",") if x.strip()]
+    elif isinstance(ticket, list):
+        ticket_names = ticket
+    else:
+        ticket_names = [str(ticket)]
+
+    if not ticket_names:
+        frappe.throw("No tickets specified for transport payment.")
+
+    tickets = [frappe.get_doc("Buy Ticket", name) for name in ticket_names]
+    transporter = tickets[0].get("transporter") or tickets[0].get("supplier")
+    if not transporter:
+        frappe.throw("Transporter is missing on the selected ticket(s).")
+
+    total_amount = 0.0
+    for t in tickets:
+        total_amount += flt(t.get("haulage_kes") or 0) + flt(t.get("cess_kes") or 0) + flt(t.get("offloading_kes") or 0)
+
+    if total_amount <= 0:
+        frappe.throw("Total transport payable amount is zero.")
+
+    if not mode_of_payment:
+        frappe.throw("Please select a Mode of Payment.")
+
+    paid_from = _mode_of_payment_account(mode_of_payment, COMPANY)
+    if not paid_from:
+        paid_from = frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+    if not paid_from:
+        frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
+
+    paid_to = get_party_account("Supplier", transporter, COMPANY)
+    if not paid_to:
+        frappe.throw(f"No payable account found for transporter {transporter}.")
+
+    from_ccy = frappe.db.get_value("Account", paid_from, "account_currency") or "KES"
+    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency") or "KES"
+
+    ref_str = (reference_no or "").strip() or tickets[0].name
+    tickets_summary = ", ".join([t.name for t in tickets])
+
+    pe = frappe.get_doc({
+        "doctype": "Payment Entry",
+        "company": COMPANY,
+        "payment_type": "Pay",
+        "posting_date": nowdate(),
+        "party_type": "Supplier",
+        "party": transporter,
+        "mode_of_payment": mode_of_payment,
+        "paid_from": paid_from,
+        "paid_to": paid_to,
+        "paid_from_account_currency": from_ccy,
+        "paid_to_account_currency": to_ccy,
+        "paid_amount": total_amount,
+        "received_amount": total_amount,
+        "source_exchange_rate": 1,
+        "target_exchange_rate": 1,
+        "reference_no": ref_str,
+        "reference_date": reference_date or nowdate(),
+        "custom_buy_ticket": tickets[0].name,
+        "remarks": f"Transporter Payment for Buy Ticket batch ({len(tickets)} tickets: {tickets_summary}): KES {total_amount:,.2f}",
+    })
+    pe.insert(ignore_permissions=True)
+    pe.submit()
+
+    for t in tickets:
+        t.db_set("transport_paid", 1)
+        t.db_set("transport_payment_entry", pe.name)
+        t.db_set("transport_payment_status", "Dispatched")
+
+    frappe.db.commit()
+
+    return {
+        "payment_entry": pe.name,
+        "amount": total_amount,
+        "transporter": transporter,
+        "count": len(tickets)
+    }
+
 
 
 @frappe.whitelist()
