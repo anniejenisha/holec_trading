@@ -28,7 +28,7 @@ interface StoreState {
 	approveSupplier: (id: string) => void;
 
 	// -- customers --
-	createCustomer: (data: Omit<Customer, "id" | "status" | "createdBy" | "approvedBy">) => Customer;
+	createCustomer: (data: Omit<Customer, "status" | "createdBy" | "approvedBy"> & { id?: string }) => Customer;
 	updateCustomer: (id: string, data: Partial<Customer>) => void;
 	submitCustomerForVerification: (id: string) => void;
 	approveCustomer: (id: string) => void;
@@ -110,9 +110,12 @@ export const useStore = create<StoreState>((set, get) => {
 		},
 
 		createCustomer: (data) => {
+			const count = get().customers.length + 1;
+			const formattedId = data.id || `CUS-${String(count).padStart(4, "0")}`;
 			const customer: Customer = {
 				...data,
-				id: uid("CUS"),
+				id: formattedId,
+				contacts: data.contacts || [],
 				status: "Draft",
 				createdBy: "You (Sales User)",
 				approvedBy: "",

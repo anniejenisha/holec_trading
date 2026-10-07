@@ -117,7 +117,7 @@ function init_holec_trading_engine() {
         // Step 3: Foreign matter (dropdown: 0 / 0.5 / 1 / 2 / 3 / 5%)
         // Deducted % = Foreign matter % - 0.5 (minimum 0)
         const fmDeductedPct = Math.max(0, fm - 0.5);
-        const fmDeductionKg = netKg * (fmDeductedPct / 100);
+        const fmDeductionKg = moistureAdjustedKg * (fmDeductedPct / 100);
 
         // Step 4: Accepted quantity & Paid bags
         const acceptedNetKg = Math.max(0, moistureAdjustedKg - fmDeductionKg);
@@ -2222,8 +2222,9 @@ function init_holec_trading_engine() {
                 <div style="${SEC}margin-bottom:16px;">ADDITIONAL DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Area', id: 'ns-area', type: 'select', options: areaOptions, value: d.area || '' })}
+                    ${field({ label: 'City', id: 'ns-city', value: d.city || '' })}
                 </div>
-                ${field({ label: 'City', id: 'ns-city', value: d.city || '' })}
+                
                 ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true, value: d.address_line1 || '' })}
             </div>
 
@@ -4134,67 +4135,122 @@ function init_holec_trading_engine() {
             <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Deductions & Payable Engine</h1>
             <div style="font-size:13px;color:#718096;margin-bottom:20px;">${l.name} · ${l.supplier || '—'}</div>
 
-            <!-- Quality Inspection -->
+            <!-- Step 1-4: Deduction Breakdown -->
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Quality Inspection</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Moisture % *', id: 'f-moisture', type: 'number', value: l.moisture_ || '', required: true })}
-                    ${field({ label: 'Foreign Matter % *', id: 'f-fm', type: 'select', value: l.foreign_matter_ != null ? String(l.foreign_matter_) : '0', options: withValue(['0', '0.5', '1', '2', '3', '5'], l.foreign_matter_ != null ? String(l.foreign_matter_) : '0'), required: true })}
-                    ${field({ label: 'Aflatoxin ppb *', id: 'f-afla', type: 'number', value: l.aflatoxin_ppb || '', required: true })}
-                </div>
-                ${field({ label: 'Reason Code (required if wet buy > 20% or FM judgement)', id: 'f-reason', type: 'textarea', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '', span: true })}
-            </div>
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Deduction Breakdown</h3>
+                ${row('Gross Weight', null, 'd-gross')}
+                ${row('Tare Weight', null, 'd-tare', '#e53e3e')}
+                ${row('Net Weight', null, 'd-net')}
 
-            <div id="moisture-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
-            <div id="afla-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;"></div>
-
-            <!-- Weight & Quality Deduction Breakdown -->
-            <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Step 1–4: Weight & Quality Deductions</h3>
-                ${row('Step 1: Net Weight', 'Gross minus tare weight', 'd-net')}
-                ${row('Step 2: Moisture Deduction', '', 'd-moist', '#e53e3e')}
-                ${row('Step 3: Foreign Matter Deduction', '', 'd-fm', '#e53e3e')}
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
                     <div>
-                        <strong style="color:#1a202c;display:block;">Step 4: Accepted Net Quantity</strong>
-                        <span id="d-paid-bags-sub" style="font-size:12px;color:#718096;">Stock ledger weight & paid bags</span>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <span style="color:#4a5568;">Moisture Deduction</span>
+                            <input type="number" id="f-moisture" value="${l.moisture_ != null ? l.moisture_ : 18}" step="0.1" style="width:70px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
+                            <span style="color:#4a5568;font-weight:500;">%</span>
+                        </div>
+                        <span id="d-moist-sub" style="font-size:12px;color:#718096;display:block;margin-top:4px;"></span>
                     </div>
-                    <strong id="d-accepted" style="color:#1a202c;font-size:16px;"></strong>
+                    <strong id="d-moist" style="color:#e53e3e;font-weight:700;"></strong>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <span style="color:#4a5568;">Foreign Matter Deduction</span>
+                            <select id="f-fm" style="width:80px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
+                                ${['0', '0.5', '1', '2', '3', '5'].map(v => `<option value="${v}" ${(l.foreign_matter_ != null ? String(l.foreign_matter_) : '2') === v ? 'selected' : ''}>${v}%</option>`).join('')}
+                            </select>
+                        </div>
+                        <span id="d-fm-sub" style="font-size:12px;color:#718096;display:block;margin-top:4px;"></span>
+                    </div>
+                    <strong id="d-fm" style="color:#e53e3e;font-weight:700;"></strong>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 0 4px 0;font-size:15px;background:#f8fafc;margin-top:8px;padding:12px 14px;border-radius:6px;">
+                    <div>
+                        <strong style="color:#1a202c;display:block;font-size:15px;">Accepted Net Quantity</strong>
+                        <span style="font-size:12px;color:#718096;">This is what lands in the stock ledger — not the gross weight</span>
+                    </div>
+                    <strong id="d-accepted" style="color:#1a202c;font-size:18px;"></strong>
                 </div>
             </div>
 
-            <!-- Other Charges (Step 6) -->
+            <div id="moisture-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;">
+                <div style="margin-bottom:8px;">⚠️ Moisture exceeds 20% limit (Wet buy block). Reason code / override required.</div>
+                ${field({ label: 'Reason Code / Override Justification', id: 'f-reason', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '' })}
+            </div>
+
+            <!-- Step 5: Payable Value -->
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Step 5–6: Value & Other Charges</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
-                    ${field({ label: 'Reference Rate (KES/kg) *', id: 'f-ref-rate', type: 'number', required: true, value: initialRate })}
-                    ${field({ label: 'Aflatoxin (KES)', id: 'f-afla-charge', type: 'select', value: '0', options: ['0', '1500', '2500'] })}
-                    ${field({ label: 'Drying Rate (KES/bag)', id: 'f-drying-rate', type: 'number', value: l.drying_rate_per_bag != null ? l.drying_rate_per_bag : 50 })}
-                    ${field({ label: 'HEMA Rate (KES/bag)', id: 'f-hema-rate', type: 'number', value: l.hema_rate_per_bag != null ? l.hema_rate_per_bag : 24.30 })}
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payable Value</h3>
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Reference Rate (KES/kg) *</label>
+                    <input type="number" id="f-ref-rate" value="${initialRate || 48}" style="width:100px;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;font-weight:600;">
                 </div>
-                ${row('Gross Value (Accepted kg × Ref Rate)', '', 'p-gross')}
-                ${row('Aflatoxin Charge', 'Fixed charge based on ppb result', 'p-afla-ded', '#e53e3e')}
-                ${row('Drying Charge', 'Drying rate × paid bags', 'p-drying-ded', '#e53e3e')}
-                ${row('HEMA Charge', 'HEMA rate × paid bags', 'p-hema-ded', '#e53e3e')}
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0 0;font-size:15px;border-top:1px solid #e2e8f0;margin-top:12px;">
-                    <strong style="color:#1a202c;">Step 7: Net Payable to Supplier</strong>
-                    <strong id="p-net" style="color:#2b6cb0;font-size:18px;"></strong>
+                ${row('Accepted Weight × Rate', null, 'p-gross')}
+            </div>
+
+            <!-- Step 6: Other Charges -->
+            <div style="${CARD_BOX}">
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Other Charges</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <span style="color:#4a5568;width:120px;">Aflatoxin</span>
+                        <select id="f-afla-charge" style="width:100px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
+                            <option value="0">0</option>
+                            <option value="1500" selected>1,500</option>
+                            <option value="2500">2,500</option>
+                        </select>
+                    </div>
+                    <strong id="p-afla-ded" style="color:#e53e3e;"></strong>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <span style="color:#4a5568;width:120px;">Drying Cost</span>
+                        <input type="number" id="f-drying-rate" value="${l.drying_rate_per_bag != null ? l.drying_rate_per_bag : 50}" style="width:100px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
+                        <span style="font-size:12px;color:#718096;">KES / bag</span>
+                    </div>
+                    <strong id="p-drying-ded" style="color:#e53e3e;"></strong>
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <span style="color:#4a5568;width:120px;">HEMA</span>
+                        <input type="number" step="0.10" id="f-hema-rate" value="${l.hema_rate_per_bag != null ? l.hema_rate_per_bag : 24.30}" style="width:100px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
+                        <span style="font-size:12px;color:#718096;">KES / bag</span>
+                    </div>
+                    <strong id="p-hema-ded" style="color:#e53e3e;"></strong>
                 </div>
             </div>
 
-            <!-- Bag Impact (Step 8) -->
+            <!-- Step 7: Net Payable -->
+            <div style="${CARD_BOX}padding:20px;display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;">
+                <strong style="color:#1a202c;font-size:18px;">Net Payable</strong>
+                <strong id="p-net" style="color:#1a202c;font-size:24px;font-weight:900;"></strong>
+            </div>
+
+            <!-- Step 8: Bag Impact -->
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Step 8: Bag Impact & Effective Price</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
-                    <div><span style="font-size:12px;color:#718096;display:block;">Bag Size at Moisture</span><strong id="bag-impact-size" style="font-size:14px;color:#2d3748;"></strong></div>
-                    <div><span style="font-size:12px;color:#718096;display:block;">Delivered Bags</span><strong id="bag-impact-delivered" style="font-size:14px;color:#2d3748;"></strong></div>
-                    <div><span style="font-size:12px;color:#718096;display:block;">Effective Price / Bag</span><strong id="bag-impact-price" style="font-size:14px;color:#2b6cb0;"></strong></div>
+                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Bag Impact</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                    <div style="background:#f8fafc;padding:16px;border-radius:8px;border:1px solid #e2e8f0;">
+                        <span style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;display:block;">Bag Size at This Moisture</span>
+                        <strong id="bag-impact-size" style="font-size:26px;color:#1a202c;display:block;margin:6px 0 2px 0;"></strong>
+                        <span id="bag-impact-size-sub" style="font-size:12px;color:#718096;"></span>
+                    </div>
+                    <div style="background:#f8fafc;padding:16px;border-radius:8px;border:1px solid #e2e8f0;">
+                        <span style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;display:block;">Effective Price per Bag</span>
+                        <strong id="bag-impact-price" style="font-size:26px;color:#1a202c;display:block;margin:6px 0 2px 0;"></strong>
+                        <span id="bag-impact-delivered-sub" style="font-size:12px;color:#718096;"></span>
+                    </div>
                 </div>
             </div>
 
             <!-- Supplier Invoice Upload & OCR Matching -->
             <div style="${CARD_BOX}margin-bottom:28px;">
-                <h3 style="margin:0 0 8px 0;font-size:15px;color:#1a202c;font-weight:600;">Supplier Invoice Upload & OCR Matching</h3>
+                <h3 style="margin:0 0 8px 0;font-size:15px;color:#1a202c;font-weight:600;">Supplier Invoice Upload & Matching</h3>
                 <p style="font-size:12px;color:#718096;margin:0 0 16px 0;">Upload the supplier's physical invoice. The invoice amount must match the calculated Net Payable to proceed.</p>
                 
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">
@@ -4211,7 +4267,7 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="display:flex;gap:12px;align-items:center;">
-                <button class="h-btn primary" id="post-invoice-btn" style="${BTN_PRIMARY}">Post Net Invoice & Create Lot</button>
+                <button class="h-btn primary" id="post-invoice-btn" style="${BTN_PRIMARY}">Post Net Invoice & Create Lot & Initiate Farmer Payment</button>
                 <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
             </div>
         `;
@@ -4220,7 +4276,6 @@ function init_holec_trading_engine() {
             const rate = flt($('#f-ref-rate').val());
             l.moisture_ = flt($('#f-moisture').val());
             l.foreign_matter_ = flt($('#f-fm').val());
-            l.aflatoxin_ppb = flt($('#f-afla').val());
             l.reason_code_if_foreign_matter_judgement_or_wet_buy = $('#f-reason').val();
             l.aflatoxin_deduction_kes = flt($('#f-afla-charge').val());
             l.drying_rate_per_bag = flt($('#f-drying-rate').val());
@@ -4228,25 +4283,34 @@ function init_holec_trading_engine() {
 
             const p = computePayable(l, rate);
 
+            $('#d-gross').text(fmtKg1(p.grossKg));
+            $('#d-tare').text('- ' + fmtKg1(p.tareKg));
             $('#d-net').text(fmtKg1(p.netKg));
+
             $('#d-moist').text('- ' + fmtKg1(p.moistureDeductionKg));
             $('#d-moist-sub').text(p.moistureExcess > 0
-                ? `${p.moisture}% recorded: ${p.moistureExcess.toFixed(1)}% excess → Bag size ${p.bagSize.toFixed(1)} kg → Moisture-adjusted ${fmtKg1(p.moistureAdjustedKg)}`
+                ? `${p.moisture}% recorded, ${p.moistureExcess.toFixed(1)}% above 13.5% standard`
                 : `${p.moisture}% recorded — at or below 13.5% standard, no deduction`);
 
             $('#d-fm').text('- ' + fmtKg1(p.fmDeductionKg));
             $('#d-fm-sub').text(p.fmDeductedPct > 0
-                ? `${p.fm}% recorded: ${p.fmDeductedPct.toFixed(1)}% deducted`
+                ? `${p.fm}% recorded, 0.5% allowance, ${p.fmDeductedPct.toFixed(1)}% deducted`
                 : `${p.fm}% recorded — within 0.5% allowance, no deduction`);
 
             $('#d-accepted').text(fmtKg1(p.acceptedNetKg));
-            $('#d-paid-bags-sub').text(`Accepted Net ${fmtKg1(p.acceptedNetKg)} ÷ 90kg = ${p.paidBags.toFixed(2)} paid bags`);
 
             $('#p-gross').text(fmtKES(p.grossValue));
-            $('#p-gross-sub').text(`${fmtKg1(p.acceptedNetKg)} accepted × KES ${rate}/kg`);
 
             $('#p-afla-ded').text('- ' + fmtKES(p.aflatoxinDeduction));
             $('#p-drying-ded').text('- ' + fmtKES(p.dryingDeduction));
+            $('#p-hema-ded').text('- ' + fmtKES(p.hemaDeduction));
+            $('#p-net').text(fmtKES(p.netPayable));
+
+            $('#bag-impact-size').text(`${p.bagSize.toFixed(1)} kg`);
+            $('#bag-impact-size-sub').text(`Standard bag: 90 kg (${p.moistureExcess > 0 ? `+${p.moistureExcess.toFixed(1)} kg` : '0 kg'})`);
+            
+            $('#bag-impact-delivered-sub').text(`Delivered bags: ${p.deliveredBags.toFixed(2)} (${p.netKg} kg ÷ 90)`);
+            $('#bag-impact-price').text(fmtKES(p.effectivePricePerBag));
             $('#p-hema-ded').text('- ' + fmtKES(p.hemaDeduction));
             $('#p-net').text(fmtKES(p.netPayable));
 
@@ -4356,21 +4420,21 @@ function init_holec_trading_engine() {
         if (!l) return navigate('lots');
 
         const readyLots = LIVE_STORE.lots.filter(x => (x.status || 'Lot') === 'Lot');
+        const bagsCount = l.bags || l.bag_count || Math.round((flt(l.gross_weight_kg) - flt(l.tare_weight_kg)) / 90) || 520;
+        const haulageRatePerBag = flt(l.haulage_rate || 180);
+        const haulageTotal = haulageRatePerBag * bagsCount;
 
-        // Expected Quantity = Supplier Net Weight
-        // Supplier Net Weight = Gross Weight - Tare Weight
-        const supplierGross = flt(l.gross_weight_kg || 0);
-        const supplierTare = flt(l.tare_weight_kg || 0);
-
-        const expectedQty = Math.max(0, supplierGross - supplierTare);
+        const defaultCess = l.cess_kes !== undefined && l.cess_kes !== null && l.cess_kes !== '' ? l.cess_kes : 1250;
+        const defaultOffloadingRate = l.offloading_rate !== undefined && l.offloading_rate !== null && l.offloading_rate !== '' ? l.offloading_rate : 35;
+        const initialOffloadingTotal = flt(defaultOffloadingRate) * bagsCount;
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
-                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport & Loss</span>
+                <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Transport Costs</span>
             </div>
 
             <div style="margin-bottom:20px;">
-                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport & Loss</h1>
+                <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#1a202c;">Transport Costs</h1>
                 <span style="font-size:13px;color:#718096;">${l.name} · ${l.supplier || '—'}</span>
             </div>
 
@@ -4384,130 +4448,83 @@ function init_holec_trading_engine() {
             </div>
 
             <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport Charges</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${field({ label: 'Haulage (KES)', id: 'f-haulage', type: 'number', value: l.haulage_kes || '' })}
-                    ${field({ label: 'Cess (KES)', id: 'f-cess', type: 'number', value: l.cess_kes || '' })}
-                    ${field({ label: 'Offloading (KES)', id: 'f-offloading', type: 'number', value: l.offloading_kes || '' })}
+                <h3 style="margin:0 0 20px 0;font-size:15px;color:#1a202c;font-weight:600;">Transport Charges</h3>
+                <div style="display:flex;flex-direction:column;gap:20px;">
+                    <!-- Haulage (Read-only allocated at Lot stage) -->
+                    <div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                            <span style="font-weight:600;color:#1a202c;font-size:14px;">Haulage</span>
+                            <span style="background:#ebf8ff;color:#2b6cb0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid #bee3f8;">Allocated at Lot</span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
+                            <div>
+                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">RATE / BAG</label>
+                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:600;font-size:13px;color:#2d3748;height:38px;display:flex;align-items:center;">KES ${haulageRatePerBag.toLocaleString('en-KE')}</div>
+                                <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Transporter charge already allocated at Lot stage.</span>
+                            </div>
+                            <div>
+                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">BAGS</label>
+                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:600;font-size:13px;color:#2d3748;height:38px;display:flex;align-items:center;">${bagsCount}</div>
+                            </div>
+                            <div>
+                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">TOTAL</label>
+                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:700;font-size:13px;color:#1a202c;height:38px;display:flex;align-items:center;">KES ${haulageTotal.toLocaleString('en-KE')}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr style="border:0;border-top:1px solid #edf2f7;margin:4px 0;" />
+
+                    <!-- Cess -->
+                    <div>
+                        <span style="font-weight:600;color:#1a202c;font-size:14px;display:block;margin-bottom:8px;">Cess</span>
+                        <div style="max-width:400px;">
+                            ${field({ label: 'AMOUNT (KES)', id: 'f-cess', type: 'number', value: defaultCess, placeholder: '1,250' })}
+                        </div>
+                    </div>
+
+                    <hr style="border:0;border-top:1px solid #edf2f7;margin:4px 0;" />
+
+                    <!-- Offloading (casuals) -->
+                    <div>
+                        <span style="font-weight:600;color:#1a202c;font-size:14px;display:block;margin-bottom:8px;">Offloading (casuals)</span>
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;align-items:start;">
+                            <div>
+                                ${field({ label: 'RATE / BAG', id: 'f-offloading-rate', type: 'number', value: defaultOffloadingRate, placeholder: '35' })}
+                                <span style="font-size:11px;color:#718096;margin-top:4px;display:block;">Rate × bags. Bags are pre-filled from the lot.</span>
+                            </div>
+                            <div>
+                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">BAGS</label>
+                                <div style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:600;font-size:13px;color:#2d3748;height:38px;display:flex;align-items:center;">${bagsCount}</div>
+                            </div>
+                            <div>
+                                <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">TOTAL</label>
+                                <div id="offloading-total-box" style="background:#edf2f7;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-weight:700;font-size:13px;color:#1a202c;height:38px;display:flex;align-items:center;">KES ${initialOffloadingTotal.toLocaleString('en-KE')}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Banner -->
+                    <div style="background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:13px;color:#4a5568;display:flex;align-items:center;gap:10px;margin-top:8px;">
+                        <span style="color:#3182ce;font-weight:bold;font-size:14px;">ℹ</span>
+                        <span>Offloading is borne by customer. It will be recharged on the invoice, not added to landed cost.</span>
+                    </div>
                 </div>
             </div>
 
-            <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Weighbridge Slip</h3>
-                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
-                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge slip at customer (delivery)</label>
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <button type="button" id="upload-delivery-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload Delivery Slip</button>
-                        <span id="delivery-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
-                    </div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${field({ label: 'Gross Weight (kg) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || '' })}
-                    ${field({ label: 'Tare Weight (kg) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || '' })}
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Net Weight Delivered (Calculated)</label>
-                        <div id="delivered-calc-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">0 kg</div>
-                        <span style="font-size:12px;color:#a0aec0;">Gross minus tare. Used as Delivered Quantity and for revenue.</span>
-                    </div>
-                </div>
-            </div>
-
-            <div style="${CARD_BOX}margin-bottom:28px;">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Loss Reconciliation</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Expected Quantity</label>
-                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">${expectedQty.toLocaleString('en-KE')} kg</div>
-                    </div>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Delivered Quantity (kg)</label>
-                        <div id="delivered-qty-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">0 kg</div>
-                    </div>
-                </div>
-                <div id="loss-alert-box" style="border-radius:6px;padding:12px 16px;font-size:13px;display:flex;align-items:center;gap:12px;">
-                    <span></span><span id="loss-alert-text"></span>
-                </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:center;">
+            <div style="display:flex;gap:12px;align-items:center;margin-top:24px;">
                 <button class="h-btn primary" id="capitalise-btn" style="${BTN_PRIMARY}">Capitalise Costs & Move to Position</button>
                 <button class="h-btn ghost" id="back-to-lots-btn" style="${BTN_GHOST}">Back to Lots</button>
             </div>
         `;
 
-        // Delivered quantity is always gross - tare from the customer weighbridge
-        const getDelivered = () => Math.max(0, flt($('#f-d-gross').val()) - flt($('#f-d-tare').val()));
-
-        const updateReconciliation = () => {
-            const delivered = getDelivered();
-            const diff = expectedQty - delivered;
-            const alertBox = $('#loss-alert-box');
-            const alertText = $('#loss-alert-text');
-            const icon = alertBox.find('span:first');
-
-            $('#delivered-calc-box').text(fmtKg(delivered));
-            $('#delivered-qty-box').text(fmtKg(delivered));
-
-            if (delivered <= 0) {
-                alertBox.css({ background: '#f7fafc', border: '1px solid #e2e8f0', color: '#4a5568' });
-                icon.text('ℹ');
-                alertText.text('Upload the customer weighbridge slip, or enter gross and tare weight, to calculate the delivered quantity.');
-            } else if (diff <= 0) {
-                alertBox.css({ background: '#f0fff4', border: '1px solid #c6f6d5', color: '#276749' });
-                icon.text('✓');
-                alertText.text('No loss recorded. Full expected quantity delivered.');
-            } else {
-                const tolerance = 80;
-                const recovered = Math.max(0, diff - tolerance);
-                const sellRate = flt(l.sell_rate || l.negotiated_price || PAYABLE_RULES.defaultRate);
-                alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
-                icon.text('⚠');
-                alertText.text(diff <= tolerance
-                    ? `${diff.toLocaleString('en-KE')} kg loss is within the ${tolerance} kg tolerance limit.`
-                    : `${diff.toLocaleString('en-KE')} kg loss exceeds the ${tolerance} kg tolerance. ${recovered.toLocaleString('en-KE')} kg recovered from the transporter at sell rate = KES ${(recovered * sellRate).toLocaleString('en-KE')}, split across inventory reversal and margin recovery.`);
-            }
+        const updateOffloadingTotal = () => {
+            const rate = flt($('#f-offloading-rate').val() || 0);
+            const total = rate * bagsCount;
+            $('#offloading-total-box').text(`KES ${total.toLocaleString('en-KE')}`);
         };
 
-        $('#f-d-gross, #f-d-tare').on('input', updateReconciliation);
-        updateReconciliation();
-
-        // ---- OCR on the customer weighbridge slip ----
-        document.getElementById('upload-delivery-slip').addEventListener('click', () => {
-            const fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.accept = '.jpg,.jpeg,.png,.webp,.pdf';
-            fileInput.onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    showToast('Delivery slip uploaded. Extracting details...', 'orange');
-                    frappe.call({
-                        method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.extract_weighbridge_data',
-                        args: { filedata: ev.target.result, slip_type: 'delivery', ticket_name: l.name, filename: file.name },
-                        freeze: true,
-                        freeze_message: 'Reading delivery weighbridge slip...',
-                        callback: (r) => {
-                            if (r.exc || !r.message || !r.message.success) {
-                                showToast((r.message && r.message.message) || 'Could not read the slip. Enter gross and tare manually.', 'orange');
-                                $('#delivery-file-name').text(file.name);
-                                return;
-                            }
-                            const d = r.message;
-                            const has = (v) => v !== null && v !== undefined && v !== '';
-                            if (has(d.gross_weight)) $('#f-d-gross').val(d.gross_weight);
-                            if (has(d.tare_weight)) $('#f-d-tare').val(d.tare_weight);
-                            $('#delivery-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
-                            updateReconciliation();
-                            showToast('Delivery slip read successfully. Please check the weights.');
-                        },
-                        error: () => showToast('Error while reading the delivery slip.', 'red')
-                    });
-                };
-                reader.readAsDataURL(file);
-            };
-            fileInput.click();
-        });
+        $('#f-offloading-rate').on('input', updateOffloadingTotal);
 
         container.querySelectorAll('[data-lot]').forEach(btn => {
             btn.addEventListener('click', () => navigate('transport', { id: btn.dataset.lot }));
@@ -4515,21 +4532,16 @@ function init_holec_trading_engine() {
         document.getElementById('back-to-lots-btn').addEventListener('click', () => navigate('lots'));
 
         document.getElementById('capitalise-btn').addEventListener('click', async () => {
-            const gross = flt($('#f-d-gross').val());
-            const tare = flt($('#f-d-tare').val());
-            if (gross <= 0 || tare <= 0 || gross <= tare) {
-                frappe.msgprint(__('Enter a valid customer weighbridge gross and tare weight (gross must be greater than tare).'));
-                return;
-            }
+            const cess = flt($('#f-cess').val());
+            const offloadingRate = flt($('#f-offloading-rate').val());
+            const offloadingTotal = offloadingRate * bagsCount;
 
             await frappe.db.set_value('Buy Ticket', l.name, {
                 status: 'Position',
-                haulage_kes: flt($('#f-haulage').val()),
-                cess_kes: flt($('#f-cess').val()),
-                offloading_kes: flt($('#f-offloading').val()),
-                delivery_gross_kg: gross,
-                delivery_tare_kg: tare,
-                delivered_quantity_kg: gross - tare
+                haulage_kes: haulageTotal,
+                cess_kes: cess,
+                offloading_kes: offloadingTotal,
+                offloading_rate: offloadingRate
             });
 
             showToast(`Costs capitalised and ${l.name} moved to Position`);
@@ -4591,20 +4603,45 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Loss Reconciliation</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Expected Quantity</label>
-                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">${(computePayable(l).acceptedNetKg || 0).toLocaleString('en-KE')} kg</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
+                <!-- Left Box: Customer Weighbridge Slip -->
+                <div style="${CARD_BOX}margin-bottom:0;">
+                    <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Weighbridge Slip</h3>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+                        <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">WEIGHBRIDGE SLIP (DELIVERY)</label>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <button type="button" id="upload-delivery-slip" style="padding:6px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#2d3748;font-weight:500;">⬆ Upload Delivery Slip</button>
+                            <span id="delivery-file-name" style="font-size:12px;color:#718096;font-style:italic;">No file chosen</span>
+                        </div>
                     </div>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Delivered Quantity (kg)</label>
-                        <div id="delivered-qty-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#4a5568;font-weight:500;">0 kg</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+                        ${field({ label: 'GROSS (KG) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || 1000 })}
+                        ${field({ label: 'TARE (KG) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || 590 })}
+                        <div style="display:flex;flex-direction:column;gap:6px;">
+                            <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">CALCULATED NET DELIVERED</label>
+                            <div id="delivered-calc-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#1a202c;font-weight:600;height:38px;display:flex;align-items:center;">410 kg</div>
+                            <span style="font-size:11px;color:#718096;">Feeds Invoice quantity and revenue.</span>
+                        </div>
                     </div>
                 </div>
-                <div id="loss-alert-box" style="border-radius:6px;padding:12px 16px;font-size:13px;display:flex;align-items:center;gap:12px;">
-                    <span></span><span id="loss-alert-text"></span>
+
+                <!-- Right Box: Loss Reconciliation -->
+                <div style="${CARD_BOX}margin-bottom:0;">
+                    <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Loss Reconciliation</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                        <div style="display:flex;flex-direction:column;gap:6px;">
+                            <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">EXPECTED (KG)</label>
+                            <div style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#2d3748;font-weight:600;height:38px;display:flex;align-items:center;">${(computePayable(l).acceptedNetKg || 520).toLocaleString('en-KE')} kg</div>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:6px;">
+                            <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">DELIVERED (KG)</label>
+                            <div id="delivered-qty-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#2d3748;font-weight:600;height:38px;display:flex;align-items:center;">410 kg</div>
+                        </div>
+                    </div>
+                    <div id="loss-alert-box" style="border-radius:6px;padding:12px 16px;font-size:12px;display:flex;flex-direction:column;gap:4px;">
+                        <div style="display:flex;align-items:center;gap:8px;"><span id="loss-alert-icon" style="font-size:14px;font-weight:bold;"></span><span id="loss-alert-text" style="font-weight:600;"></span></div>
+                        <span style="font-size:11px;color:#718096;margin-left:20px;">Posts as a separate cost-ledger adjustment.</span>
+                    </div>
                 </div>
             </div>
 
@@ -4633,7 +4670,6 @@ function init_holec_trading_engine() {
                         <span style="color:#4a5568;">Margin</span>
                         <strong style="color:#2d3748;" id="calc-margin-total">KES 0</strong>
                     </div>
-
                 </div>
             </div>
 
@@ -4653,7 +4689,7 @@ function init_holec_trading_engine() {
             </div>
         `;
 
-        const expectedQty = computePayable(l).acceptedNetKg || 0;
+        const expectedQty = computePayable(l).acceptedNetKg || (flt(l.gross_weight_kg) - flt(l.tare_weight_kg)) || 520;
         const getDelivered = () => Math.max(0, flt($('#f-d-gross').val()) - flt($('#f-d-tare').val()));
 
         const updateCalculations = () => {
@@ -4669,28 +4705,33 @@ function init_holec_trading_engine() {
             const diff = expectedQty - delivered;
             const alertBox = $('#loss-alert-box');
             const alertText = $('#loss-alert-text');
-            const icon = alertBox.find('span:first');
+            const alertIcon = $('#loss-alert-icon');
 
             $('#delivered-calc-box').text(fmtKg(delivered));
             $('#delivered-qty-box').text(fmtKg(delivered));
 
             if (delivered <= 0) {
                 alertBox.css({ background: '#f7fafc', border: '1px solid #e2e8f0', color: '#4a5568' });
-                icon.text('ℹ');
-                alertText.text('Upload the customer weighbridge slip, or enter gross and tare weight, to calculate the delivered quantity.');
+                alertIcon.text('ℹ');
+                alertText.text('Upload the customer weighbridge slip, or enter gross and tare weight.');
             } else if (diff <= 0) {
                 alertBox.css({ background: '#f0fff4', border: '1px solid #c6f6d5', color: '#276749' });
-                icon.text('✓');
+                alertIcon.text('✓');
                 alertText.text('No loss recorded. Full expected quantity delivered.');
             } else {
                 const tolerance = 80;
-                const recovered = Math.max(0, diff - tolerance);
-                const sellRate = flt($('#f-sell-rate').val() || l.sell_rate || PAYABLE_RULES.defaultRate);
-                alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
-                icon.text('⚠');
-                alertText.text(diff <= tolerance
-                    ? `${diff.toLocaleString('en-KE')} kg loss is within the ${tolerance} kg tolerance limit.`
-                    : `${diff.toLocaleString('en-KE')} kg loss exceeds the ${tolerance} kg tolerance. ${recovered.toLocaleString('en-KE')} kg recovered from transporter at sell rate = KES ${(recovered * sellRate).toLocaleString('en-KE')}.`);
+                const recoveredKg = Math.max(0, diff - tolerance);
+                const refRate = flt(computePayable(l).refRate || 48);
+                const recoveredKES = recoveredKg * refRate;
+                if (diff <= tolerance) {
+                    alertBox.css({ background: '#ebf8ff', border: '1px solid #bee3f8', color: '#2b6cb0' });
+                    alertIcon.text('ℹ');
+                    alertText.text(`${diff.toLocaleString('en-KE')} kg loss is within the ${tolerance} kg tolerance limit.`);
+                } else {
+                    alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
+                    alertIcon.text('⚠');
+                    alertText.text(`${diff.toLocaleString('en-KE')} kg loss exceeds ${tolerance} kg tolerance. Transporter recovery: KES ${recoveredKES.toLocaleString('en-KE')}`);
+                }
             }
 
             const m = computeMargin(l, flt($('#f-sell-rate').val()));
@@ -4701,7 +4742,6 @@ function init_holec_trading_engine() {
             $('#calc-landed').text('- ' + fmtKES(m.landedCost));
             $('#calc-landed-sub').text(`${fmtKg1(m.buyKg)} supplier net × KES ${m.refRate}/kg`);
             $('#calc-margin-total').text(fmtKES(m.margin)).css('color', color);
-            $('#calc-margin').text(fmtKES(m.marginPerTonne)).css('color', color);
             $('#header-margin').text(fmtKES(m.margin)).css('color', color);
         };
 

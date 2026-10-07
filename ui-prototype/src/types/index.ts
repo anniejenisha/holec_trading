@@ -2,7 +2,7 @@
 
 export type Tier = "N" | "C" | "B";
 
-export type SupplierGroup = "Farmers" | "Transporters" | "Cess" | "Casual Labour" | "Farmer" | "Transporter" | "CESS" | "Aggregator" | "Trader";
+export type SupplierGroup = "Farmers" | "Transporters" | "Cess" | "Casual Labour";
 export type PartyStatus = "Draft" | "Verified" | "Approved";
 export type PaymentRail = "Mpesa" | "PesaLink" | "Bank Transfer" | "Cash";
 export type EtimsStatus = "Registered" | "Buyer-Generated" | "Blocked";
@@ -15,7 +15,6 @@ export interface Supplier {
 	group: SupplierGroup | "";
 	kraPin: string;
 	idNo: string;
-	county: string;
 	address: string;
 	etims: EtimsStatus | "";
 	vat: VatStatus | "";
@@ -31,22 +30,33 @@ export interface Supplier {
 }
 
 export type CustomerGroup = "Miller" | "Exporter" | "Feed Manufacturer" | "Trader";
-export type CreditTerms = "Net 7" | "Net 14" | "Net 30" | "Cash on delivery";
 export type OffloadingBorneBy = "Customer" | "Us";
+
+export interface CustomerContact {
+	id: string;
+	name: string;
+	role: string;
+	area: string;
+	phone: string;
+	email: string;
+	isPrimary: boolean;
+}
 
 export interface Customer {
 	id: string;
 	name: string;
+	registeredName?: string;
 	group: CustomerGroup | "";
 	kraPin: string;
 	address: string;
 	creditLimit: number;
-	creditTerms: CreditTerms | "";
+	creditTerms?: string;
 	exposureLimit: number;
 	guarantee: string;
 	moistureRule: string;
 	fmRule: string;
 	offloadingBorneBy: OffloadingBorneBy | "";
+	contacts: CustomerContact[];
 	status: PartyStatus;
 	createdBy: string;
 	approvedBy: string;

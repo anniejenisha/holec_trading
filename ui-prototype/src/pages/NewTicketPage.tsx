@@ -16,7 +16,7 @@ export default function NewTicketPage() {
 	const suppliers = useStore((s) => s.suppliers);
 	const createTicket = useStore((s) => s.createTicket);
 
-	const farmerSuppliers = suppliers.filter((s) => s.status === "Approved" && (s.group === "Farmer" || s.group === "Farmers"));
+	const farmerSuppliers = suppliers.filter((s) => s.status === "Approved" && s.group === "Farmers");
 	const unapprovedCount = suppliers.length - farmerSuppliers.length;
 
 	const [supplierId, setSupplierId] = useState("");

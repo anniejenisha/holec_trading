@@ -88,11 +88,11 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Must be an Approved/Active Supplier record.",
+   "description": "Must be an Approved/Active Farmer record.",
    "fieldname": "supplier",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Supplier",
+   "label": "Farmer",
    "options": "Supplier",
    "reqd": 1
   },

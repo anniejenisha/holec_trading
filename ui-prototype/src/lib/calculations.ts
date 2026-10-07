@@ -25,54 +25,72 @@ export interface PayableResult {
 	fmDeductedPct: number;
 	fmDeductionKg: number;
 	acceptedNetKg: number;
+	paidBags: number;
 	refRatePerKg: number;
 	grossValue: number;
-	baggingDeduction: number;
-	aflatoxinTestFee: number;
-	aflatoxinPass: boolean;
+	aflatoxinFee: number;
+	dryingRatePerBag: number;
+	dryingDeduction: number;
+	hemaRatePerBag: number;
+	hemaDeduction: number;
+	totalOtherCharges: number;
 	netPayable: number;
+	deliveredBags: number;
+	effectivePricePerBag: number;
 }
 
-// Deduction engine — mirrors Module 8 (payable engine)
+// Deduction engine — 8-step Payable calculation
 export function computePayable(
-	lot: Pick<Lot, "grossKg" | "tareKg" | "moisturePct" | "fmPct" | "bags" | "aflatoxinTested" | "aflatoxinPpb">,
+	lot: Pick<Lot, "grossKg" | "tareKg"> & {
+		moisturePct?: number;
+		fmPct?: number;
+		refRatePerKg?: number;
+		aflatoxinFee?: number;
+		dryingRatePerBag?: number;
+		hemaRatePerBag?: number;
+	},
 ): PayableResult {
 	const grossKg = lot.grossKg ?? 0;
 	const tareKg = lot.tareKg ?? 0;
-	const moisturePct = lot.moisturePct ?? 0;
+	const moisturePct = lot.moisturePct ?? 13.5;
 	const fmPct = lot.fmPct ?? 0;
-	const bags = lot.bags ?? 0;
 
-	// Step 1: Weight (Net = Gross - Tare)
+	// Step 1: Weight
 	const netKg = Math.max(0, grossKg - tareKg);
 
 	// Step 2: Moisture
-	// Excess % = Moisture % - 13.5 (minimum 0)
 	const moistureStd = 13.5;
 	const moistureExcess = Math.max(0, moisturePct - moistureStd);
-	// Bag size = 90 + Excess (every 1% over adds 1 kg per bag)
 	const bagSize = 90 + moistureExcess;
-	// Moisture-adjusted kg = Net ÷ Bag size x 90
 	const moistureAdjustedKg = netKg > 0 && bagSize > 0 ? (netKg / bagSize) * 90 : netKg;
-	// Moisture deduction kg = Net - Moisture-adjusted kg
 	const moistureDeductionKg = Math.max(0, netKg - moistureAdjustedKg);
 
 	// Step 3: Foreign matter
-	// Deducted % = Foreign matter % - 0.5 (minimum 0)
 	const fmDeductedPct = Math.max(0, fmPct - 0.5);
-	const fmDeductionKg = netKg * (fmDeductedPct / 100);
+	const fmDeductionKg = moistureAdjustedKg * (fmDeductedPct / 100);
 
-	// Stock quantity after deductions
+	// Step 4: Accepted quantity
 	const acceptedNetKg = Math.max(0, moistureAdjustedKg - fmDeductionKg);
+	const paidBags = acceptedNetKg > 0 ? acceptedNetKg / 90 : 0;
 
-	const refRatePerKg = 48; // reference rate KES/kg
-	const grossValue = netKg * refRatePerKg;
-	const baggingRatePerBag = 25;
-	const baggingDeduction = bags * baggingRatePerBag;
-	const aflatoxinTestFee = lot.aflatoxinTested ? 300 : 0;
-	const aflatoxinPass = (lot.aflatoxinPpb ?? 0) <= 10;
+	// Step 5: Payable value
+	const refRatePerKg = lot.refRatePerKg ?? 48;
+	const grossValue = acceptedNetKg * refRatePerKg;
 
-	const netPayable = Math.max(0, grossValue - baggingDeduction - aflatoxinTestFee);
+	// Step 6: Other charges
+	const aflatoxinFee = lot.aflatoxinFee ?? 0;
+	const dryingRatePerBag = lot.dryingRatePerBag ?? 50;
+	const dryingDeduction = dryingRatePerBag * paidBags;
+	const hemaRatePerBag = lot.hemaRatePerBag ?? 24.30;
+	const hemaDeduction = hemaRatePerBag * paidBags;
+	const totalOtherCharges = aflatoxinFee + dryingDeduction + hemaDeduction;
+
+	// Step 7: Net payable
+	const netPayable = Math.max(0, grossValue - totalOtherCharges);
+
+	// Step 8: Bag Impact
+	const deliveredBags = netKg > 0 ? netKg / 90 : 0;
+	const effectivePricePerBag = deliveredBags > 0 ? netPayable / deliveredBags : 0;
 
 	return {
 		netKg,
@@ -85,12 +103,18 @@ export function computePayable(
 		fmDeductedPct,
 		fmDeductionKg,
 		acceptedNetKg,
+		paidBags,
 		refRatePerKg,
 		grossValue,
-		baggingDeduction,
-		aflatoxinTestFee,
-		aflatoxinPass,
+		aflatoxinFee,
+		dryingRatePerBag,
+		dryingDeduction,
+		hemaRatePerBag,
+		hemaDeduction,
+		totalOtherCharges,
 		netPayable,
+		deliveredBags,
+		effectivePricePerBag,
 	};
 }
 

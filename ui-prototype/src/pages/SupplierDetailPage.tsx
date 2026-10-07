@@ -14,7 +14,7 @@ import { useStore } from "@/store/useStore";
 import type { Supplier } from "@/types";
 
 const BLANK: Omit<Supplier, "id" | "status" | "createdBy" | "approvedBy"> = {
-	name: "", group: "", kraPin: "", idNo: "", county: "", address: "",
+	name: "", group: "Farmers", kraPin: "", idNo: "", address: "",
 	etims: "", vat: "", aflatoxinLicence: false, bank: "", bankLetter: false,
 	callbackDone: false, rail: "", transferBorneBy: "",
 };
@@ -29,9 +29,13 @@ export default function SupplierDetailPage() {
 	const submitSupplierForVerification = useStore((s) => s.submitSupplierForVerification);
 	const approveSupplier = useStore((s) => s.approveSupplier);
 
-	const [form, setForm] = useState<Omit<Supplier, "id" | "status" | "createdBy" | "approvedBy">>(
-		existing ?? BLANK,
-	);
+	const [form, setForm] = useState<Omit<Supplier, "id" | "status" | "createdBy" | "approvedBy">>(() => {
+		if (existing) {
+			const { id: _i, status: _s, createdBy: _c, approvedBy: _a, ...rest } = existing;
+			return rest;
+		}
+		return BLANK;
+	});
 	const [errors, setErrors] = useState<Record<string, string>>({});
 
 	if (!isNew && !existing) {

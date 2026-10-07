@@ -6,32 +6,32 @@ import type { Customer, Lot, LotState, Payment, Sequences, Supplier, TradeEvent 
 
 export const seedSuppliers: Supplier[] = [
 	{
-		id: "SUP-0001", name: "Wanjiru Grain Traders", group: "Aggregator", kraPin: "A011223344B", idNo: "22334455",
-		county: "Nakuru", address: "Njoro Rd, Nakuru", etims: "Registered", vat: "Registered", aflatoxinLicence: true,
+		id: "SUP-0001", name: "Wanjiru Grain Traders", group: "Farmers", kraPin: "A011223344B", idNo: "22334455",
+		address: "Njoro Rd, Nakuru", etims: "Registered", vat: "Registered", aflatoxinLicence: true,
 		bank: "Equity Bank — 0110xxxxxx", bankLetter: true, callbackDone: true, rail: "PesaLink",
 		transferBorneBy: "Supplier", status: "Approved", createdBy: "Grace (Ops)", approvedBy: "Finance",
 	},
 	{
-		id: "SUP-0002", name: "Kiptoo Farmers Cooperative", group: "Farmer", kraPin: "A022334455C", idNo: "11223366",
-		county: "Uasin Gishu", address: "Eldoret-Ziwa Rd", etims: "Buyer-Generated", vat: "Not registered", aflatoxinLicence: false,
+		id: "SUP-0002", name: "Kiptoo Farmers Cooperative", group: "Farmers", kraPin: "A022334455C", idNo: "11223366",
+		address: "Eldoret-Ziwa Rd", etims: "Buyer-Generated", vat: "Not registered", aflatoxinLicence: false,
 		bank: "KCB — 0220xxxxxx", bankLetter: true, callbackDone: true, rail: "Mpesa",
 		transferBorneBy: "Us", status: "Approved", createdBy: "Grace (Ops)", approvedBy: "Finance",
 	},
 	{
-		id: "SUP-0003", name: "Rift Valley Logistics (Transport)", group: "Transporter", kraPin: "A033445566D", idNo: "33445566",
-		county: "Nakuru", address: "Industrial Area, Nakuru", etims: "Registered", vat: "Registered", aflatoxinLicence: false,
+		id: "SUP-0003", name: "Rift Valley Logistics (Transport)", group: "Transporters", kraPin: "A033445566D", idNo: "33445566",
+		address: "Industrial Area, Nakuru", etims: "Registered", vat: "Registered", aflatoxinLicence: false,
 		bank: "I&M Bank — 0330xxxxxx", bankLetter: true, callbackDone: true, rail: "Bank Transfer",
 		transferBorneBy: "Us", status: "Approved", createdBy: "Grace (Ops)", approvedBy: "Finance",
 	},
 	{
-		id: "SUP-0004", name: "Cherono Bulk Suppliers", group: "Trader", kraPin: "A044556677E", idNo: "44556677",
-		county: "Trans Nzoia", address: "Kitale Town", etims: "Registered", vat: "Registered", aflatoxinLicence: true,
+		id: "SUP-0004", name: "Cherono Bulk Suppliers", group: "Cess", kraPin: "A044556677E", idNo: "44556677",
+		address: "Kitale Town", etims: "Registered", vat: "Registered", aflatoxinLicence: true,
 		bank: "", bankLetter: false, callbackDone: false, rail: "PesaLink",
 		transferBorneBy: "Supplier", status: "Verified", createdBy: "Grace (Ops)", approvedBy: "",
 	},
 	{
-		id: "SUP-0005", name: "Chebet & Sons", group: "Farmer", kraPin: "", idNo: "",
-		county: "Nakuru", address: "", etims: "", vat: "", aflatoxinLicence: false,
+		id: "SUP-0005", name: "Chebet & Sons", group: "Casual Labour", kraPin: "", idNo: "",
+		address: "", etims: "", vat: "", aflatoxinLicence: false,
 		bank: "", bankLetter: false, callbackDone: false, rail: "",
 		transferBorneBy: "", status: "Draft", createdBy: "Grace (Ops)", approvedBy: "",
 	},
@@ -39,21 +39,33 @@ export const seedSuppliers: Supplier[] = [
 
 export const seedCustomers: Customer[] = [
 	{
-		id: "CUS-0001", name: "Pembe Flour Mills Ltd", group: "Miller", kraPin: "P051667788F",
-		address: "Athi River, Machakos", creditLimit: 8000000, creditTerms: "Net 14", exposureLimit: 12000000,
+		id: "CUS-0001", name: "Pembe Flour Mills Ltd", registeredName: "Pembe Flour Mills Limited", group: "Miller", kraPin: "P051667788F",
+		address: "Athi River, Machakos", creditLimit: 8000000, exposureLimit: 12000000,
 		guarantee: "Bank guarantee — KES 5,000,000", moistureRule: "13.5% max", fmRule: "2.0% max",
-		offloadingBorneBy: "Customer", status: "Approved", createdBy: "Sales User", approvedBy: "Finance",
+		offloadingBorneBy: "Customer",
+		contacts: [
+			{ id: "CT-101", name: "David Kimani", role: "Procurement Manager", area: "Athi River", phone: "0722111222", email: "dkimani@pembemills.co.ke", isPrimary: true },
+			{ id: "CT-102", name: "Sarah Mutua", role: "Finance Officer", area: "Nairobi", phone: "0733222333", email: "smutua@pembemills.co.ke", isPrimary: false }
+		],
+		status: "Approved", createdBy: "Sales User", approvedBy: "Finance",
 	},
 	{
-		id: "CUS-0002", name: "Unga Group Kenya", group: "Miller", kraPin: "P062778899G",
-		address: "Industrial Area, Nairobi", creditLimit: 5000000, creditTerms: "Net 7", exposureLimit: 6000000,
+		id: "CUS-0002", name: "Unga Group Kenya", registeredName: "Unga Group PLC", group: "Miller", kraPin: "P062778899G",
+		address: "Industrial Area, Nairobi", creditLimit: 5000000, exposureLimit: 6000000,
 		guarantee: "Trade reference on file", moistureRule: "13.0% max", fmRule: "1.5% max",
-		offloadingBorneBy: "Us", status: "Approved", createdBy: "Sales User", approvedBy: "Finance",
+		offloadingBorneBy: "Us",
+		contacts: [
+			{ id: "CT-201", name: "James Ochieng", role: "Factory Manager", area: "Nairobi", phone: "0711999888", email: "j.ochieng@unga.com", isPrimary: true }
+		],
+		status: "Approved", createdBy: "Sales User", approvedBy: "Finance",
 	},
 	{
-		id: "CUS-0003", name: "Mombasa Grain Exports", group: "Exporter", kraPin: "",
-		address: "Mombasa", creditLimit: 0, creditTerms: "", exposureLimit: 0,
+		id: "CUS-0003", name: "Mombasa Grain Exports", registeredName: "Mombasa Grain Exports Ltd", group: "Exporter", kraPin: "",
+		address: "Mombasa", creditLimit: 0, exposureLimit: 0,
 		guarantee: "", moistureRule: "", fmRule: "", offloadingBorneBy: "",
+		contacts: [
+			{ id: "CT-301", name: "Hassan Ali", role: "Logistics Lead", area: "Mombasa", phone: "0788444555", email: "hassan@mombasagrain.co.ke", isPrimary: true }
+		],
 		status: "Draft", createdBy: "Sales User", approvedBy: "",
 	},
 ];

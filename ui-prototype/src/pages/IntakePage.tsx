@@ -128,7 +128,7 @@ export default function IntakePage() {
 						<Select value={transporterId} onValueChange={setTransporterId}>
 							<SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
 							<SelectContent>
-								{suppliers.filter((s) => s.group === "Transporter" || s.group === "Transporters").map((s) => (
+								{suppliers.filter((s) => s.group === "Transporters").map((s) => (
 									<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
 								))}
 							</SelectContent>
@@ -156,6 +156,7 @@ export default function IntakePage() {
 			<div className="mt-6 flex items-center gap-2">
 				<Button onClick={handleSubmit}>Submit intake & create lot</Button>
 				<Button variant="ghost" onClick={() => navigate("/lots")}>Cancel</Button>
+			</div>
 		</div>
 	);
 }

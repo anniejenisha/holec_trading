@@ -1,4 +1,13 @@
 frappe.ui.form.on('Buy Ticket', {
+    setup(frm) {
+        frm.set_query('supplier', () => {
+            return {
+                filters: {
+                    supplier_group: ['in', ['Farmer', 'Farmers']]
+                }
+            };
+        });
+    },
     refresh(frm) {
         inject_portal_form_styles();
         if (frm.is_new()) {

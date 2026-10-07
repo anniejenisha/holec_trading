@@ -14,16 +14,43 @@ export default function CustomersPage() {
 	const navigate = useNavigate();
 
 	const columns: Column<Customer>[] = [
-		{ key: "id", header: "ID", render: (c) => <span className="font-mono text-xs">{c.id}</span>, sortValue: (c) => c.id },
+		{ key: "id", header: "Customer ID", render: (c) => <span className="font-mono text-xs font-semibold">{c.id}</span>, sortValue: (c) => c.id },
 		{ key: "name", header: "Name", render: (c) => <span className="font-medium">{c.name}</span>, sortValue: (c) => c.name },
 		{ key: "group", header: "Group", render: (c) => c.group || "—" },
+		{
+			key: "contact", header: "Primary Contact Area",
+			render: (c) => {
+				const primary = c.contacts?.find((ct) => ct.isPrimary) || c.contacts?.[0];
+				return primary ? (
+					<div className="text-xs">
+						<span className="font-medium">{primary.name}</span>
+						{primary.area && <span className="ml-1 text-muted-foreground">({primary.area})</span>}
+					</div>
+				) : "—";
+			},
+		},
 		{
 			key: "creditLimit", header: "Credit limit",
 			render: (c) => (c.creditLimit ? fmtKES(c.creditLimit) : "—"),
 			sortValue: (c) => c.creditLimit, className: "text-right",
 		},
-		{ key: "creditTerms", header: "Terms", render: (c) => c.creditTerms || "—" },
-		{ key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
+		{
+			key: "status", header: "Status & Activation",
+			render: (c) => (
+				<div className="flex items-center gap-1.5">
+					<StatusBadge status={c.status} />
+					{c.status === "Approved" ? (
+						<span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+							Active
+						</span>
+					) : (
+						<span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+							Pending
+						</span>
+					)}
+				</div>
+			),
+		},
 	];
 
 	return (
