@@ -137,7 +137,7 @@ function init_holec_trading_engine() {
 
         // Step 7: Net payable = Gross value - Aflatoxin - Drying - HEMA
         const calculatedNetPayable = Math.max(0, grossValue - totalOtherDeductions);
-        const netPayable = calculatedNetPayable;
+        const netPayable = (rateOverride == null && flt(lot.supplier_payment_amount) > 0) ? flt(lot.supplier_payment_amount) : calculatedNetPayable;
 
         // Step 8: Bag Impact
         const deliveredBags = netKg > 0 ? netKg / 90 : 0;
@@ -3284,6 +3284,7 @@ function init_holec_trading_engine() {
 
         const supplierRows = dueSupplierTickets.map(t => {
             const p = computePayable(t);
+            const netPayableAmt = flt(t.supplier_payment_amount) > 0 ? flt(t.supplier_payment_amount) : p.netPayable;
             const ps = t.supplier_payment_status || 'Pending Finance Approval';
             let label = 'Submit for approval', style = BTN_SM_APPROVE;
             if (ps === 'Pending Finance Approval' || ps === 'Pending Approval') { label = 'Review 1st Stage (Finance)'; style = BTN_SM_SUBMIT; }
@@ -3299,7 +3300,7 @@ function init_holec_trading_engine() {
                 <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${escHtml(t.name)}</td>
                 <td style="padding:12px 16px;color:#2d3748;">${escHtml(supplierName)}</td>
                 <td style="padding:12px 16px;color:#2d3748;">${fmtKg1(p.acceptedNetKg)}</td>
-                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(p.netPayable)}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(netPayableAmt)}</td>
                 <td style="padding:12px 16px;">${approvalBadge(ps, 'Pending Approval')}</td>
                 <td style="padding:12px 16px;text-align:right;">
                     <button class="h-btn sm pay-supplier-btn" data-id="${escHtml(t.name)}" style="${style}">${label}</button>
