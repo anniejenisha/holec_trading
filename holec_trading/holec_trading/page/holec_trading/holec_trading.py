@@ -835,7 +835,7 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
 
 @frappe.whitelist()
-def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None, amount=None, payment_type=None):
+def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None, amount=None, payment_type=None, paid_from=None, paid_to=None):
     """
     2-stage approval workflow for Supplier Net Invoice Payment:
       - 'submit': Holec Finance / Submitter initiates -> status = 'Pending Finance Approval'
@@ -864,6 +864,8 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         "supplier_invoice_amount",
         "supplier_payment_amount",
         "supplier_payment_type",
+        "supplier_payment_paid_from",
+        "supplier_payment_paid_to",
     ]:
         if not frappe.db.has_column("Buy Ticket", fieldname):
             try:
@@ -879,6 +881,10 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         t.db_set("supplier_payment_amount", flt(amount))
     if payment_type:
         t.db_set("supplier_payment_type", payment_type)
+    if paid_from:
+        t.db_set("supplier_payment_paid_from", paid_from)
+    if paid_to:
+        t.db_set("supplier_payment_paid_to", paid_to)
 
     if action == "submit":
         t.db_set("supplier_payment_requested_by", user)
@@ -918,7 +924,50 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
 
 
 @frappe.whitelist()
-def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None, amount=None, payment_type=None):
+def get_payment_entry_defaults(ticket=None, payment_type="Pay", mode_of_payment=None):
+    """
+    Returns default Paid From and Paid To accounts based on ERPNext rules for Payment Entry.
+    """
+    from erpnext.accounts.party import get_party_account
+
+    ptype = payment_type or "Pay"
+    mop = mode_of_payment or "Bank Transfer"
+    t = frappe.get_doc("Buy Ticket", ticket) if (ticket and frappe.db.exists("Buy Ticket", ticket)) else None
+
+    mop_acc = _mode_of_payment_account(mop, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+
+    paid_from = None
+    paid_to = None
+
+    if ptype == "Pay":
+        paid_from = mop_acc
+        if t and t.supplier:
+            paid_to = get_party_account("Supplier", t.supplier, COMPANY)
+        if not paid_to:
+            paid_to = frappe.db.get_value("Account", {"account_type": "Payable", "company": COMPANY}, "name")
+    elif ptype == "Receive":
+        party_type = "Customer" if (t and t.customer) else "Supplier"
+        party = (t.customer if t else None) or (t.supplier if t else None)
+        if party:
+            paid_from = get_party_account(party_type, party, COMPANY)
+        if not paid_from:
+            paid_from = frappe.db.get_value("Account", {"account_type": "Receivable", "company": COMPANY}, "name")
+        paid_to = mop_acc
+    else:  # Internal Transfer
+        paid_from = mop_acc
+        cash_acc = frappe.db.get_value("Account", {"account_type": "Cash", "company": COMPANY}, "name")
+        paid_to = cash_acc if cash_acc != paid_from else mop_acc
+
+    return {
+        "paid_from": (t.get("supplier_payment_paid_from") if (t and t.get("supplier_payment_paid_from")) else paid_from) or paid_from,
+        "paid_to": (t.get("supplier_payment_paid_to") if (t and t.get("supplier_payment_paid_to")) else paid_to) or paid_to,
+        "default_paid_from": paid_from,
+        "default_paid_to": paid_to
+    }
+
+
+@frappe.whitelist()
+def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None, amount=None, payment_type=None, paid_from=None, paid_to=None):
     """
     Pays the supplier for one Buy Ticket (accepted net quantity * ref rate) and marks it paid.
     Reads credentials and environment URLs from Bank Account document.
@@ -937,6 +986,10 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         t.db_set("supplier_payment_mode", mode_of_payment)
     if reference_no is not None:
         t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
+    if paid_from:
+        t.db_set("supplier_payment_paid_from", paid_from)
+    if paid_to:
+        t.db_set("supplier_payment_paid_to", paid_to)
 
     if not t.supplier and ptype != "Internal Transfer":
         frappe.throw("This ticket has no supplier.")
@@ -1022,27 +1075,36 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
             "supplier_account": supplier_acc_no
         }
 
+    account_paid_from = paid_from or t.get("supplier_payment_paid_from")
+    account_paid_to = paid_to or t.get("supplier_payment_paid_to")
+
     party_type = "Supplier"
     party = t.supplier
     if ptype == "Pay":
-        paid_from = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
-        paid_to = get_party_account("Supplier", t.supplier, COMPANY) if t.supplier else paid_from
+        if not account_paid_from:
+            account_paid_from = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        if not account_paid_to:
+            account_paid_to = get_party_account("Supplier", t.supplier, COMPANY) if t.supplier else account_paid_from
     elif ptype == "Receive":
         party_type = "Customer" if (t.customer or not frappe.db.exists("Supplier", t.supplier)) else "Supplier"
         party = t.customer or t.supplier
-        paid_from = get_party_account(party_type, party, COMPANY) if party else frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
-        paid_to = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        if not account_paid_from:
+            account_paid_from = get_party_account(party_type, party, COMPANY) if party else frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        if not account_paid_to:
+            account_paid_to = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
     else: # Internal Transfer
         party_type = None
         party = None
-        paid_from = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
-        paid_to = frappe.db.get_value("Account", {"account_type": "Cash", "company": COMPANY}, "name") or paid_from
+        if not account_paid_from:
+            account_paid_from = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        if not account_paid_to:
+            account_paid_to = frappe.db.get_value("Account", {"account_type": "Cash", "company": COMPANY}, "name") or account_paid_from
 
-    if not paid_from:
+    if not account_paid_from:
         frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
 
-    from_ccy = frappe.db.get_value("Account", paid_from, "account_currency") or "KES"
-    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency") if paid_to else "KES"
+    from_ccy = frappe.db.get_value("Account", account_paid_from, "account_currency") or "KES"
+    to_ccy = frappe.db.get_value("Account", account_paid_to, "account_currency") if account_paid_to else "KES"
     to_ccy = to_ccy or "KES"
 
     import json
@@ -1097,8 +1159,8 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "payment_type": ptype,
         "posting_date": nowdate(),
         "mode_of_payment": mode_of_payment,
-        "paid_from": paid_from,
-        "paid_to": paid_to,
+        "paid_from": account_paid_from,
+        "paid_to": account_paid_to,
         "paid_from_account_currency": from_ccy,
         "paid_to_account_currency": to_ccy,
         "paid_amount": amount,

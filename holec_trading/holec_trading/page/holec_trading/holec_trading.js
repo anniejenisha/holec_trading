@@ -471,7 +471,7 @@ function init_holec_trading_engine() {
 
     async function loadMasterData() {
         try {
-            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch] = await Promise.all([
+            const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch, accounts] = await Promise.all([
                 frappe.db.get_list('Supplier', {
                     fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id', SUPPLIER_STATUS_FIELD, 'owner'],
                     limit: 500
@@ -502,7 +502,8 @@ function init_holec_trading_engine() {
                         'sell_rate', 'invoice_number', 'delivery_gross_kg', 'delivery_tare_kg',
                         'transport_paid', 'transport_payment_status', 'transport_payment_mode', 'transport_payment_ref', 'transport_payment_requested_by', 'transport_payment_approved_by',
                         'supplier_paid', 'supplier_payment_status', 'supplier_payment_mode', 'supplier_payment_ref', 'supplier_payment_requested_by', 'supplier_finance_approved_by', 'supplier_manager_approved_by', 'supplier_payment_approved_by', 'supplier_payment_entry',
-                        'aflatoxin_deduction_kes', 'drying_rate_per_bag', 'hema_rate_per_bag', 'supplier_invoice_amount', 'supplier_payment_amount'
+                        'aflatoxin_deduction_kes', 'drying_rate_per_bag', 'hema_rate_per_bag', 'supplier_invoice_amount', 'supplier_payment_amount',
+                        'supplier_payment_type', 'supplier_payment_paid_from', 'supplier_payment_paid_to'
                     ],
                     order_by: 'creation desc',
                     limit: 500
@@ -517,6 +518,7 @@ function init_holec_trading_engine() {
                 frappe.db.get_list('Origin Area', { fields: ['name'], order_by: 'name asc', limit: 500 }).catch(() => []),
                 frappe.db.get_list('Origin County', { fields: ['name'], order_by: 'name asc', limit: 500 }).catch(() => []),
                 frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], order_by: 'name asc', limit: 500 }).catch(() => []),
+                frappe.db.get_list('Account', { filters: { is_group: 0 }, fields: ['name', 'account_name', 'account_type', 'company'], limit: 500, order_by: 'name asc' }).catch(() => []),
             ]);
 
             LIVE_STORE.suppliers = suppliers || [];
@@ -532,6 +534,7 @@ function init_holec_trading_engine() {
             LIVE_STORE.origin_area = origin_area || [];
             LIVE_STORE.origin_county = origin_county || [];
             LIVE_STORE.branch = branch || [];
+            LIVE_STORE.accounts = accounts || [];
 
             await loadApprovalStatuses();
         } catch (e) {
@@ -3482,6 +3485,14 @@ function init_holec_trading_engine() {
             console.error('Error fetching Mode of Payment:', e);
         }
 
+        const rawAccounts = LIVE_STORE.accounts || [];
+        const accountOpts = rawAccounts.length ? rawAccounts.map(a => ({
+            value: a.name,
+            label: `${a.name}${a.account_name && a.account_name !== a.name ? ' (' + a.account_name + ')' : ''}`
+        })) : [''];
+        const currentPaidFrom = l.supplier_payment_paid_from || '';
+        const currentPaidTo = l.supplier_payment_paid_to || '';
+
         const readonlyBox = (label, value, bold) => `
             <div style="display:flex;flex-direction:column;gap:8px;">
                 <label style="font-size:13px;font-weight:500;color:#4a5568;">${label}</label>
@@ -3498,7 +3509,7 @@ function init_holec_trading_engine() {
                 <span style="font-size:13px;color:#718096;">${escHtml(l.name)} · ${escHtml(supplierLabel)}</span>
             </div>
 
-            <div style="${CARD_BOX}padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="${CARD_BOX}padding:16px 24px;display:flex;justify-space-between;align-items:center;gap:16px;flex-wrap:wrap;">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <span style="font-size:13px;color:#4a5568;font-weight:600;">Payment Status</span>
                     ${approvalBadge(pstatus, 'Pending Finance Approval')}
@@ -3536,6 +3547,20 @@ function init_holec_trading_engine() {
                         value: l.supplier_payment_type || 'Pay'
                     })}
                     ${field({
+                        label: 'Account Paid From',
+                        id: 'f-sp-paid-from',
+                        type: 'select',
+                        options: withValue(accountOpts, currentPaidFrom),
+                        value: currentPaidFrom
+                    })}
+                    ${field({
+                        label: 'Account Paid To',
+                        id: 'f-sp-paid-to',
+                        type: 'select',
+                        options: withValue(accountOpts, currentPaidTo),
+                        value: currentPaidTo
+                    })}
+                    ${field({
                         label: 'Net Payable Amount (KES) *',
                         id: 'f-sp-net-payable',
                         type: 'number',
@@ -3569,17 +3594,49 @@ function init_holec_trading_engine() {
         const openParty = document.getElementById('open-party-btn');
         if (openParty && supplier) openParty.addEventListener('click', () => navigate('supplier_detail', { id: supplier.name }));
 
+        const updateAccountDefaults = function(forceReset = false) {
+            const ptype = $('#f-sp-payment-type').val() || 'Pay';
+            const rail = $('#f-sp-rail').val() || 'Bank Transfer';
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.get_payment_entry_defaults',
+                args: { ticket: l.name, payment_type: ptype, mode_of_payment: rail },
+                callback: (r) => {
+                    if (r && r.message) {
+                        const curFrom = $('#f-sp-paid-from').val();
+                        const curTo = $('#f-sp-paid-to').val();
+                        if (forceReset || !curFrom) $('#f-sp-paid-from').val(r.message.paid_from || r.message.default_paid_from || '');
+                        if (forceReset || !curTo) $('#f-sp-paid-to').val(r.message.paid_to || r.message.default_paid_to || '');
+                    }
+                }
+            });
+        };
+
         $('#f-sp-payment-type').on('change', function() {
             const val = $(this).val();
             const labelEl = $('label[for="f-sp-net-payable"]');
+            const fromLabelEl = $('label[for="f-sp-paid-from"]');
+            const toLabelEl = $('label[for="f-sp-paid-to"]');
             if (val === 'Receive') {
                 labelEl.html('Net Amount Received (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+                fromLabelEl.html('Account Paid From (Party / Receivable)');
+                toLabelEl.html('Account Paid To (Bank / Cash)');
             } else if (val === 'Internal Transfer') {
                 labelEl.html('Transfer Amount (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+                fromLabelEl.html('Account Paid From (Source Bank/Cash)');
+                toLabelEl.html('Account Paid To (Destination Bank/Cash)');
             } else {
                 labelEl.html('Net Payable Amount (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+                fromLabelEl.html('Account Paid From (Bank / Cash)');
+                toLabelEl.html('Account Paid To (Supplier Payable)');
             }
-        }).trigger('change');
+            updateAccountDefaults(true);
+        });
+
+        $('#f-sp-rail').on('change', function() {
+            updateAccountDefaults(true);
+        });
+
+        updateAccountDefaults(false);
 
         // ---- 1. Submit for approval ----
         const submitBtn = document.getElementById('sp-submit-btn');
@@ -3594,7 +3651,16 @@ function init_holec_trading_engine() {
             submitBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'submit', mode_of_payment: rail, reference_no: ($('#f-sp-ref').val() || '').trim(), amount: payAmt, payment_type: ptype },
+                args: {
+                    ticket: l.name,
+                    action: 'submit',
+                    mode_of_payment: rail,
+                    reference_no: ($('#f-sp-ref').val() || '').trim(),
+                    amount: payAmt,
+                    payment_type: ptype,
+                    paid_from: $('#f-sp-paid-from').val(),
+                    paid_to: $('#f-sp-paid-to').val()
+                },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3619,7 +3685,16 @@ function init_holec_trading_engine() {
             finApproveBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'finance_approve', mode_of_payment: rail, reference_no: refNo, amount: payAmt, payment_type: ptype },
+                args: {
+                    ticket: l.name,
+                    action: 'finance_approve',
+                    mode_of_payment: rail,
+                    reference_no: refNo,
+                    amount: payAmt,
+                    payment_type: ptype,
+                    paid_from: $('#f-sp-paid-from').val(),
+                    paid_to: $('#f-sp-paid-to').val()
+                },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3645,7 +3720,16 @@ function init_holec_trading_engine() {
             mgrApproveBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'manager_approve', mode_of_payment: rail, reference_no: refNo, amount: payAmt, payment_type: ptype },
+                args: {
+                    ticket: l.name,
+                    action: 'manager_approve',
+                    mode_of_payment: rail,
+                    reference_no: refNo,
+                    amount: payAmt,
+                    payment_type: ptype,
+                    paid_from: $('#f-sp-paid-from').val(),
+                    paid_to: $('#f-sp-paid-to').val()
+                },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3702,7 +3786,9 @@ function init_holec_trading_engine() {
                     reference_no: refNo,
                     reference_date: frappe.datetime.get_today(),
                     amount: payAmt,
-                    payment_type: ptype
+                    payment_type: ptype,
+                    paid_from: $('#f-sp-paid-from').val(),
+                    paid_to: $('#f-sp-paid-to').val()
                 },
                 freeze: true,
                 freeze_message: 'Processing Bank API Transaction...',
