@@ -72,3 +72,33 @@ class IMBankClient:
         resp = self._session.post(f"{SERVICE_BASE_URL}/MakePayment", json=payload, headers=headers, timeout=30)
         resp.raise_for_status()
         return resp.json()
+
+    def transfer_within_bank(self, sender_account, sender_name, receiver_account, receiver_name, amount, narration="Payment", currency="KES") -> dict:
+        ref_num = _generate_ref_num()
+        service_name = "WithinBankAccountTransfer"
+        payload = {
+            "sender": {
+                "senderAccountNo": sender_account,
+                "senderName": sender_name
+            },
+            "receiver": {
+                "receiverAccountNo": receiver_account,
+                "receiverAccountFullName": receiver_name
+            },
+            "trandetails": {
+                "transAmount": str(amount),
+                "tranCCY": currency,
+                "narration": narration,
+                "eventID": "FUND_TRF_WIB"
+            }
+        }
+        headers = {
+            "Authorization": f"Bearer {self._get_valid_token()}",
+            "serviceName": service_name,
+            "requestRefNum": ref_num,
+            "initChannelID": self.channel_id,
+            "checkSum": _generate_checksum(service_name, self.channel_id, ref_num, sender_account, str(amount), currency, self.credentials.get("public_key", ""))
+        }
+        resp = self._session.post(f"{SERVICE_BASE_URL}/MakePayment", json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+        return resp.json()

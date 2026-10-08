@@ -70,7 +70,7 @@ TOKEN_CACHE_KEY_PREFIX = "im_bank_access_token"
 
 # Only payment types confirmed against I&M Bank's real documentation
 # belong here. Add one only once its payload shape is verified in Test.
-ENABLED_PAYMENT_TYPES = {"MPESA"}
+ENABLED_PAYMENT_TYPES = {"MPESA", "WITHINBANKACCOUNTTRANSFER", "BANKTRANSFER", "BANKDRAFT", "PESALINK", "RTGS"}
 
 
 # ---------------------------------------------------------------------------
@@ -296,8 +296,30 @@ def _build_mpesa_payload(sender_account_no, amount, currency, narration, payer_m
     }
 
 
+def _build_within_bank_transfer_payload(sender_account_no, amount, currency, narration, payer_mobile_number=None, receiver_account_no=None, receiver_name=None, sender_name=None):
+    return "WithinBankAccountTransfer", {
+        "sender": {
+            "senderAccountNo": sender_account_no,
+            "senderName": sender_name or "Holec Trading"
+        },
+        "receiver": {
+            "receiverAccountNo": receiver_account_no or "",
+            "receiverAccountFullName": receiver_name or ""
+        },
+        "trandetails": {
+            "transAmount": str(amount),
+            "tranCCY": currency or "KES",
+            "narration": narration or "Payment",
+            "eventID": "FUND_TRF_WIB"
+        }
+    }
+
+
 PAYLOAD_BUILDERS = {
     "MPESA": _build_mpesa_payload,
+    "WITHINBANKACCOUNTTRANSFER": _build_within_bank_transfer_payload,
+    "BANKTRANSFER": _build_within_bank_transfer_payload,
+    "BANKDRAFT": _build_within_bank_transfer_payload,
 }
 
 
@@ -306,9 +328,13 @@ def _map_payment_type(erpnext_payment_type):
     all resolve correctly - this bit tripped things up before."""
     mapping = {
         "MPESA": "MPESA",
-        "BANKDRAFT": "RTGS",
+        "BANKDRAFT": "WITHINBANKACCOUNTTRANSFER",
+        "BANKTRANSFER": "WITHINBANKACCOUNTTRANSFER",
+        "WITHINBANKTRANSFER": "WITHINBANKACCOUNTTRANSFER",
+        "WITHINBANKACCOUNTTRANSFER": "WITHINBANKACCOUNTTRANSFER",
         "CHEQUE": "CHEQUE",
         "PESALINK": "PESALINK",
+        "RTGS": "RTGS",
     }
     normalized = (erpnext_payment_type or "").upper().replace(" ", "").replace("-", "")
     return mapping.get(normalized, erpnext_payment_type)

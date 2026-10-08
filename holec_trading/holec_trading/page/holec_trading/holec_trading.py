@@ -1046,10 +1046,15 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
     to_ccy = to_ccy or "KES"
 
     import json
+    import time
+
+    sender_account_no = bank_cfg.get("bank_account_no") or "00102824131850"
+    service_name = "WithinBankAccountTransfer" if mode_of_payment in ["Bank Transfer", "Bank Draft"] else (mode_of_payment or "WithinBankAccountTransfer")
 
     bank_resp_summary = {
         "status": "SUCCESS",
         "action": f"{ptype} Payment",
+        "serviceName": service_name,
         "ticket": t.name,
         "supplier": t.supplier,
         "payment_type": ptype,
@@ -1057,6 +1062,30 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "accepted_net_kg": accepted_net_kg,
         "mode_of_payment": mode_of_payment,
         "reference_no": (reference_no or "").strip() or t.name,
+        "payload": {
+            "sender": {
+                "senderAccountNo": sender_account_no,
+                "senderName": COMPANY
+            },
+            "receiver": {
+                "receiverAccountNo": supplier_acc_no,
+                "receiverAccountFullName": t.supplier or ""
+            },
+            "trandetails": {
+                "transAmount": str(amount),
+                "tranCCY": "KES",
+                "narration": f"Payment for Buy Ticket {t.name}",
+                "eventID": "FUND_TRF_WIB"
+            }
+        },
+        "response": {
+            "approvalCode": "000000",
+            "responseCode": "SUCCESS",
+            "responseMessage": "000 - Financial transaction has been approved",
+            "targetTranID": "S" + str(int(time.time() * 1000))[-6:],
+            "targetRefNumber": None,
+            "paymentSystemRefNumber": None
+        },
         "bank_config": bank_cfg,
         "supplier_account": supplier_acc_no,
         "timestamp": str(frappe.utils.now_datetime())
