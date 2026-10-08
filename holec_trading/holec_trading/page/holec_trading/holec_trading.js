@@ -3628,6 +3628,7 @@ function init_holec_trading_engine() {
                 ${isPendingFinance && isFinanceRole ? `<button class="h-btn" id="sp-approve-fin-btn" style="${BTN_APPROVE}">Approve (1st Stage: Holec Finance)</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isPendingManager && isManagerRole ? `<button class="h-btn" id="sp-approve-mgr-btn" style="${BTN_APPROVE}">Approve (Final Stage: Holec Manager)</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isApproved ? `<button class="h-btn primary" id="sp-dispatch-btn" style="${BTN_PRIMARY}">Dispatch funds to Bank</button>` : ''}
+                ${pstatus ? `<button class="h-btn" id="sp-reset-btn" style="${BTN_REJECT}">Cancel / Reset Payment</button>` : ''}
                 <button class="h-btn ghost" id="cancel-sp-btn" style="${BTN_GHOST}">Back to payments</button>
             </div>
         `;
@@ -3827,6 +3828,28 @@ function init_holec_trading_engine() {
             });
         });
 
+        // ---- Cancel / Reset Payment action ----
+        const resetBtn = document.getElementById('sp-reset-btn');
+        if (resetBtn) resetBtn.addEventListener('click', async () => {
+            const ok = await confirmAsync(__('Are you sure you want to cancel and reset this payment request? Any associated payment entry will be cancelled and deleted.'));
+            if (!ok) return;
+            resetBtn.disabled = true;
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.reset_supplier_payment',
+                args: { ticket: l.name },
+                freeze: true,
+                freeze_message: 'Resetting payment request...',
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(r.message.message || 'Payment request reset successfully', 'orange');
+                        await loadMasterData();
+                        navigate('pay_supplier', { id: l.name });
+                    } else { resetBtn.disabled = false; }
+                },
+                error: () => { resetBtn.disabled = false; }
+            });
+        });
+
         // ---- 4. Dispatch to Bank ----
         const dispatchBtn = document.getElementById('sp-dispatch-btn');
         if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
@@ -3968,6 +3991,7 @@ function init_holec_trading_engine() {
                 ${editable ? `<button class="h-btn primary" id="tp-submit-btn" style="${BTN_PRIMARY}">Submit for approval</button>` : ''}
                 ${isPending && approver ? `<button class="h-btn" id="tp-approve-btn" style="${BTN_APPROVE}">Approve payment</button><button class="h-btn" id="tp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isApproved ? `<button class="h-btn primary" id="tp-dispatch-btn" style="${BTN_PRIMARY}">Dispatch funds</button>` : ''}
+                ${pstatus ? `<button class="h-btn" id="tp-reset-btn" style="${BTN_REJECT}">Cancel / Reset Payment</button>` : ''}
                 <button class="h-btn ghost" id="cancel-tp-btn" style="${BTN_GHOST}">Back to payments</button>
             </div>
         `;
@@ -4047,6 +4071,28 @@ function init_holec_trading_engine() {
                 __('Reject payment'),
                 __('Reject')
             );
+        });
+
+        // ---- Cancel / Reset Transporter Payment ----
+        const tpResetBtn = document.getElementById('tp-reset-btn');
+        if (tpResetBtn) tpResetBtn.addEventListener('click', async () => {
+            const ok = await confirmAsync(__('Are you sure you want to cancel and reset this transport payment request?'));
+            if (!ok) return;
+            tpResetBtn.disabled = true;
+            frappe.call({
+                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.reset_transporter_payment',
+                args: { ticket_ids: params.id },
+                freeze: true,
+                freeze_message: 'Resetting transport payment...',
+                callback: async (r) => {
+                    if (r && r.message) {
+                        showToast(r.message.message || 'Transport payment reset successfully', 'orange');
+                        await loadMasterData();
+                        navigate('payments_form', { id: params.id });
+                    } else { tpResetBtn.disabled = false; }
+                },
+                error: () => { tpResetBtn.disabled = false; }
+            });
         });
 
         // ---- 3. Dispatch funds (only when Approved) ----
