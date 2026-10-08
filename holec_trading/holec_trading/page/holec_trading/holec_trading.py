@@ -717,11 +717,17 @@ COMPANY = "Holec (E.A.) Limited"
 
 
 def _mode_of_payment_account(mode_of_payment, company):
-    return frappe.db.get_value(
+    acc = frappe.db.get_value(
         "Mode of Payment Account",
         {"parent": mode_of_payment, "company": company},
         "default_account",
     )
+    if not acc:
+        return None
+    if frappe.db.get_value("Account", acc, "is_group"):
+        child = frappe.db.get_value("Account", {"parent_account": acc, "is_group": 0, "disabled": 0}, "name")
+        return child or None
+    return acc
 
 
 @frappe.whitelist()
@@ -939,7 +945,11 @@ def get_payment_entry_defaults(ticket=None, payment_type="Pay", mode_of_payment=
     t = frappe.get_doc("Buy Ticket", ticket) if (ticket and frappe.db.exists("Buy Ticket", ticket)) else None
     target_company = company or (t.get("company") if t else None) or COMPANY
 
-    mop_acc = _mode_of_payment_account(mop, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company}, "name")
+    mop_acc = _mode_of_payment_account(mop, target_company) or frappe.db.get_value(
+        "Account", {"account_type": "Bank", "company": target_company, "is_group": 0, "disabled": 0}, "name"
+    ) or frappe.db.get_value(
+        "Account", {"company": target_company, "is_group": 0, "disabled": 0}, "name"
+    )
 
     paid_from = None
     paid_to = None
@@ -948,25 +958,43 @@ def get_payment_entry_defaults(ticket=None, payment_type="Pay", mode_of_payment=
         paid_from = mop_acc
         if t and t.supplier:
             paid_to = get_party_account("Supplier", t.supplier, target_company)
+            if paid_to and frappe.db.get_value("Account", paid_to, "is_group"):
+                paid_to = None
         if not paid_to:
-            paid_to = frappe.db.get_value("Account", {"account_type": "Payable", "company": target_company}, "name")
+            paid_to = frappe.db.get_value(
+                "Account", {"account_type": "Payable", "company": target_company, "is_group": 0, "disabled": 0}, "name"
+            ) or mop_acc
     elif ptype == "Receive":
         party_type = "Customer" if (t and t.customer) else "Supplier"
         party = (t.customer if t else None) or (t.supplier if t else None)
         if party:
             paid_from = get_party_account(party_type, party, target_company)
+            if paid_from and frappe.db.get_value("Account", paid_from, "is_group"):
+                paid_from = None
         if not paid_from:
-            paid_from = frappe.db.get_value("Account", {"account_type": "Receivable", "company": target_company}, "name")
+            paid_from = frappe.db.get_value(
+                "Account", {"account_type": "Receivable", "company": target_company, "is_group": 0, "disabled": 0}, "name"
+            ) or mop_acc
         paid_to = mop_acc
     else:  # Internal Transfer
         paid_from = mop_acc
-        cash_acc = frappe.db.get_value("Account", {"account_type": "Cash", "company": target_company}, "name")
-        paid_to = cash_acc if cash_acc != paid_from else mop_acc
+        cash_acc = frappe.db.get_value(
+            "Account", {"account_type": "Cash", "company": target_company, "is_group": 0, "disabled": 0}, "name"
+        )
+        paid_to = cash_acc if (cash_acc and cash_acc != paid_from) else mop_acc
+
+    saved_from = t.get("supplier_payment_paid_from") if t else None
+    if saved_from and frappe.db.get_value("Account", saved_from, "is_group"):
+        saved_from = None
+
+    saved_to = t.get("supplier_payment_paid_to") if t else None
+    if saved_to and frappe.db.get_value("Account", saved_to, "is_group"):
+        saved_to = None
 
     return {
         "company": target_company,
-        "paid_from": (t.get("supplier_payment_paid_from") if (t and t.get("supplier_payment_paid_from")) else paid_from) or paid_from,
-        "paid_to": (t.get("supplier_payment_paid_to") if (t and t.get("supplier_payment_paid_to")) else paid_to) or paid_to,
+        "paid_from": saved_from or paid_from,
+        "paid_to": saved_to or paid_to,
         "default_paid_from": paid_from,
         "default_paid_to": paid_to
     }
@@ -995,9 +1023,10 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         t.db_set("supplier_payment_mode", mode_of_payment)
     if reference_no is not None:
         t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
-    if paid_from:
+
+    if paid_from and not frappe.db.get_value("Account", paid_from, "is_group"):
         t.db_set("supplier_payment_paid_from", paid_from)
-    if paid_to:
+    if paid_to and not frappe.db.get_value("Account", paid_to, "is_group"):
         t.db_set("supplier_payment_paid_to", paid_to)
 
     if not t.supplier and ptype != "Internal Transfer":
@@ -1085,29 +1114,42 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         }
 
     account_paid_from = paid_from or t.get("supplier_payment_paid_from")
+    if account_paid_from and frappe.db.get_value("Account", account_paid_from, "is_group"):
+        account_paid_from = None
+
     account_paid_to = paid_to or t.get("supplier_payment_paid_to")
+    if account_paid_to and frappe.db.get_value("Account", account_paid_to, "is_group"):
+        account_paid_to = None
 
     party_type = "Supplier"
     party = t.supplier
     if ptype == "Pay":
         if not account_paid_from:
-            account_paid_from = _mode_of_payment_account(mode_of_payment, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company}, "name")
+            account_paid_from = _mode_of_payment_account(mode_of_payment, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company, "is_group": 0, "disabled": 0}, "name")
         if not account_paid_to:
-            account_paid_to = get_party_account("Supplier", t.supplier, target_company) if t.supplier else account_paid_from
+            account_paid_to = get_party_account("Supplier", t.supplier, target_company) if t.supplier else None
+            if account_paid_to and frappe.db.get_value("Account", account_paid_to, "is_group"):
+                account_paid_to = None
+            if not account_paid_to:
+                account_paid_to = frappe.db.get_value("Account", {"account_type": "Payable", "company": target_company, "is_group": 0, "disabled": 0}, "name") or account_paid_from
     elif ptype == "Receive":
         party_type = "Customer" if (t.customer or not frappe.db.exists("Supplier", t.supplier)) else "Supplier"
         party = t.customer or t.supplier
         if not account_paid_from:
-            account_paid_from = get_party_account(party_type, party, target_company) if party else frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company}, "name")
+            account_paid_from = get_party_account(party_type, party, target_company) if party else None
+            if account_paid_from and frappe.db.get_value("Account", account_paid_from, "is_group"):
+                account_paid_from = None
+            if not account_paid_from:
+                account_paid_from = frappe.db.get_value("Account", {"account_type": "Receivable", "company": target_company, "is_group": 0, "disabled": 0}, "name") or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company, "is_group": 0, "disabled": 0}, "name")
         if not account_paid_to:
-            account_paid_to = _mode_of_payment_account(mode_of_payment, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company}, "name")
+            account_paid_to = _mode_of_payment_account(mode_of_payment, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company, "is_group": 0, "disabled": 0}, "name")
     else: # Internal Transfer
         party_type = None
         party = None
         if not account_paid_from:
-            account_paid_from = _mode_of_payment_account(mode_of_payment, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company}, "name")
+            account_paid_from = _mode_of_payment_account(mode_of_payment, target_company) or frappe.db.get_value("Account", {"account_type": "Bank", "company": target_company, "is_group": 0, "disabled": 0}, "name")
         if not account_paid_to:
-            account_paid_to = frappe.db.get_value("Account", {"account_type": "Cash", "company": target_company}, "name") or account_paid_from
+            account_paid_to = frappe.db.get_value("Account", {"account_type": "Cash", "company": target_company, "is_group": 0, "disabled": 0}, "name") or account_paid_from
 
     if not account_paid_from:
         frappe.throw(f"'{mode_of_payment}' has no default account set for {target_company}.")
