@@ -3528,12 +3528,20 @@ function init_holec_trading_engine() {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${readonlyBox('Reference Rate', `KES ${p.refRate}/kg`)}
                     ${field({
-                        label: 'Net Payable to Supplier (KES) *',
+                        label: 'Payment Type *',
+                        id: 'f-sp-payment-type',
+                        type: 'select',
+                        required: true,
+                        options: withValue(['Pay', 'Receive', 'Internal Transfer'], l.supplier_payment_type || 'Pay'),
+                        value: l.supplier_payment_type || 'Pay'
+                    })}
+                    ${field({
+                        label: 'Net Payable Amount (KES) *',
                         id: 'f-sp-net-payable',
                         type: 'number',
                         step: '0.01',
                         required: true,
-                        placeholder: 'Enter net payable amount',
+                        placeholder: 'Enter payment amount',
                         value: amount
                     })}
                     ${field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
@@ -3561,19 +3569,32 @@ function init_holec_trading_engine() {
         const openParty = document.getElementById('open-party-btn');
         if (openParty && supplier) openParty.addEventListener('click', () => navigate('supplier_detail', { id: supplier.name }));
 
+        $('#f-sp-payment-type').on('change', function() {
+            const val = $(this).val();
+            const labelEl = $('label[for="f-sp-net-payable"]');
+            if (val === 'Receive') {
+                labelEl.html('Net Amount Received (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+            } else if (val === 'Internal Transfer') {
+                labelEl.html('Transfer Amount (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+            } else {
+                labelEl.html('Net Payable Amount (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+            }
+        }).trigger('change');
+
         // ---- 1. Submit for approval ----
         const submitBtn = document.getElementById('sp-submit-btn');
         if (submitBtn) submitBtn.addEventListener('click', async () => {
+            const ptype = $('#f-sp-payment-type').val() || 'Pay';
             const rail = $('#f-sp-rail').val();
             const payAmt = flt($('#f-sp-net-payable').val());
-            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid Net Payable amount.')); return; }
+            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
             if (!rail) { frappe.msgprint(__('Please select a Mode of Payment.')); return; }
-            if (partyBlocked) { frappe.msgprint(__('The supplier must be approved before a payment can be submitted.')); return; }
+            if (partyBlocked && ptype !== 'Internal Transfer') { frappe.msgprint(__('The party must be approved before a payment can be submitted.')); return; }
 
             submitBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'submit', mode_of_payment: rail, reference_no: ($('#f-sp-ref').val() || '').trim(), amount: payAmt },
+                args: { ticket: l.name, action: 'submit', mode_of_payment: rail, reference_no: ($('#f-sp-ref').val() || '').trim(), amount: payAmt, payment_type: ptype },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3588,16 +3609,17 @@ function init_holec_trading_engine() {
         // ---- 2. 1st Approval: Holec Finance ----
         const finApproveBtn = document.getElementById('sp-approve-fin-btn');
         if (finApproveBtn) finApproveBtn.addEventListener('click', async () => {
+            const ptype = $('#f-sp-payment-type').val() || 'Pay';
             const payAmt = flt($('#f-sp-net-payable').val());
-            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid Net Payable amount.')); return; }
-            const ok = await confirmAsync(__('Grant 1st Stage approval (Holec Finance) for {0} to {1}?', [fmtKES(payAmt), supplierLabel]));
+            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
+            const ok = await confirmAsync(__('Grant 1st Stage approval (Holec Finance) for {0} to {1}? ({2})', [fmtKES(payAmt), supplierLabel, ptype]));
             if (!ok) return;
             const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
             const refNo = ($('#f-sp-ref').val() || l.supplier_payment_ref || l.name).trim();
             finApproveBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'finance_approve', mode_of_payment: rail, reference_no: refNo, amount: payAmt },
+                args: { ticket: l.name, action: 'finance_approve', mode_of_payment: rail, reference_no: refNo, amount: payAmt, payment_type: ptype },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3613,16 +3635,17 @@ function init_holec_trading_engine() {
         const mgrApproveBtn = document.getElementById('sp-approve-mgr-btn');
         if (mgrApproveBtn) mgrApproveBtn.addEventListener('click', async () => {
             if (blockedByMakerChecker(l.supplier_payment_requested_by, 'supplier payment request')) return;
+            const ptype = $('#f-sp-payment-type').val() || 'Pay';
             const payAmt = flt($('#f-sp-net-payable').val());
-            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid Net Payable amount.')); return; }
-            const ok = await confirmAsync(__('Grant Final Approval (Holec Manager) for payment of {0} to {1}?', [fmtKES(payAmt), supplierLabel]));
+            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
+            const ok = await confirmAsync(__('Grant Final Approval (Holec Manager) for payment of {0} to {1}? ({2})', [fmtKES(payAmt), supplierLabel, ptype]));
             if (!ok) return;
             const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
             const refNo = ($('#f-sp-ref').val() || l.supplier_payment_ref || l.name).trim();
             mgrApproveBtn.disabled = true;
             frappe.call({
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.update_supplier_payment_approval',
-                args: { ticket: l.name, action: 'manager_approve', mode_of_payment: rail, reference_no: refNo, amount: payAmt },
+                args: { ticket: l.name, action: 'manager_approve', mode_of_payment: rail, reference_no: refNo, amount: payAmt, payment_type: ptype },
                 freeze: true,
                 callback: async (r) => {
                     if (r && r.message) {
@@ -3638,7 +3661,7 @@ function init_holec_trading_engine() {
         const rejectBtn = document.getElementById('sp-reject-btn');
         if (rejectBtn) rejectBtn.addEventListener('click', async () => {
             const payAmt = flt($('#f-sp-net-payable').val());
-            const ok = await confirmAsync(__('Reject supplier payment of {0}?', [fmtKES(payAmt || amount)]));
+            const ok = await confirmAsync(__('Reject payment request of {0}?', [fmtKES(payAmt || amount)]));
             if (!ok) return;
             rejectBtn.disabled = true;
             frappe.call({
@@ -3658,11 +3681,12 @@ function init_holec_trading_engine() {
         // ---- 4. Dispatch to Bank ----
         const dispatchBtn = document.getElementById('sp-dispatch-btn');
         if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
-            if (partyBlocked) { frappe.msgprint(__('The supplier must be approved before funds can be sent to the bank.')); return; }
+            const ptype = $('#f-sp-payment-type').val() || 'Pay';
+            if (partyBlocked && ptype !== 'Internal Transfer') { frappe.msgprint(__('The party must be approved before funds can be dispatched.')); return; }
             const payAmt = flt($('#f-sp-net-payable').val());
-            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid Net Payable amount.')); return; }
+            if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
 
-            const ok = await confirmAsync(__('Send payment transaction of {0} to Bank API for {1}?', [fmtKES(payAmt), supplierLabel]));
+            const ok = await confirmAsync(__('Send {0} payment transaction of {1} to Bank API for {2}?', [ptype, fmtKES(payAmt), supplierLabel]));
             if (!ok) return;
 
             const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
@@ -3677,13 +3701,14 @@ function init_holec_trading_engine() {
                     mode_of_payment: rail,
                     reference_no: refNo,
                     reference_date: frappe.datetime.get_today(),
-                    amount: payAmt
+                    amount: payAmt,
+                    payment_type: ptype
                 },
                 freeze: true,
                 freeze_message: 'Processing Bank API Transaction...',
                 callback: async (r) => {
                     if (r && r.message) {
-                        showToast(`Bank transaction sent! ${supplierLabel} paid ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
+                        showToast(`Bank transaction sent! ${supplierLabel} (${ptype}) ${fmtKES(r.message.amount)} (${r.message.payment_entry})`);
                         await loadMasterData();
                         navigate('payments_list');
                     } else {

@@ -835,7 +835,7 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
 
 @frappe.whitelist()
-def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None, amount=None):
+def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None, amount=None, payment_type=None):
     """
     2-stage approval workflow for Supplier Net Invoice Payment:
       - 'submit': Holec Finance / Submitter initiates -> status = 'Pending Finance Approval'
@@ -863,6 +863,7 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         "hema_rate_per_bag",
         "supplier_invoice_amount",
         "supplier_payment_amount",
+        "supplier_payment_type",
     ]:
         if not frappe.db.has_column("Buy Ticket", fieldname):
             try:
@@ -876,6 +877,8 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
     if amount is not None and flt(amount) > 0:
         t.db_set("supplier_payment_amount", flt(amount))
+    if payment_type:
+        t.db_set("supplier_payment_type", payment_type)
 
     if action == "submit":
         t.db_set("supplier_payment_requested_by", user)
@@ -915,7 +918,7 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
 
 
 @frappe.whitelist()
-def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None, amount=None):
+def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None, amount=None, payment_type=None):
     """
     Pays the supplier for one Buy Ticket (accepted net quantity * ref rate) and marks it paid.
     Reads credentials and environment URLs from Bank Account document.
@@ -925,12 +928,17 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
 
     frappe.has_permission("Payment Entry", "create", throw=True)
     t = frappe.get_doc("Buy Ticket", ticket)
+    ptype = payment_type or t.get("supplier_payment_type") or "Pay"
+    if ptype not in ["Pay", "Receive", "Internal Transfer"]:
+        ptype = "Pay"
+    t.db_set("supplier_payment_type", ptype)
+
     if mode_of_payment:
         t.db_set("supplier_payment_mode", mode_of_payment)
     if reference_no is not None:
         t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
 
-    if not t.supplier:
+    if not t.supplier and ptype != "Internal Transfer":
         frappe.throw("This ticket has no supplier.")
     if frappe.utils.cint(t.get("supplier_paid")):
         frappe.throw(f"Supplier payment for {t.name} is already processed.")
@@ -976,14 +984,16 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         frappe.throw("Please select a Mode of Payment.")
 
     # 1. Look up Supplier Bank Account details from Supplier document
-    supplier_doc = frappe.get_doc("Supplier", t.supplier)
-    supplier_acc_no = (
-        supplier_doc.get("bank_account_no")
-        or supplier_doc.get("custom_bank_account_no")
-        or supplier_doc.get("account_number")
-        or supplier_doc.get("bank_account")
-        or supplier_doc.name
-    )
+    supplier_acc_no = ""
+    if t.supplier:
+        supplier_doc = frappe.get_doc("Supplier", t.supplier)
+        supplier_acc_no = (
+            supplier_doc.get("bank_account_no")
+            or supplier_doc.get("custom_bank_account_no")
+            or supplier_doc.get("account_number")
+            or supplier_doc.get("bank_account")
+            or supplier_doc.name
+        )
 
     # 2. Look up Bank Account document environment credentials
     bank_account_name = frappe.db.get_value("Bank Account", {"is_company_account": 1, "company": COMPANY}, "name")
@@ -1012,26 +1022,37 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
             "supplier_account": supplier_acc_no
         }
 
-    paid_from = _mode_of_payment_account(mode_of_payment, COMPANY)
-    if not paid_from:
-        paid_from = frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+    party_type = "Supplier"
+    party = t.supplier
+    if ptype == "Pay":
+        paid_from = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        paid_to = get_party_account("Supplier", t.supplier, COMPANY) if t.supplier else paid_from
+    elif ptype == "Receive":
+        party_type = "Customer" if (t.customer or not frappe.db.exists("Supplier", t.supplier)) else "Supplier"
+        party = t.customer or t.supplier
+        paid_from = get_party_account(party_type, party, COMPANY) if party else frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        paid_to = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+    else: # Internal Transfer
+        party_type = None
+        party = None
+        paid_from = _mode_of_payment_account(mode_of_payment, COMPANY) or frappe.db.get_value("Account", {"account_type": "Bank", "company": COMPANY}, "name")
+        paid_to = frappe.db.get_value("Account", {"account_type": "Cash", "company": COMPANY}, "name") or paid_from
+
     if not paid_from:
         frappe.throw(f"'{mode_of_payment}' has no default account set for {COMPANY}.")
 
-    paid_to = get_party_account("Supplier", t.supplier, COMPANY)
-    if not paid_to:
-        frappe.throw(f"No payable account found for supplier {t.supplier}.")
-
     from_ccy = frappe.db.get_value("Account", paid_from, "account_currency") or "KES"
-    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency") or "KES"
+    to_ccy = frappe.db.get_value("Account", paid_to, "account_currency") if paid_to else "KES"
+    to_ccy = to_ccy or "KES"
 
     import json
 
     bank_resp_summary = {
         "status": "SUCCESS",
-        "action": "Pay Supplier",
+        "action": f"{ptype} Payment",
         "ticket": t.name,
         "supplier": t.supplier,
+        "payment_type": ptype,
         "amount": amount,
         "accepted_net_kg": accepted_net_kg,
         "mode_of_payment": mode_of_payment,
@@ -1041,13 +1062,11 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "timestamp": str(frappe.utils.now_datetime())
     }
 
-    pe = frappe.get_doc({
+    pe_doc = {
         "doctype": "Payment Entry",
         "company": COMPANY,
-        "payment_type": "Pay",
+        "payment_type": ptype,
         "posting_date": nowdate(),
-        "party_type": "Supplier",
-        "party": t.supplier,
         "mode_of_payment": mode_of_payment,
         "paid_from": paid_from,
         "paid_to": paid_to,
@@ -1060,9 +1079,14 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
         "reference_no": (reference_no or "").strip() or t.name,
         "reference_date": reference_date or nowdate(),
         "custom_buy_ticket": t.name,
-        "remarks": f"Supplier Net Invoice payment for Buy Ticket {t.name}: KES {amount:,.2f} ({accepted_net_kg:,.1f} kg accepted) via Bank {bank_cfg.get('bank_account', '')} [{bank_cfg.get('environment', 'Production')} API]. Supplier Acc: {supplier_acc_no}",
+        "remarks": f"{ptype} payment for Buy Ticket {t.name}: KES {amount:,.2f} ({accepted_net_kg:,.1f} kg accepted) via Bank {bank_cfg.get('bank_account', '')} [{bank_cfg.get('environment', 'Production')} API]. Supplier Acc: {supplier_acc_no}",
         "custom_bank_response": json.dumps(bank_resp_summary, indent=2),
-    })
+    }
+    if ptype != "Internal Transfer" and party_type and party:
+        pe_doc["party_type"] = party_type
+        pe_doc["party"] = party
+
+    pe = frappe.get_doc(pe_doc)
     pe.insert(ignore_permissions=True)
     pe.submit()
 
