@@ -841,38 +841,7 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
 
 @frappe.whitelist()
-def reset_transporter_payment(ticket_ids):
-    """
-    Resets transport payment status and cancels any linked Payment Entry for a batch of Buy Tickets.
-    """
-    if isinstance(ticket_ids, str):
-        ticket_ids = [x.strip() for x in ticket_ids.split(",") if x.strip()]
-
-    tickets = [frappe.get_doc("Buy Ticket", name) for name in ticket_ids if frappe.db.exists("Buy Ticket", name)]
-    pe_names = set(t.get("transport_payment_entry") for t in tickets if t.get("transport_payment_entry"))
-
-    for pe_name in pe_names:
-        if frappe.db.exists("Payment Entry", pe_name):
-            try:
-                pe_doc = frappe.get_doc("Payment Entry", pe_name)
-                if pe_doc.docstatus == 1:
-                    pe_doc.cancel()
-                if pe_doc.docstatus in [0, 2]:
-                    frappe.delete_doc("Payment Entry", pe_name)
-            except Exception as e:
-                frappe.log_error(f"Error resetting transporter Payment Entry {pe_name}: {str(e)}")
-
-    for t in tickets:
-        t.db_set("transport_payment_status", "")
-        t.db_set("transport_paid", 0)
-        t.db_set("transport_payment_entry", None)
-        t.db_set("transport_payment_requested_by", None)
-        t.db_set("transport_payment_approved_by", None)
-        t.db_set("transport_payment_mode", None)
-        t.db_set("transport_payment_ref", None)
-
-    frappe.db.commit()
-    return {"status": "Reset", "message": f"Transport payment for {len(tickets)} ticket(s) has been reset."}
+@frappe.whitelist()
 def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None, amount=None, payment_type=None, paid_from=None, paid_to=None, company=None):
     """
     2-stage approval workflow for Supplier Net Invoice Payment:
@@ -960,79 +929,8 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         frappe.db.commit()
         return {"status": "Rejected", "message": "Supplier payment request rejected."}
 
-    elif action in ["reset", "cancel", "delete"]:
-        return reset_supplier_payment(ticket)
-
     else:
         frappe.throw(f"Invalid approval action: {action}")
-
-
-@frappe.whitelist()
-def reset_supplier_payment(ticket):
-    """
-    Cancels and deletes any associated Payment Entry and resets supplier payment fields on the Buy Ticket.
-    """
-    t = frappe.get_doc("Buy Ticket", ticket)
-    pe_name = t.get("supplier_payment_entry")
-    if pe_name and frappe.db.exists("Payment Entry", pe_name):
-        try:
-            pe_doc = frappe.get_doc("Payment Entry", pe_name)
-            if pe_doc.docstatus == 1:
-                pe_doc.cancel()
-            if pe_doc.docstatus in [0, 2]:
-                frappe.delete_doc("Payment Entry", pe_name)
-        except Exception as e:
-            frappe.log_error(f"Error removing Payment Entry {pe_name}: {str(e)}")
-
-    t.db_set("supplier_payment_status", "")
-    t.db_set("supplier_paid", 0)
-    t.db_set("supplier_payment_entry", None)
-    t.db_set("supplier_payment_requested_by", None)
-    t.db_set("supplier_finance_approved_by", None)
-    t.db_set("supplier_manager_approved_by", None)
-    t.db_set("supplier_payment_approved_by", None)
-    t.db_set("supplier_payment_mode", None)
-    t.db_set("supplier_payment_ref", None)
-    t.db_set("supplier_payment_amount", None)
-    frappe.db.commit()
-    return {"status": "Reset", "message": f"Payment request for ticket {ticket} has been cancelled and reset."}
-
-
-@frappe.whitelist()
-def reset_all_test_supplier_payments():
-    """
-    Cleans up all test Payment Entries created today or linked to Buy Tickets and resets payment fields on all Buy Tickets.
-    """
-    pes = frappe.get_all("Payment Entry", filters=[["creation", ">=", "2026-10-08"]], fields=["name", "docstatus"])
-    count_pe = 0
-    for pe in pes:
-        try:
-            doc = frappe.get_doc("Payment Entry", pe.name)
-            if doc.docstatus == 1:
-                doc.cancel()
-            frappe.delete_doc("Payment Entry", pe.name)
-            count_pe += 1
-        except Exception as e:
-            frappe.log_error(f"Error resetting test Payment Entry {pe.name}: {str(e)}")
-
-    tickets = frappe.get_all("Buy Ticket", filters=[["supplier_payment_status", "!=", ""]], fields=["name"])
-    count_t = 0
-    for t_dict in tickets:
-        t = frappe.get_doc("Buy Ticket", t_dict.name)
-        t.db_set("supplier_payment_status", "")
-        t.db_set("supplier_paid", 0)
-        t.db_set("supplier_payment_entry", None)
-        t.db_set("supplier_payment_requested_by", None)
-        t.db_set("supplier_finance_approved_by", None)
-        t.db_set("supplier_manager_approved_by", None)
-        t.db_set("supplier_payment_approved_by", None)
-        t.db_set("supplier_payment_mode", None)
-        t.db_set("supplier_payment_ref", None)
-        t.db_set("supplier_payment_amount", None)
-        count_t += 1
-
-    frappe.db.commit()
-    return {"message": f"Removed {count_pe} test Payment Entries and reset {count_t} Buy Tickets."}
 
 
 @frappe.whitelist()

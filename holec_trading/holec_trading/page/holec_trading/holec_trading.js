@@ -137,7 +137,7 @@ function init_holec_trading_engine() {
 
         // Step 7: Net payable = Gross value - Aflatoxin - Drying - HEMA
         const calculatedNetPayable = Math.max(0, grossValue - totalOtherDeductions);
-        const netPayable = (rateOverride == null && flt(lot.supplier_payment_amount) > 0) ? flt(lot.supplier_payment_amount) : calculatedNetPayable;
+        const netPayable = calculatedNetPayable;
 
         // Step 8: Bag Impact
         const deliveredBags = netKg > 0 ? netKg / 90 : 0;
@@ -3284,7 +3284,6 @@ function init_holec_trading_engine() {
 
         const supplierRows = dueSupplierTickets.map(t => {
             const p = computePayable(t);
-            const netPayableAmt = flt(t.supplier_payment_amount) > 0 ? flt(t.supplier_payment_amount) : p.netPayable;
             const ps = t.supplier_payment_status || 'Pending Finance Approval';
             let label = 'Submit for approval', style = BTN_SM_APPROVE;
             if (ps === 'Pending Finance Approval' || ps === 'Pending Approval') { label = 'Review 1st Stage (Finance)'; style = BTN_SM_SUBMIT; }
@@ -3300,7 +3299,7 @@ function init_holec_trading_engine() {
                 <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${escHtml(t.name)}</td>
                 <td style="padding:12px 16px;color:#2d3748;">${escHtml(supplierName)}</td>
                 <td style="padding:12px 16px;color:#2d3748;">${fmtKg1(p.acceptedNetKg)}</td>
-                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(netPayableAmt)}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(p.netPayable)}</td>
                 <td style="padding:12px 16px;">${approvalBadge(ps, 'Pending Approval')}</td>
                 <td style="padding:12px 16px;text-align:right;">
                     <button class="h-btn sm pay-supplier-btn" data-id="${escHtml(t.name)}" style="${style}">${label}</button>
@@ -3576,44 +3575,44 @@ function init_holec_trading_engine() {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${readonlyBox('Reference Rate', `KES ${p.refRate}/kg`)}
                     ${field({
-                        label: 'Company *',
-                        id: 'f-sp-company',
-                        type: 'select',
-                        required: true,
-                        options: withValue(companyOpts, currentCompany),
-                        value: currentCompany
-                    })}
+            label: 'Company *',
+            id: 'f-sp-company',
+            type: 'select',
+            required: true,
+            options: withValue(companyOpts, currentCompany),
+            value: currentCompany
+        })}
                     ${field({
-                        label: 'Payment Type *',
-                        id: 'f-sp-payment-type',
-                        type: 'select',
-                        required: true,
-                        options: withValue(['Pay', 'Receive', 'Internal Transfer'], l.supplier_payment_type || 'Pay'),
-                        value: l.supplier_payment_type || 'Pay'
-                    })}
+            label: 'Payment Type *',
+            id: 'f-sp-payment-type',
+            type: 'select',
+            required: true,
+            options: withValue(['Pay', 'Receive', 'Internal Transfer'], l.supplier_payment_type || 'Pay'),
+            value: l.supplier_payment_type || 'Pay'
+        })}
                     ${field({
-                        label: 'Account Paid From',
-                        id: 'f-sp-paid-from',
-                        type: 'select',
-                        options: withValue(getFilteredAccounts(currentCompany, 'paid_from', l.supplier_payment_type || 'Pay'), currentPaidFrom),
-                        value: currentPaidFrom
-                    })}
+            label: 'Account Paid From',
+            id: 'f-sp-paid-from',
+            type: 'select',
+            options: withValue(getFilteredAccounts(currentCompany, 'paid_from', l.supplier_payment_type || 'Pay'), currentPaidFrom),
+            value: currentPaidFrom
+        })}
                     ${field({
-                        label: 'Account Paid To',
-                        id: 'f-sp-paid-to',
-                        type: 'select',
-                        options: withValue(getFilteredAccounts(currentCompany, 'paid_to', l.supplier_payment_type || 'Pay'), currentPaidTo),
-                        value: currentPaidTo
-                    })}
+            label: 'Account Paid To',
+            id: 'f-sp-paid-to',
+            type: 'select',
+            options: withValue(getFilteredAccounts(currentCompany, 'paid_to', l.supplier_payment_type || 'Pay'), currentPaidTo),
+            value: currentPaidTo
+        })}
                     ${field({
-                        label: 'Net Payable Amount (KES) *',
-                        id: 'f-sp-net-payable',
-                        type: 'number',
-                        step: '0.01',
-                        required: true,
-                        placeholder: 'Enter payment amount',
-                        value: amount
-                    })}
+            label: 'Net Payable Amount (KES) *',
+            id: 'f-sp-net-payable',
+            type: 'number',
+            step: '0.01',
+            required: true,
+            placeholder: 'Enter payment amount',
+            value: amount
+        })}
                     ${field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
                     ${field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || l.name })}
                 </div>
@@ -3628,7 +3627,6 @@ function init_holec_trading_engine() {
                 ${isPendingFinance && isFinanceRole ? `<button class="h-btn" id="sp-approve-fin-btn" style="${BTN_APPROVE}">Approve (1st Stage: Holec Finance)</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isPendingManager && isManagerRole ? `<button class="h-btn" id="sp-approve-mgr-btn" style="${BTN_APPROVE}">Approve (Final Stage: Holec Manager)</button><button class="h-btn" id="sp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isApproved ? `<button class="h-btn primary" id="sp-dispatch-btn" style="${BTN_PRIMARY}">Dispatch funds to Bank</button>` : ''}
-                ${pstatus ? `<button class="h-btn" id="sp-reset-btn" style="${BTN_REJECT}">Cancel / Reset Payment</button>` : ''}
                 <button class="h-btn ghost" id="cancel-sp-btn" style="${BTN_GHOST}">Back to payments</button>
             </div>
         `;
@@ -3640,7 +3638,7 @@ function init_holec_trading_engine() {
         const openParty = document.getElementById('open-party-btn');
         if (openParty && supplier) openParty.addEventListener('click', () => navigate('supplier_detail', { id: supplier.name }));
 
-        const updateAccountDefaults = function(forceReset = false) {
+        const updateAccountDefaults = function (forceReset = false) {
             const selectedCompany = $('#f-sp-company').val() || currentCompany;
             const ptype = $('#f-sp-payment-type').val() || 'Pay';
             const rail = $('#f-sp-rail').val() || 'Bank Transfer';
@@ -3670,11 +3668,11 @@ function init_holec_trading_engine() {
             });
         };
 
-        $('#f-sp-company').on('change', function() {
+        $('#f-sp-company').on('change', function () {
             updateAccountDefaults(true);
         });
 
-        $('#f-sp-payment-type').on('change', function() {
+        $('#f-sp-payment-type').on('change', function () {
             const val = $(this).val();
             const labelEl = $('label[for="f-sp-net-payable"]');
             const fromLabelEl = $('label[for="f-sp-paid-from"]');
@@ -3695,7 +3693,7 @@ function init_holec_trading_engine() {
             updateAccountDefaults(true);
         });
 
-        $('#f-sp-rail').on('change', function() {
+        $('#f-sp-rail').on('change', function () {
             updateAccountDefaults(true);
         });
 
@@ -3825,28 +3823,6 @@ function init_holec_trading_engine() {
                     } else { rejectBtn.disabled = false; }
                 },
                 error: () => { rejectBtn.disabled = false; }
-            });
-        });
-
-        // ---- Cancel / Reset Payment action ----
-        const resetBtn = document.getElementById('sp-reset-btn');
-        if (resetBtn) resetBtn.addEventListener('click', async () => {
-            const ok = await confirmAsync(__('Are you sure you want to cancel and reset this payment request? Any associated payment entry will be cancelled and deleted.'));
-            if (!ok) return;
-            resetBtn.disabled = true;
-            frappe.call({
-                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.reset_supplier_payment',
-                args: { ticket: l.name },
-                freeze: true,
-                freeze_message: 'Resetting payment request...',
-                callback: async (r) => {
-                    if (r && r.message) {
-                        showToast(r.message.message || 'Payment request reset successfully', 'orange');
-                        await loadMasterData();
-                        navigate('pay_supplier', { id: l.name });
-                    } else { resetBtn.disabled = false; }
-                },
-                error: () => { resetBtn.disabled = false; }
             });
         });
 
@@ -3991,7 +3967,6 @@ function init_holec_trading_engine() {
                 ${editable ? `<button class="h-btn primary" id="tp-submit-btn" style="${BTN_PRIMARY}">Submit for approval</button>` : ''}
                 ${isPending && approver ? `<button class="h-btn" id="tp-approve-btn" style="${BTN_APPROVE}">Approve payment</button><button class="h-btn" id="tp-reject-btn" style="${BTN_REJECT}">Reject</button>` : ''}
                 ${isApproved ? `<button class="h-btn primary" id="tp-dispatch-btn" style="${BTN_PRIMARY}">Dispatch funds</button>` : ''}
-                ${pstatus ? `<button class="h-btn" id="tp-reset-btn" style="${BTN_REJECT}">Cancel / Reset Payment</button>` : ''}
                 <button class="h-btn ghost" id="cancel-tp-btn" style="${BTN_GHOST}">Back to payments</button>
             </div>
         `;
@@ -4071,28 +4046,6 @@ function init_holec_trading_engine() {
                 __('Reject payment'),
                 __('Reject')
             );
-        });
-
-        // ---- Cancel / Reset Transporter Payment ----
-        const tpResetBtn = document.getElementById('tp-reset-btn');
-        if (tpResetBtn) tpResetBtn.addEventListener('click', async () => {
-            const ok = await confirmAsync(__('Are you sure you want to cancel and reset this transport payment request?'));
-            if (!ok) return;
-            tpResetBtn.disabled = true;
-            frappe.call({
-                method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.reset_transporter_payment',
-                args: { ticket_ids: params.id },
-                freeze: true,
-                freeze_message: 'Resetting transport payment...',
-                callback: async (r) => {
-                    if (r && r.message) {
-                        showToast(r.message.message || 'Transport payment reset successfully', 'orange');
-                        await loadMasterData();
-                        navigate('payments_form', { id: params.id });
-                    } else { tpResetBtn.disabled = false; }
-                },
-                error: () => { tpResetBtn.disabled = false; }
-            });
         });
 
         // ---- 3. Dispatch funds (only when Approved) ----
