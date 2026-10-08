@@ -3994,7 +3994,7 @@ function init_holec_trading_engine() {
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${field({ label: 'Weighbridge Ticket Number *', id: 'f-wbnum', value: l.weighbridge_ticket_number || '', required: true, placeholder: 'Unique, e.g. WB-88213' })}
-                    ${field({ label: 'Transporter *', id: 'f-transporter', type: 'select', value: l.transporter || '', options: transporterOptions, required: true })}
+                    ${field({ label: 'Transporter', id: 'f-transporter', type: 'select', value: l.transporter || '', options: transporterOptions })}
                     ${field({ label: 'Vehicle Registration', id: 'f-vehicle', type: 'text', value: l.vehicle_registration || '', placeholder: 'e.g. KDA 123A' })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
@@ -4039,8 +4039,8 @@ function init_holec_trading_engine() {
             const wbNo = $('#f-wbnum').val();
             const transporter = $('#f-transporter').val();
 
-            if (!gross || !tare || !bags || !wbNo || !transporter) {
-                frappe.msgprint(__('Please fill all mandatory Weighbridge fields (including Transporter).'));
+            if (!gross || !tare || !bags || !wbNo) {
+                frappe.msgprint(__('Please fill all mandatory Weighbridge fields'));
                 return;
             }
             if (gross <= tare) {
