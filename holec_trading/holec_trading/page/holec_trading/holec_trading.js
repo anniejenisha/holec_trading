@@ -137,7 +137,7 @@ function init_holec_trading_engine() {
 
         // Step 7: Net payable = Gross value - Aflatoxin - Drying - HEMA
         const calculatedNetPayable = Math.max(0, grossValue - totalOtherDeductions);
-        const netPayable = (lot.supplier_payment_amount != null && flt(lot.supplier_payment_amount) > 0) ? flt(lot.supplier_payment_amount) : calculatedNetPayable;
+        const netPayable = calculatedNetPayable;
 
         // Step 8: Bag Impact
         const deliveredBags = netKg > 0 ? netKg / 90 : 0;
@@ -4227,9 +4227,9 @@ function init_holec_trading_engine() {
                     <div style="display:flex;align-items:center;gap:12px;">
                         <span style="color:#4a5568;width:120px;">Aflatoxin</span>
                         <select id="f-afla-charge" style="width:100px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
-                            <option value="0">0</option>
-                            <option value="1500" selected>1,500</option>
-                            <option value="2500">2,500</option>
+                            <option value="0" ${flt(l.aflatoxin_deduction_kes) === 0 ? 'selected' : ''}>0</option>
+                            <option value="1500" ${flt(l.aflatoxin_deduction_kes) === 1500 || l.aflatoxin_deduction_kes == null ? 'selected' : ''}>1,500</option>
+                            <option value="2500" ${flt(l.aflatoxin_deduction_kes) === 2500 ? 'selected' : ''}>2,500</option>
                         </select>
                     </div>
                     <strong id="p-afla-ded" style="color:#e53e3e;"></strong>
@@ -4412,6 +4412,10 @@ function init_holec_trading_engine() {
                 return;
             }
 
+            l.aflatoxin_deduction_kes = flt($('#f-afla-charge').val());
+            l.drying_rate_per_bag = flt($('#f-drying-rate').val());
+            l.hema_rate_per_bag = flt($('#f-hema-rate').val());
+
             const p = computePayable(l, rate);
             if (invAmount > 0 && Math.abs(invAmount - p.netPayable) >= 1) {
                 frappe.msgprint(__('Supplier Invoice Amount ({0}) does not match Net Payable ({1}). Cannot proceed until invoice matches.', [fmtKES(invAmount), fmtKES(p.netPayable)]));
@@ -4436,7 +4440,8 @@ function init_holec_trading_engine() {
                 drying_rate_per_bag: flt($('#f-drying-rate').val()),
                 hema_rate_per_bag: flt($('#f-hema-rate').val()),
                 reason_code_if_foreign_matter_judgement_or_wet_buy: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '',
-                supplier_invoice_amount: invAmount
+                supplier_invoice_amount: invAmount,
+                supplier_payment_amount: p.netPayable
             });
             showToast(`Net invoice for ${l.name} submitted and brought to Payments page for approval`);
             await loadMasterData();
