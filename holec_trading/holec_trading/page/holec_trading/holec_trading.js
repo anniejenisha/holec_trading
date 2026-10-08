@@ -4409,6 +4409,9 @@ function init_holec_trading_engine() {
                 moisture_: flt(l.moisture_),
                 foreign_matter_: flt(l.foreign_matter_),
                 aflatoxin_ppb: flt(l.aflatoxin_ppb),
+                aflatoxin_deduction_kes: flt($('#f-afla-charge').val()),
+                drying_rate_per_bag: flt($('#f-drying-rate').val()),
+                hema_rate_per_bag: flt($('#f-hema-rate').val()),
                 reason_code_if_foreign_matter_judgement_or_wet_buy: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '',
                 supplier_invoice_amount: invAmount
             });

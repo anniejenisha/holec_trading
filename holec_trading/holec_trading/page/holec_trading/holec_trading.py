@@ -857,7 +857,11 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         "supplier_payment_approved_by",
         "supplier_paid",
         "supplier_payment_entry",
-        "transport_batch"
+        "transport_batch",
+        "aflatoxin_deduction_kes",
+        "drying_rate_per_bag",
+        "hema_rate_per_bag",
+        "supplier_invoice_amount",
     ]:
         if not frappe.db.has_column("Buy Ticket", fieldname):
             try:
