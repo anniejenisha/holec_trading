@@ -835,7 +835,7 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
 
 @frappe.whitelist()
-def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None):
+def update_supplier_payment_approval(ticket, action, mode_of_payment=None, reference_no=None, amount=None):
     """
     2-stage approval workflow for Supplier Net Invoice Payment:
       - 'submit': Holec Finance / Submitter initiates -> status = 'Pending Finance Approval'
@@ -862,6 +862,7 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         "drying_rate_per_bag",
         "hema_rate_per_bag",
         "supplier_invoice_amount",
+        "supplier_payment_amount",
     ]:
         if not frappe.db.has_column("Buy Ticket", fieldname):
             try:
@@ -873,6 +874,8 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         t.db_set("supplier_payment_mode", mode_of_payment)
     if reference_no is not None:
         t.db_set("supplier_payment_ref", (reference_no or "").strip() or t.name)
+    if amount is not None and flt(amount) > 0:
+        t.db_set("supplier_payment_amount", flt(amount))
 
     if action == "submit":
         t.db_set("supplier_payment_requested_by", user)
@@ -912,7 +915,7 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
 
 
 @frappe.whitelist()
-def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None):
+def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None, amount=None):
     """
     Pays the supplier for one Buy Ticket (accepted net quantity * ref rate) and marks it paid.
     Reads credentials and environment URLs from Bank Account document.
@@ -955,10 +958,19 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
     aflatoxin_ded = flt(t.get("aflatoxin_deduction_kes") or 0)
     drying_ded = flt(t.get("drying_rate_per_bag") if t.get("drying_rate_per_bag") is not None else 50) * paid_bags
     hema_ded = flt(t.get("hema_rate_per_bag") if t.get("hema_rate_per_bag") is not None else 24.30) * paid_bags
-    amount = max(0, gross_val - (aflatoxin_ded + drying_ded + hema_ded))
+    calculated_amount = max(0, gross_val - (aflatoxin_ded + drying_ded + hema_ded))
+
+    if amount is not None and flt(amount) > 0:
+        amount = flt(amount)
+    elif t.get("supplier_payment_amount") and flt(t.get("supplier_payment_amount")) > 0:
+        amount = flt(t.get("supplier_payment_amount"))
+    else:
+        amount = calculated_amount
 
     if amount <= 0:
         frappe.throw("Net payable is zero - nothing to pay.")
+
+    t.db_set("supplier_payment_amount", amount)
 
     if not mode_of_payment:
         frappe.throw("Please select a Mode of Payment.")
