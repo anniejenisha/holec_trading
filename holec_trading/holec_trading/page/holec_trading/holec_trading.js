@@ -3261,6 +3261,7 @@ function init_holec_trading_engine() {
 
         try {
             paymentEntries = await frappe.db.get_list('Payment Entry', {
+                filters: { docstatus: 1 },
                 fields: ['name', 'party', 'party_type', 'paid_amount', 'mode_of_payment', 'docstatus', 'creation'],
                 order_by: 'creation desc',
                 limit: 50
