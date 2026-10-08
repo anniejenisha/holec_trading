@@ -3489,7 +3489,7 @@ function init_holec_trading_engine() {
 
         const rawCompanies = LIVE_STORE.companies || [];
         const companyOpts = rawCompanies.length ? rawCompanies.map(c => ({ value: c.name, label: c.company_name || c.name })) : [COMPANY];
-        const currentCompany = l.company || frappe.defaults.get_user_default('Company') || COMPANY;
+        const currentCompany = l.company || COMPANY;
 
         const BANK_CASH_TYPES = ['Bank', 'Cash'];
         const PAYABLE_TYPES = ['Payable', 'Expense Account', 'Direct Expense', 'Indirect Expense', 'Cost of Goods Sold', 'Current Liability', 'Stock Expenses', 'Tax', 'Chargeable'];
@@ -3697,7 +3697,7 @@ function init_holec_trading_engine() {
             updateAccountDefaults(true);
         });
 
-        updateAccountDefaults(false);
+        updateAccountDefaults(true);
 
         // ---- 1. Submit for approval ----
         const submitBtn = document.getElementById('sp-submit-btn');

@@ -984,12 +984,18 @@ def get_payment_entry_defaults(ticket=None, payment_type="Pay", mode_of_payment=
         paid_to = cash_acc if (cash_acc and cash_acc != paid_from) else mop_acc
 
     saved_from = t.get("supplier_payment_paid_from") if t else None
-    if saved_from and frappe.db.get_value("Account", saved_from, "is_group"):
-        saved_from = None
+    if saved_from:
+        s_type = frappe.db.get_value("Account", saved_from, "account_type")
+        s_group = frappe.db.get_value("Account", saved_from, "is_group")
+        if s_group or (ptype == "Pay" and s_type not in ["Bank", "Cash"]):
+            saved_from = None
 
     saved_to = t.get("supplier_payment_paid_to") if t else None
-    if saved_to and frappe.db.get_value("Account", saved_to, "is_group"):
-        saved_to = None
+    if saved_to:
+        s_type = frappe.db.get_value("Account", saved_to, "account_type")
+        s_group = frappe.db.get_value("Account", saved_to, "is_group")
+        if s_group or (ptype == "Pay" and s_type in ["Bank", "Cash"]):
+            saved_to = None
 
     return {
         "company": target_company,
