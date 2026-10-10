@@ -513,11 +513,11 @@ function init_holec_trading_engine() {
                     order_by: 'creation desc',
                     limit: 100
                 }).catch(() => []),
-                frappe.db.get_list('Bank', { fields: ['name', 'bank_name'], order_by: 'name asc', limit: 500 }).catch(() => []),
-                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], limit: 500, order_by: 'name asc' }).catch(() => []),
+                frappe.db.get_list('Bank', { fields: ['name', 'bank_name', 'bank_code', 'swift_number'], order_by: 'name asc', limit: 500 }).catch(() => []),
+                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank', 'branch_code', 'swift_code'], limit: 500, order_by: 'name asc' }).catch(() => []),
                 frappe.db.get_list('Origin Area', { fields: ['name'], order_by: 'name asc', limit: 500 }).catch(() => []),
                 frappe.db.get_list('Origin County', { fields: ['name'], order_by: 'name asc', limit: 500 }).catch(() => []),
-                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank'], order_by: 'name asc', limit: 500 }).catch(() => []),
+                frappe.db.get_list('Bank Branch', { fields: ['name', 'branch_name', 'bank', 'branch_code', 'swift_code'], order_by: 'name asc', limit: 500 }).catch(() => []),
                 frappe.db.get_list('Account', { filters: { is_group: 0, disabled: 0 }, fields: ['name', 'account_name', 'account_type', 'company', 'is_group', 'disabled'], limit: 1000, order_by: 'name asc' }).catch(() => []),
                 frappe.db.get_list('Company', { fields: ['name', 'company_name'], limit: 500, order_by: 'name asc' }).catch(() => []),
             ]);
@@ -1993,9 +1993,18 @@ function init_holec_trading_engine() {
 
         let doc = null;
         try {
-            doc = await frappe.db.get_doc('Supplier', id);
+            const res = await frappe.call({
+                method: 'frappe.client.get',
+                args: { doctype: 'Supplier', name: id }
+            });
+            doc = res ? res.message : null;
         } catch (e) {
-            console.warn('Supplier get_doc failed, using LIVE_STORE fallback:', e);
+            console.warn('Supplier client.get failed, trying get_doc:', e);
+            try {
+                doc = await frappe.db.get_doc('Supplier', id);
+            } catch (err) {
+                console.warn('Supplier get_doc failed:', err);
+            }
         }
 
         if (!doc) {
@@ -2220,7 +2229,7 @@ function init_holec_trading_engine() {
                     ${field({ label: 'City', id: 'ns-city', value: d.city || '' })}
                 </div>
                 
-                ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true, value: d.address_line1 || '' })}
+                ${field({ label: 'Physical Address', id: 'ns-address', type: 'textarea', span: true, value: d.physical_address || d.address_line1 || '' })}
             </div>
 
             <div style="${CARD_BOX}">
@@ -2234,7 +2243,7 @@ function init_holec_trading_engine() {
                         </div>
                     </div>
                     ${field({ label: 'KRA PIN *', id: 'ns-krapin', required: true, placeholder: 'Auto-filled on certificate upload or enter manually', value: d.tax_id || d.kra_pin || '' })}
-                    ${field({ label: 'VAT Status', id: 'ns-vat', type: 'select', options: withValue(['Registered', 'Exempt', 'Not Registered'], d.custom_vat_status), value: d.custom_vat_status || '' })}
+                    ${field({ label: 'VAT Status', id: 'ns-vat', type: 'select', options: withValue(['Registered', 'Exempt', 'Not Registered'], d.vat_status || d.custom_vat_status), value: d.vat_status || d.custom_vat_status || '' })}
                 </div>
                 <div style="max-width:320px;">
                     ${field({ label: 'eTIMS Registration Status', id: 'ns-etims', type: 'select', options: withValue(['Registered', 'Pending', 'Not Required'], d.custom_etims_status), value: d.custom_etims_status || '' })}
@@ -2317,19 +2326,36 @@ function init_holec_trading_engine() {
         bindToggle('sec-bank2');
 
         // Narrow the branch list to the selected bank (falls back to all branches if none match)
-        const bindBranchFilter = (bankSel, branchSel) => {
+        // and auto-populate bank_code, swift_code, and branch_code
+        const bindBankAndBranchEvents = (bankSel, branchSel, bankCodeSel, swiftCodeSel, branchCodeSel) => {
             $(bankSel).on('change', function () {
+                const bankVal = $(this).val();
                 const branchSelect = $(branchSel);
                 branchSelect.empty().append('<option value="">Select...</option>');
-                branchOptionsFor($(this).val()).forEach(o => {
+                branchOptionsFor(bankVal).forEach(o => {
                     const v = typeof o === 'object' ? o.value : o;
                     const lb = typeof o === 'object' ? o.label : o;
                     branchSelect.append(`<option value="${escHtml(v)}">${escHtml(lb)}</option>`);
                 });
+
+                const bObj = (LIVE_STORE.banks || []).find(b => b.name === bankVal);
+                if (bObj) {
+                    if (bObj.bank_code) $(bankCodeSel).val(bObj.bank_code);
+                    if (bObj.swift_number && !$(swiftCodeSel).val()) $(swiftCodeSel).val(bObj.swift_number);
+                }
+            });
+
+            $(branchSel).on('change', function () {
+                const branchVal = $(this).val();
+                const brObj = (LIVE_STORE.branch || []).find(b => b.name === branchVal);
+                if (brObj) {
+                    if (brObj.branch_code) $(branchCodeSel).val(brObj.branch_code);
+                    if (brObj.swift_code) $(swiftCodeSel).val(brObj.swift_code);
+                }
             });
         };
-        bindBranchFilter('#ns-bank', '#ns-branch');
-        bindBranchFilter('#ns2-bank', '#ns2-branch');
+        bindBankAndBranchEvents('#ns-bank', '#ns-branch', '#ns-bank-code', '#ns-swift-code', '#ns-branch-code');
+        bindBankAndBranchEvents('#ns2-bank', '#ns2-branch', '#ns2-bank-code', '#ns2-swift-code', '#ns2-branch-code');
 
         document.getElementById('upload-kra-btn').addEventListener('click', () => {
             const fileInput = document.createElement('input');
@@ -2523,7 +2549,9 @@ function init_holec_trading_engine() {
                 tax_id: taxId,
                 kra_pin: taxId,
                 area: area,
+                physical_address: address,
                 address_line1: address,
+                vat_status: vatStatus,
                 custom_vat_status: vatStatus,
                 custom_etims_status: etimsStatus,
 

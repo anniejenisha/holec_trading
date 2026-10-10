@@ -1358,8 +1358,8 @@ def submit_sale(ticket, customer, sell_rate):
     if sell_rate <= 0:
         frappe.throw("Please enter a valid Sell Rate.")
 
-    cust_gross = flt(t.customer_gross_kg or t.gross_weight_kg or 0)
-    cust_tare = flt(t.customer_tare_kg or t.tare_weight_kg or 0)
+    cust_gross = flt(t.delivery_gross_kg or t.gross_weight_kg or 0)
+    cust_tare = flt(t.delivery_gross_kg or t.tare_weight_kg or 0)
     sold_kg = max(0, cust_gross - cust_tare)
 
     if sold_kg <= 0:
