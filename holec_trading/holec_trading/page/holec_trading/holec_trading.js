@@ -51,6 +51,20 @@ function init_holec_trading_engine() {
     // true = a transporter payment cannot be submitted or dispatched unless the supplier record is Approved
     const REQUIRE_APPROVED_PARTY_FOR_PAYMENT = true;
 
+    function isSupplierApproved(s) {
+        if (!s) return false;
+        if (cint(s.disabled) === 1) return false;
+        const st = s.approval_status || s.custom_status || (s[SUPPLIER_STATUS_FIELD]) || 'Draft';
+        return st === 'Approved';
+    }
+
+    function isCustomerApproved(c) {
+        if (!c) return false;
+        if (cint(c.disabled) === 1) return false;
+        const st = c.approval_status || c.custom_approval_status || (c[CUSTOMER_STATUS_FIELD]) || 'Draft';
+        return st === 'Approved';
+    }
+
     const BTN_PRIMARY = 'background:#1a202c;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_GHOST = 'background:transparent;color:#4a5568;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
     const BTN_OUTLINE = 'background:#ffffff;color:#1a202c;border:1px solid #cbd5e0;padding:9px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:13px;';
@@ -474,7 +488,7 @@ function init_holec_trading_engine() {
         try {
             const [suppliers, customers, customerGroups, countries, items, vehicles, buyTickets, lotEventLogs, banks, bankBranches, origin_area, origin_county, branch, accounts, companies] = await Promise.all([
                 frappe.db.get_list('Supplier', {
-                    fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id', SUPPLIER_STATUS_FIELD, 'owner'],
+                    fields: ['name', 'supplier_name', 'supplier_group', 'country', 'tax_id', SUPPLIER_STATUS_FIELD, 'disabled', 'owner'],
                     limit: 500
                 }),
                 frappe.db.get_list('Customer', {
@@ -549,12 +563,12 @@ function init_holec_trading_engine() {
     async function loadApprovalStatuses() {
         const [supRows, custRows, tktRows] = await Promise.all([
             frappe.db.get_list('Supplier', {
-                fields: ['name', SUPPLIER_STATUS_FIELD, 'owner'],
+                fields: ['name', SUPPLIER_STATUS_FIELD, 'disabled', 'owner'],
                 limit: 500
             }).catch((e) => { console.warn('Supplier approval field not available:', SUPPLIER_STATUS_FIELD, e); return []; }),
             frappe.db.get_list('Customer', {
                 filters: { customer_group: 'Holec Trading' },
-                fields: ['name', CUSTOMER_STATUS_FIELD, 'owner'],
+                fields: ['name', CUSTOMER_STATUS_FIELD, 'disabled', 'owner'],
                 limit: 500
             }).catch((e) => { console.warn('Customer approval field not available:', CUSTOMER_STATUS_FIELD, e); return []; }),
             frappe.db.get_list('Buy Ticket', {
@@ -573,11 +587,15 @@ function init_holec_trading_engine() {
         LIVE_STORE.suppliers.forEach(s => {
             const r = sup[s.name];
             s.approval_status = (r && r[SUPPLIER_STATUS_FIELD]) || s[SUPPLIER_STATUS_FIELD] || 'Draft';
+            s.custom_status = s.approval_status;
+            if (r && r.disabled !== undefined) s.disabled = r.disabled;
             s.owner = (r && r.owner) || s.owner;
         });
         LIVE_STORE.customers.forEach(c => {
             const r = cus[c.name];
             c.approval_status = (r && r[CUSTOMER_STATUS_FIELD]) || c[CUSTOMER_STATUS_FIELD] || 'Draft';
+            c.custom_approval_status = c.approval_status;
+            if (r && r.disabled !== undefined) c.disabled = r.disabled;
             c.owner = (r && r.owner) || c.owner;
         });
         LIVE_STORE.lots.forEach(l => {
@@ -3330,12 +3348,22 @@ function init_holec_trading_engine() {
             else if (ps === 'Rejected') { label = 'Fix & resubmit'; style = BTN_SM; }
 
             const supplierObj = (LIVE_STORE.suppliers || []).find(s => s.name === t.supplier);
+            const supApproved = isSupplierApproved(supplierObj);
+            const supStatus = supplierObj ? (supplierObj.approval_status || supplierObj.custom_status || 'Draft') : 'Draft';
             const supplierName = supplierObj && supplierObj.supplier_name ? `${supplierObj.supplier_name} (${t.supplier})` : t.supplier;
+            const supplierBadgeHtml = !supApproved
+                ? `<span style="background:#fff5f5;color:#c53030;border:1px solid #feb2b2;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px;" title="Supplier is ${escHtml(supStatus)}">Supplier ${escHtml(supStatus)}</span>`
+                : '';
+
+            if (!supApproved) {
+                label = 'Approve supplier first';
+                style = BTN_SM;
+            }
 
             return `
             <tr style="border-bottom:1px solid #edf2f7;">
                 <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${escHtml(t.name)}</td>
-                <td style="padding:12px 16px;color:#2d3748;">${escHtml(supplierName)}</td>
+                <td style="padding:12px 16px;color:#2d3748;">${escHtml(supplierName)}${supplierBadgeHtml}</td>
                 <td style="padding:12px 16px;color:#2d3748;">${fmtKg1(p.acceptedNetKg)}</td>
                 <td style="padding:12px 16px;color:#2d3748;font-weight:600;">${fmtKES(payableAmount)}</td>
                 <td style="padding:12px 16px;">${approvalBadge(ps, 'Pending Approval')}</td>
@@ -3379,6 +3407,18 @@ function init_holec_trading_engine() {
             else if (ps === 'Approved') { label = 'Dispatch to Bank'; style = BTN_SM_APPROVE; }
             else if (ps === 'Rejected') { label = 'Fix & resubmit'; style = BTN_SM; }
 
+            const transporterObj = (LIVE_STORE.suppliers || []).find(s => s.name === tName);
+            const transApproved = isSupplierApproved(transporterObj);
+            const transStatus = transporterObj ? (transporterObj.approval_status || transporterObj.custom_status || 'Draft') : 'Draft';
+            const transBadgeHtml = !transApproved
+                ? `<br><span style="background:#fff5f5;color:#c53030;border:1px solid #feb2b2;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;" title="Transporter is ${escHtml(transStatus)}">Transporter ${escHtml(transStatus)}</span>`
+                : '';
+
+            if (!transApproved) {
+                label = 'Approve transporter first';
+                style = BTN_SM;
+            }
+
             const idsParam = groupLots.map(x => x.name).join(',');
 
             return `
@@ -3386,6 +3426,7 @@ function init_holec_trading_engine() {
                 <td style="padding:12px 16px;color:#2d3748;font-weight:600;">
                     ${escHtml(tName)}
                     ${batchId ? `<br><span style="font-size:11px;color:#4a5568;font-weight:normal;background:#e2e8f0;padding:1px 6px;border-radius:4px;display:inline-block;margin-top:2px;">Batch: ${escHtml(batchId)}</span>` : ''}
+                    ${transBadgeHtml}
                 </td>
                 <td style="padding:12px 16px;font-family:monospace;font-size:12px;color:#4a5568;">${escHtml(lotNamesStr)} <span style="background:#edf2f7;color:#4a5568;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:600;margin-left:4px;">${groupLots.length} lot(s)</span></td>
                 <td style="padding:12px 16px;color:#2d3748;">${fmtKES(totalHaulage)}</td>
@@ -3596,8 +3637,11 @@ function init_holec_trading_engine() {
 
             ${partyBlocked ? `
             <div style="background:#fffaf0;border:1px solid #feebc8;border-radius:8px;padding:14px 18px;margin-bottom:24px;font-size:13px;color:#9c4221;display:flex;justify-content:space-between;align-items:center;gap:16px;">
-                <span>This supplier is not approved yet. Approve the supplier record first.</span>
-                <button type="button" id="open-party-btn" style="${BTN_OUTLINE}white-space:nowrap;">Open supplier</button>
+                <span>This supplier is not approved yet (Current status: <strong>${escHtml(partyStatus)}</strong>). Approve the supplier record first before processing payments.</span>
+                <div style="display:flex;gap:8px;">
+                    ${supplier && canApprove() ? `<button type="button" id="quick-approve-supplier-btn" style="${BTN_PRIMARY}padding:6px 14px;font-size:12px;">✓ Approve Supplier Now</button>` : ''}
+                    <button type="button" id="open-party-btn" style="${BTN_OUTLINE}padding:6px 14px;font-size:12px;white-space:nowrap;">Open supplier</button>
+                </div>
             </div>` : ''}
 
             <div style="${CARD_BOX}">
@@ -3675,6 +3719,18 @@ function init_holec_trading_engine() {
         document.getElementById('cancel-sp-btn').addEventListener('click', () => navigate('payments_list'));
         const openParty = document.getElementById('open-party-btn');
         if (openParty && supplier) openParty.addEventListener('click', () => navigate('supplier_detail', { id: supplier.name }));
+        const quickApprove = document.getElementById('quick-approve-supplier-btn');
+        if (quickApprove && supplier) {
+            quickApprove.addEventListener('click', async () => {
+                quickApprove.disabled = true;
+                const ok = await approveSupplier(supplier.name);
+                if (ok) {
+                    await refresh();
+                } else {
+                    quickApprove.disabled = false;
+                }
+            });
+        }
 
         const updateAccountDefaults = function (forceReset = false) {
             const selectedCompany = $('#f-sp-company').val() || currentCompany;
@@ -3795,6 +3851,10 @@ function init_holec_trading_engine() {
         const finApproveBtn = document.getElementById('sp-approve-fin-btn');
         if (finApproveBtn) finApproveBtn.addEventListener('click', async () => {
             const ptype = $('#f-sp-payment-type').val() || 'Pay';
+            if (partyBlocked && ptype !== 'Internal Transfer') {
+                frappe.msgprint(__('Cannot approve payment: The supplier is not approved yet (Current status: {0}). Please approve the supplier first.', [partyStatus]));
+                return;
+            }
             const payAmt = flt($('#f-sp-net-payable').val());
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
             const ok = await confirmAsync(__('Grant 1st Stage approval (Holec Finance) for {0} to {1}? ({2})', [fmtKES(payAmt), supplierLabel, ptype]));
@@ -3831,6 +3891,10 @@ function init_holec_trading_engine() {
         if (mgrApproveBtn) mgrApproveBtn.addEventListener('click', async () => {
             if (blockedByMakerChecker(l.supplier_payment_requested_by, 'supplier payment request')) return;
             const ptype = $('#f-sp-payment-type').val() || 'Pay';
+            if (partyBlocked && ptype !== 'Internal Transfer') {
+                frappe.msgprint(__('Cannot approve payment: The supplier is not approved yet (Current status: {0}). Please approve the supplier first.', [partyStatus]));
+                return;
+            }
             const payAmt = flt($('#f-sp-net-payable').val());
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
             const ok = await confirmAsync(__('Grant Final Approval (Holec Manager) for payment of {0} to {1}? ({2})', [fmtKES(payAmt), supplierLabel, ptype]));
@@ -3887,7 +3951,10 @@ function init_holec_trading_engine() {
         const dispatchBtn = document.getElementById('sp-dispatch-btn');
         if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
             const ptype = $('#f-sp-payment-type').val() || 'Pay';
-            if (partyBlocked && ptype !== 'Internal Transfer') { frappe.msgprint(__('The party must be approved before funds can be dispatched.')); return; }
+            if (partyBlocked && ptype !== 'Internal Transfer') {
+                frappe.msgprint(__('The supplier is not approved yet (Current status: {0}). Approve the supplier record before funds can be dispatched.', [partyStatus]));
+                return;
+            }
             const payAmt = flt($('#f-sp-net-payable').val());
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
 
@@ -3996,8 +4063,11 @@ function init_holec_trading_engine() {
 
             ${partyBlocked ? `
             <div style="background:#fffaf0;border:1px solid #feebc8;border-radius:8px;padding:14px 18px;margin-bottom:24px;font-size:13px;color:#9c4221;display:flex;justify-content:space-between;align-items:center;gap:16px;">
-                <span>This transporter is not approved yet, so payment cannot be submitted or dispatched. Approve the supplier first.</span>
-                <button type="button" id="open-party-btn" style="${BTN_OUTLINE}white-space:nowrap;">Open supplier</button>
+                <span>This transporter is not approved yet (Current status: <strong>${escHtml(partyStatus)}</strong>). Approve the transporter/supplier record first before submitting or dispatching payments.</span>
+                <div style="display:flex;gap:8px;">
+                    ${transporter && canApprove() ? `<button type="button" id="quick-approve-transporter-btn" style="${BTN_PRIMARY}padding:6px 14px;font-size:12px;">✓ Approve Transporter Now</button>` : ''}
+                    <button type="button" id="open-party-btn" style="${BTN_OUTLINE}padding:6px 14px;font-size:12px;white-space:nowrap;">Open supplier</button>
+                </div>
             </div>` : ''}
 
             <div style="${CARD_BOX}">
@@ -4043,13 +4113,28 @@ function init_holec_trading_engine() {
         document.getElementById('cancel-tp-btn').addEventListener('click', () => navigate('payments_list'));
         const openParty = document.getElementById('open-party-btn');
         if (openParty && transporter) openParty.addEventListener('click', () => navigate('supplier_detail', { id: transporter.name }));
+        const quickApproveTr = document.getElementById('quick-approve-transporter-btn');
+        if (quickApproveTr && transporter) {
+            quickApproveTr.addEventListener('click', async () => {
+                quickApproveTr.disabled = true;
+                const ok = await approveSupplier(transporter.name);
+                if (ok) {
+                    await refresh();
+                } else {
+                    quickApproveTr.disabled = false;
+                }
+            });
+        }
 
         // ---- 1. Submit for approval ----
         const submitBtn = document.getElementById('tp-submit-btn');
         if (submitBtn) submitBtn.addEventListener('click', async () => {
             const rail = $('#f-tp-rail').val();
             if (!rail) { frappe.msgprint(__('Please select a Mode of Payment.')); return; }
-            if (partyBlocked) { frappe.msgprint(__('The transporter must be approved before a payment can be submitted.')); return; }
+            if (partyBlocked) {
+                frappe.msgprint(__('The transporter is not approved yet (Current status: {0}). Please approve the transporter before submitting payment.', [partyStatus]));
+                return;
+            }
 
             submitBtn.disabled = true;
             try {
@@ -4073,6 +4158,10 @@ function init_holec_trading_engine() {
         const approveBtn = document.getElementById('tp-approve-btn');
         if (approveBtn) approveBtn.addEventListener('click', async () => {
             if (blockedByMakerChecker(l.transport_payment_requested_by, 'payment request')) return;
+            if (partyBlocked) {
+                frappe.msgprint(__('Cannot approve payment: The transporter is not approved yet (Current status: {0}). Please approve the transporter first.', [partyStatus]));
+                return;
+            }
             const ok = await confirmAsync(__('Approve batch payment of {0} to {1}?', [fmtKES(amount), transporterLabel]));
             if (!ok) return;
             approveBtn.disabled = true;
@@ -4108,7 +4197,10 @@ function init_holec_trading_engine() {
         // ---- 3. Dispatch funds (only when Approved) ----
         const dispatchBtn = document.getElementById('tp-dispatch-btn');
         if (dispatchBtn) dispatchBtn.addEventListener('click', async () => {
-            if (partyBlocked) { frappe.msgprint(__('The transporter must be approved before funds can be dispatched.')); return; }
+            if (partyBlocked) {
+                frappe.msgprint(__('The transporter is not approved yet (Current status: {0}). Approve the transporter record before funds can be dispatched.', [partyStatus]));
+                return;
+            }
 
             let f;
             try {
@@ -4161,16 +4253,29 @@ function init_holec_trading_engine() {
         }));
         const defaultCommodity = itemOptions.length > 0 ? itemOptions[0].value : 'Maize';
 
+        const approvedFarmers = (LIVE_STORE.suppliers || [])
+            .filter(s => (s.supplier_group === 'Farmer' || s.supplier_group === 'Farmers') && isSupplierApproved(s));
+        const farmerOptions = approvedFarmers.map(s => ({
+            value: s.name,
+            label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name
+        }));
+
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">New Ticket</span>
             </div>
             <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1a202c;">New Ticket</h1>
 
+            ${!approvedFarmers.length ? `
+            <div style="background:#fffaf0;border:1px solid #feebc8;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#9c4221;display:flex;justify-content:space-between;align-items:center;">
+                <span>No approved farmers found. Farmers must be approved before tickets and payments can be created.</span>
+                <button type="button" class="h-btn outline" id="go-suppliers-btn" style="${BTN_OUTLINE}padding:6px 12px;font-size:12px;">Go to Suppliers</button>
+            </div>` : ''}
+
             <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;margin-bottom:20px;">
-                    ${field({ label: 'Farmer *', id: 'f-supplier', type: 'select', required: true, options: LIVE_STORE.suppliers.filter(s => s.supplier_group === 'Farmer' || s.supplier_group === 'Farmers').map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })) })}
+                    ${field({ label: 'Farmer *', id: 'f-supplier', type: 'select', required: true, options: farmerOptions })}
                     ${field({ label: 'Commodity', id: 'f-item', type: 'select', value: defaultCommodity, options: itemOptions })}
                     ${field({ label: 'Expected Quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
                 </div>
@@ -4185,13 +4290,21 @@ function init_holec_trading_engine() {
             </div>
         `;
 
+        const goSuppliers = document.getElementById('go-suppliers-btn');
+        if (goSuppliers) goSuppliers.addEventListener('click', () => navigate('suppliers'));
+
         document.getElementById('cancel-btn').addEventListener('click', () => navigate('lots'));
         document.getElementById('create-ticket-btn').addEventListener('click', async () => {
             const supplier = $('#f-supplier').val();
             const commodity = $('#f-item').val();
             const qty = parseFloat($('#f-qty').val()) || 0;
 
-            if (!supplier) { frappe.msgprint(__('Please select a Farmer.')); return; }
+            if (!supplier) { frappe.msgprint(__('Please select an approved Farmer.')); return; }
+            const supObj = (LIVE_STORE.suppliers || []).find(s => s.name === supplier);
+            if (!supObj || !isSupplierApproved(supObj)) {
+                frappe.msgprint(__('Selected farmer is not approved yet. Tickets and payments can only be created for approved suppliers.'));
+                return;
+            }
             if (qty <= 0) { frappe.msgprint(__('Please enter a valid Expected Quantity.')); return; }
 
             const res = await frappe.db.insert({
@@ -4219,8 +4332,10 @@ function init_holec_trading_engine() {
         if (!l) return navigate('lots');
 
         const waitingTickets = LIVE_STORE.lots.filter(x => (x.status || 'Ticket') === 'Ticket');
-        const transporterOptions = (LIVE_STORE.suppliers || [])
-            .map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name }));
+        const approvedTransporters = (LIVE_STORE.suppliers || []).filter(s => isSupplierApproved(s));
+        const transporterOptions = (l.transporter && !approvedTransporters.some(s => s.name === l.transporter))
+            ? [{ value: l.transporter, label: `${l.transporter} (Unapproved)` }].concat(approvedTransporters.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name })))
+            : approvedTransporters.map(s => ({ value: s.name, label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name }));
 
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
@@ -4302,6 +4417,13 @@ function init_holec_trading_engine() {
             if (gross <= tare) {
                 frappe.msgprint(__('Gross weight must be greater than tare weight.'));
                 return;
+            }
+            if (transporter) {
+                const trObj = (LIVE_STORE.suppliers || []).find(s => s.name === transporter);
+                if (trObj && !isSupplierApproved(trObj)) {
+                    frappe.msgprint(__('Selected Transporter "{0}" is not approved yet. Please select an approved transporter or approve the record first.', [transporter]));
+                    return;
+                }
             }
 
             // Held in memory until "Post Net Invoice & Create Lot" saves them on the Deductions screen
@@ -4634,6 +4756,12 @@ function init_holec_trading_engine() {
             const reason = $('#f-reason').val() || '';
             const invAmount = flt($('#f-supplier-invoice-amount').val());
 
+            const supObj = (LIVE_STORE.suppliers || []).find(s => s.name === l.supplier);
+            if (supObj && !isSupplierApproved(supObj)) {
+                frappe.msgprint(__('Supplier "{0}" is not approved yet. Please approve the supplier record first before posting net invoice and initiating payment.', [l.supplier]));
+                return;
+            }
+
             if (rate <= 0) { frappe.msgprint(__('Please enter a valid Reference Rate.')); return; }
             if (moisture === '' || fm === '' || afla === '') {
                 frappe.msgprint(__('Please fill all mandatory Quality Inspection fields (Moisture, Foreign Matter, Aflatoxin).'));
@@ -4689,6 +4817,7 @@ function init_holec_trading_engine() {
         const readyLots = LIVE_STORE.lots.filter(x => (x.status || 'Lot') === 'Lot');
 
         const transporterOptions = (LIVE_STORE.suppliers || [])
+            .filter(s => isSupplierApproved(s))
             .map(s => ({
                 value: s.name,
                 label: s.supplier_name ? `${s.supplier_name} (${s.name})` : s.name
@@ -4741,10 +4870,14 @@ function init_holec_trading_engine() {
                 const bags = lot.bag_count || Math.round((flt(lot.gross_weight_kg) - flt(lot.tare_weight_kg)) / 90) || 520;
                 const netKg = Math.max(0, flt(lot.gross_weight_kg) - flt(lot.tare_weight_kg)) || flt(lot.quantity_kg || 0);
 
+                const lotTranspOpts = (lot.transporter && !transporterOptions.some(o => o.value === lot.transporter))
+                    ? [{ value: lot.transporter, label: `${lot.transporter} (Unapproved)` }].concat(transporterOptions)
+                    : transporterOptions;
+
                 const transpSelectHtml = `
                     <select class="lot-transp-sel-${safeId}" data-lot="${escHtml(lot.name)}" style="padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:12px;background:#fff;max-width:180px;">
                         <option value="">Select Transporter...</option>
-                        ${transporterOptions.map(o => `<option value="${escHtml(o.value)}" ${o.value === lot.transporter ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
+                        ${lotTranspOpts.map(o => `<option value="${escHtml(o.value)}" ${o.value === lot.transporter ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
                     </select>
                 `;
 
@@ -4918,6 +5051,18 @@ function init_holec_trading_engine() {
                 const offloadingRate = flt($(`#f-offloading-rate-${safeId}`).val() || 0);
                 const cessTotal = flt($(`#f-cess-${safeId}`).val() || 0);
 
+                for (const chk of checkedChks) {
+                    const lotName = chk.dataset.lot;
+                    const selTransporter = $(`.lot-transp-sel-${safeId}[data-lot="${lotName}"]`).val() || tName;
+                    if (selTransporter && selTransporter !== 'Unassigned Transporter') {
+                        const trObj = (LIVE_STORE.suppliers || []).find(s => s.name === selTransporter);
+                        if (trObj && !isSupplierApproved(trObj)) {
+                            frappe.msgprint(__('Transporter "{0}" is not approved yet. Only approved transporters can be assigned when moving to Position.', [selTransporter]));
+                            return;
+                        }
+                    }
+                }
+
                 btn.disabled = true;
                 btn.textContent = 'Moving batch to Position...';
 
@@ -4970,11 +5115,10 @@ function init_holec_trading_engine() {
         if (!l) return navigate('lots');
 
         const positionLots = LIVE_STORE.lots.filter(x => (x.status || 'Position') === 'Position');
-        const approvedCustomers = (LIVE_STORE.customers || []).filter(c => {
-            const st = cint(c.disabled) === 1 ? 'Disabled' : (c.approval_status || c.custom_approval_status || 'Draft');
-            return st === 'Approved';
-        });
-        const customerOptions = approvedCustomers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name }));
+        const approvedCustomers = (LIVE_STORE.customers || []).filter(c => isCustomerApproved(c));
+        const customerOptions = (l.customer && !approvedCustomers.some(c => c.name === l.customer))
+            ? [{ value: l.customer, label: `${l.customer} (Unapproved)` }].concat(approvedCustomers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name })))
+            : approvedCustomers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name }));
 
         const expectedQty = flt(computePayable(l).acceptedNetKg || (flt(l.gross_weight_kg) - flt(l.tare_weight_kg)) || flt(l.quantity_kg) || 0);
         const initGross = flt(l.delivery_gross_kg);
@@ -5265,8 +5409,7 @@ function init_holec_trading_engine() {
                     return;
                 }
                 const selectedCustomer = (LIVE_STORE.customers || []).find(c => c.name === customer);
-                const custSt = selectedCustomer ? (cint(selectedCustomer.disabled) === 1 ? 'Disabled' : (selectedCustomer.approval_status || selectedCustomer.custom_approval_status || 'Draft')) : 'Draft';
-                if (custSt !== 'Approved') {
+                if (!selectedCustomer || !isCustomerApproved(selectedCustomer)) {
                     frappe.msgprint(__('Selected customer is not approved. Only approved customers can be selected when selling.'));
                     return;
                 }

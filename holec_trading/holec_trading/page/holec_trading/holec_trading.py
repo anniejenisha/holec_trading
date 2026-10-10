@@ -772,6 +772,10 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
         frappe.throw("No tickets specified for transporter payment.")
 
     transporter = tickets[0].transporter
+    transporter_status = frappe.db.get_value("Supplier", transporter, "custom_status") or "Draft"
+    if transporter_status != "Approved":
+        frappe.throw(f"Transporter '{transporter}' is not approved (Current status: {transporter_status}). Only approved suppliers/transporters can receive payment.")
+
     for t in tickets:
         if not t.transporter:
             frappe.throw(f"Ticket {t.name} has no transporter.")
@@ -908,6 +912,12 @@ def update_supplier_payment_approval(ticket, action, mode_of_payment=None, refer
         t.db_set("supplier_payment_paid_to", paid_to)
     if company:
         t.db_set("company", company)
+
+    if action in ["submit", "finance_approve", "manager_approve"]:
+        if t.supplier and (payment_type or t.get("supplier_payment_type") or "Pay") != "Internal Transfer":
+            sup_status = frappe.db.get_value("Supplier", t.supplier, "custom_status") or "Draft"
+            if sup_status != "Approved":
+                frappe.throw(f"Supplier '{t.supplier}' is not approved (Current status: {sup_status}). Please approve the supplier record before processing payments.")
 
     if action == "submit":
         t.db_set("supplier_payment_requested_by", user)
@@ -1050,6 +1060,10 @@ def pay_supplier(ticket, mode_of_payment, reference_no=None, reference_date=None
 
     if not t.supplier and ptype != "Internal Transfer":
         frappe.throw("This ticket has no supplier.")
+    if t.supplier and ptype != "Internal Transfer":
+        sup_status = frappe.db.get_value("Supplier", t.supplier, "custom_status") or "Draft"
+        if sup_status != "Approved":
+            frappe.throw(f"Supplier '{t.supplier}' is not approved (Current status: {sup_status}). Please approve the supplier record before dispatching funds.")
     if frappe.utils.cint(t.get("supplier_paid")):
         frappe.throw(f"Supplier payment for {t.name} is already processed.")
 
