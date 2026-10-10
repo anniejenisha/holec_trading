@@ -3539,6 +3539,22 @@ function init_holec_trading_engine() {
     }
 
     async function renderPaySupplier(container, params) {
+        if (!LIVE_STORE.accounts || !LIVE_STORE.accounts.length) {
+            await loadMasterData();
+        }
+        if (!LIVE_STORE.accounts || !LIVE_STORE.accounts.length) {
+            try {
+                LIVE_STORE.accounts = await frappe.db.get_list('Account', {
+                    filters: { is_group: 0, disabled: 0 },
+                    fields: ['name', 'account_name', 'account_type', 'company', 'is_group', 'disabled'],
+                    limit: 1000,
+                    order_by: 'name asc'
+                });
+            } catch (e) {
+                console.error('Error fetching accounts:', e);
+            }
+        }
+
         const l = LIVE_STORE.lots.find(x => x.name === params.id);
         if (!l) return navigate('payments_list');
 
@@ -3577,42 +3593,40 @@ function init_holec_trading_engine() {
         const currentCompany = l.company || COMPANY;
 
         const BANK_CASH_TYPES = ['Bank', 'Cash'];
-        const PAYABLE_TYPES = ['Payable', 'Expense Account', 'Direct Expense', 'Indirect Expense', 'Cost of Goods Sold', 'Current Liability', 'Stock Expenses', 'Tax', 'Chargeable'];
-        const RECEIVABLE_TYPES = ['Receivable', 'Income Account', 'Direct Income', 'Indirect Income', 'Current Asset'];
+        const PAYABLE_TYPES = ['Payable'];
+        const RECEIVABLE_TYPES = ['Receivable'];
 
         const getFilteredAccounts = (cmp, fieldType, paymentType) => {
             const raw = LIVE_STORE.accounts || [];
-            let filtered = raw.filter(a => a.company === cmp && !a.is_group && !a.disabled);
+            const companyAccounts = raw.filter(a => (!cmp || a.company === cmp) && !a.is_group && !a.disabled);
 
+            let allowedTypes = [];
             if (paymentType === 'Pay') {
-                if (fieldType === 'paid_from') {
-                    const matches = filtered.filter(a => BANK_CASH_TYPES.includes(a.account_type));
-                    if (matches.length) filtered = matches;
-                } else if (fieldType === 'paid_to') {
-                    const matches = filtered.filter(a => PAYABLE_TYPES.includes(a.account_type) || !a.account_type);
-                    if (matches.length) filtered = matches;
-                }
+                allowedTypes = (fieldType === 'paid_from') ? BANK_CASH_TYPES : PAYABLE_TYPES;
             } else if (paymentType === 'Receive') {
-                if (fieldType === 'paid_from') {
-                    const matches = filtered.filter(a => RECEIVABLE_TYPES.includes(a.account_type) || !a.account_type);
-                    if (matches.length) filtered = matches;
-                } else if (fieldType === 'paid_to') {
-                    const matches = filtered.filter(a => BANK_CASH_TYPES.includes(a.account_type));
-                    if (matches.length) filtered = matches;
-                }
+                allowedTypes = (fieldType === 'paid_from') ? RECEIVABLE_TYPES : BANK_CASH_TYPES;
             } else if (paymentType === 'Internal Transfer') {
-                const matches = filtered.filter(a => BANK_CASH_TYPES.includes(a.account_type));
-                if (matches.length) filtered = matches;
+                allowedTypes = BANK_CASH_TYPES;
+            } else {
+                allowedTypes = (fieldType === 'paid_from') ? BANK_CASH_TYPES : PAYABLE_TYPES;
             }
 
+            const filtered = companyAccounts.filter(a => allowedTypes.includes(a.account_type));
             return filtered.map(a => ({
                 value: a.name,
-                label: `${a.name}${a.account_name && a.account_name !== a.name ? ' (' + a.account_name + ')' : ''}`
+                label: `${a.name}${a.account_name && a.account_name !== a.name ? ' (' + a.account_name + ')' : ''}`,
+                type: a.account_type
             }));
         };
 
+        const initPtype = l.supplier_payment_type || 'Pay';
+        const initFromOpts = getFilteredAccounts(currentCompany, 'paid_from', initPtype);
+        const initToOpts = getFilteredAccounts(currentCompany, 'paid_to', initPtype);
+
         const currentPaidFrom = l.supplier_payment_paid_from || '';
         const currentPaidTo = l.supplier_payment_paid_to || '';
+        const initialFromVal = initFromOpts.some(o => o.value === currentPaidFrom) ? currentPaidFrom : (initFromOpts[0]?.value || '');
+        const initialToVal = initToOpts.some(o => o.value === currentPaidTo) ? currentPaidTo : (initToOpts[0]?.value || '');
 
         const readonlyBox = (label, value, bold) => `
             <div style="display:flex;flex-direction:column;gap:8px;">
@@ -3682,15 +3696,15 @@ function init_holec_trading_engine() {
             label: 'Account Paid From',
             id: 'f-sp-paid-from',
             type: 'select',
-            options: withValue(getFilteredAccounts(currentCompany, 'paid_from', l.supplier_payment_type || 'Pay'), currentPaidFrom),
-            value: currentPaidFrom
+            options: initFromOpts,
+            value: initialFromVal
         })}
                     ${field({
             label: 'Account Paid To',
             id: 'f-sp-paid-to',
             type: 'select',
-            options: withValue(getFilteredAccounts(currentCompany, 'paid_to', l.supplier_payment_type || 'Pay'), currentPaidTo),
-            value: currentPaidTo
+            options: initToOpts,
+            value: initialToVal
         })}
                     ${field({
             label: 'Net Payable Amount (KES) *',
@@ -3754,16 +3768,33 @@ function init_holec_trading_engine() {
                 method: 'holec_trading.holec_trading.page.holec_trading.holec_trading.get_payment_entry_defaults',
                 args: { ticket: l.name, payment_type: ptype, mode_of_payment: rail, company: selectedCompany },
                 callback: (r) => {
+                    const fromValid = (val) => fromOpts.some(o => (typeof o === 'object' ? o.value : o) === val);
+                    const toValid = (val) => toOpts.some(o => (typeof o === 'object' ? o.value : o) === val);
+
                     let targetFrom = curFrom;
                     let targetTo = curTo;
-                    if (r && r.message) {
-                        if (forceReset || !targetFrom) targetFrom = r.message.paid_from || r.message.default_paid_from || '';
-                        if (forceReset || !targetTo) targetTo = r.message.paid_to || r.message.default_paid_to || '';
+
+                    const backendFrom = (r && r.message) ? (r.message.paid_from || r.message.default_paid_from) : '';
+                    const backendTo = (r && r.message) ? (r.message.paid_to || r.message.default_paid_to) : '';
+
+                    if (forceReset || !targetFrom || !fromValid(targetFrom)) {
+                        targetFrom = fromValid(backendFrom) ? backendFrom : (fromOpts.length ? fromOpts[0].value : '');
+                    }
+                    if (forceReset || !targetTo || !toValid(targetTo)) {
+                        targetTo = toValid(backendTo) ? backendTo : (toOpts.length ? toOpts[0].value : '');
                     }
 
-                    const renderOpts = (opts, sel) => opts.map(o => `<option value="${escHtml(typeof o === 'object' ? o.value : o)}"${(typeof o === 'object' ? o.value : o) === sel ? ' selected' : ''}>${escHtml(typeof o === 'object' ? o.label : o)}</option>`).join('');
-                    fromEl.html(renderOpts(withValue(fromOpts, targetFrom), targetFrom));
-                    toEl.html(renderOpts(withValue(toOpts, targetTo), targetTo));
+                    const renderOpts = (opts, sel) => opts.map(o => {
+                        const val = typeof o === 'object' ? o.value : o;
+                        const lbl = typeof o === 'object' ? o.label : o;
+                        return `<option value="${escHtml(val)}"${val === sel ? ' selected' : ''}>${escHtml(lbl)}</option>`;
+                    }).join('');
+
+                    fromEl.html(renderOpts(fromOpts, targetFrom));
+                    if (targetFrom) fromEl.val(targetFrom);
+
+                    toEl.html(renderOpts(toOpts, targetTo));
+                    if (targetTo) toEl.val(targetTo);
                 }
             });
         };
@@ -3824,8 +3855,12 @@ function init_holec_trading_engine() {
             const ptype = $('#f-sp-payment-type').val() || 'Pay';
             const rail = $('#f-sp-rail').val();
             const payAmt = flt($('#f-sp-net-payable').val());
+            const paidFrom = $('#f-sp-paid-from').val();
+            const paidTo = $('#f-sp-paid-to').val();
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
             if (!rail) { frappe.msgprint(__('Please select a Mode of Payment.')); return; }
+            if (!paidFrom) { frappe.msgprint(__('Please select an Account Paid From.')); return; }
+            if (!paidTo) { frappe.msgprint(__('Please select an Account Paid To.')); return; }
             if (partyBlocked && ptype !== 'Internal Transfer') { frappe.msgprint(__('The party must be approved before a payment can be submitted.')); return; }
 
             submitBtn.disabled = true;
@@ -3838,8 +3873,8 @@ function init_holec_trading_engine() {
                     reference_no: ($('#f-sp-ref').val() || '').trim(),
                     amount: payAmt,
                     payment_type: ptype,
-                    paid_from: $('#f-sp-paid-from').val(),
-                    paid_to: $('#f-sp-paid-to').val(),
+                    paid_from: paidFrom,
+                    paid_to: paidTo,
                     company: $('#f-sp-company').val()
                 },
                 freeze: true,
@@ -3863,6 +3898,11 @@ function init_holec_trading_engine() {
             }
             const payAmt = flt($('#f-sp-net-payable').val());
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
+            const paidFrom = $('#f-sp-paid-from').val();
+            const paidTo = $('#f-sp-paid-to').val();
+            if (!paidFrom) { frappe.msgprint(__('Please select an Account Paid From.')); return; }
+            if (!paidTo) { frappe.msgprint(__('Please select an Account Paid To.')); return; }
+
             const ok = await confirmAsync(__('Grant 1st Stage approval (Holec Finance) for {0} to {1}? ({2})', [fmtKES(payAmt), supplierLabel, ptype]));
             if (!ok) return;
             const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
@@ -3877,8 +3917,8 @@ function init_holec_trading_engine() {
                     reference_no: refNo,
                     amount: payAmt,
                     payment_type: ptype,
-                    paid_from: $('#f-sp-paid-from').val(),
-                    paid_to: $('#f-sp-paid-to').val(),
+                    paid_from: paidFrom,
+                    paid_to: paidTo,
                     company: $('#f-sp-company').val()
                 },
                 freeze: true,
@@ -3903,6 +3943,11 @@ function init_holec_trading_engine() {
             }
             const payAmt = flt($('#f-sp-net-payable').val());
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
+            const paidFrom = $('#f-sp-paid-from').val();
+            const paidTo = $('#f-sp-paid-to').val();
+            if (!paidFrom) { frappe.msgprint(__('Please select an Account Paid From.')); return; }
+            if (!paidTo) { frappe.msgprint(__('Please select an Account Paid To.')); return; }
+
             const ok = await confirmAsync(__('Grant Final Approval (Holec Manager) for payment of {0} to {1}? ({2})', [fmtKES(payAmt), supplierLabel, ptype]));
             if (!ok) return;
             const rail = $('#f-sp-rail').val() || l.supplier_payment_mode || 'Bank Transfer';
@@ -3917,8 +3962,8 @@ function init_holec_trading_engine() {
                     reference_no: refNo,
                     amount: payAmt,
                     payment_type: ptype,
-                    paid_from: $('#f-sp-paid-from').val(),
-                    paid_to: $('#f-sp-paid-to').val(),
+                    paid_from: paidFrom,
+                    paid_to: paidTo,
                     company: $('#f-sp-company').val()
                 },
                 freeze: true,
@@ -3963,6 +4008,10 @@ function init_holec_trading_engine() {
             }
             const payAmt = flt($('#f-sp-net-payable').val());
             if (!payAmt || payAmt <= 0) { frappe.msgprint(__('Please enter a valid amount.')); return; }
+            const paidFrom = $('#f-sp-paid-from').val();
+            const paidTo = $('#f-sp-paid-to').val();
+            if (!paidFrom) { frappe.msgprint(__('Please select an Account Paid From.')); return; }
+            if (!paidTo) { frappe.msgprint(__('Please select an Account Paid To.')); return; }
 
             const ok = await confirmAsync(__('Send {0} payment transaction of {1} to Bank API for {2}?', [ptype, fmtKES(payAmt), supplierLabel]));
             if (!ok) return;
@@ -3981,8 +4030,8 @@ function init_holec_trading_engine() {
                     reference_date: frappe.datetime.get_today(),
                     amount: payAmt,
                     payment_type: ptype,
-                    paid_from: $('#f-sp-paid-from').val(),
-                    paid_to: $('#f-sp-paid-to').val(),
+                    paid_from: paidFrom,
+                    paid_to: paidTo,
                     company: $('#f-sp-company').val()
                 },
                 freeze: true,
