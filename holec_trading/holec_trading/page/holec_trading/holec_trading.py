@@ -679,9 +679,22 @@ def extract_weighbridge_data(filedata=None, file_url=None, slip_type="gross", ti
         if file_size_mb > 20:
             return {"success": False, "message": f"File size is {file_size_mb:.2f} MB. Please upload smaller than 20 MB."}
 
-        slip_type = (slip_type or "gross").lower().strip()
-        if slip_type not in ["gross", "tare"]:
-            slip_type = "gross"
+        slip_type = (slip_type or "delivery").lower().strip()
+        if slip_type not in ["gross", "tare", "delivery"]:
+            slip_type = "delivery"
+
+        if ticket_name and file_bytes and filename:
+            try:
+                frappe.get_doc({
+                    "doctype": "File",
+                    "file_name": filename,
+                    "attached_to_doctype": "Buy Ticket",
+                    "attached_to_name": ticket_name,
+                    "content": file_bytes,
+                    "is_private": 0
+                }).insert(ignore_permissions=True)
+            except Exception:
+                pass
 
         result = extract_weights_via_openai(file_bytes=file_bytes, filename=filename or "", slip_type=slip_type)
 
@@ -699,7 +712,7 @@ def extract_weighbridge_data(filedata=None, file_url=None, slip_type="gross", ti
             "net_weight": result.get("net_weight"),
             "ticket_no": result.get("ticket_no"),
             "vehicle_no": result.get("vehicle_no"),
-            "bag_count": int(result.get("net_weight") / 90)
+            "bag_count": int(result.get("net_weight") / 90) if result.get("net_weight") else 0
         }
 
     except Exception as e:
@@ -1338,7 +1351,7 @@ def pay_transporter(ticket, mode_of_payment, reference_no=None, reference_date=N
 
 
 @frappe.whitelist()
-def submit_sale(ticket, customer, sell_rate):
+def submit_sale(ticket, customer, sell_rate, delivery_gross=None, delivery_tare=None, delivered_quantity=None):
     """
     Creates and submits a Sales Invoice for a Buy Ticket, updating ticket status to 'Invoiced'.
     Safely disables any legacy Server Scripts referencing missing database columns like sales_partner.
@@ -1358,9 +1371,18 @@ def submit_sale(ticket, customer, sell_rate):
     if sell_rate <= 0:
         frappe.throw("Please enter a valid Sell Rate.")
 
-    cust_gross = flt(t.delivery_gross_kg or t.gross_weight_kg or 0)
-    cust_tare = flt(t.delivery_gross_kg or t.tare_weight_kg or 0)
-    sold_kg = max(0, cust_gross - cust_tare)
+    if delivery_gross is not None and delivery_gross != "":
+        t.db_set("delivery_gross_kg", flt(delivery_gross))
+    if delivery_tare is not None and delivery_tare != "":
+        t.db_set("delivery_tare_kg", flt(delivery_tare))
+    if delivered_quantity is not None and delivered_quantity != "":
+        t.db_set("delivered_quantity_kg", flt(delivered_quantity))
+
+    cust_gross = flt(t.delivery_gross_kg or 0)
+    cust_tare = flt(t.delivery_tare_kg or 0)
+    sold_kg = flt(t.delivered_quantity_kg or 0)
+    if sold_kg <= 0 and cust_gross > 0 and cust_tare > 0:
+        sold_kg = max(0, cust_gross - cust_tare)
 
     if sold_kg <= 0:
         gross_kg = flt(t.gross_weight_kg or t.quantity_kg or 0)

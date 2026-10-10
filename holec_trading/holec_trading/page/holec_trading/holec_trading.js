@@ -4976,6 +4976,13 @@ function init_holec_trading_engine() {
         });
         const customerOptions = approvedCustomers.map(c => ({ value: c.name, label: c.customer_name ? `${c.customer_name} (${c.name})` : c.name }));
 
+        const expectedQty = flt(computePayable(l).acceptedNetKg || (flt(l.gross_weight_kg) - flt(l.tare_weight_kg)) || flt(l.quantity_kg) || 0);
+        const initGross = flt(l.delivery_gross_kg);
+        const initTare = flt(l.delivery_tare_kg);
+        const initialDelivered = (initGross > 0 && initTare > 0)
+            ? Math.max(0, initGross - initTare)
+            : flt(l.delivered_quantity_kg || 0);
+
         container.innerHTML = `
             <div style="font-size:12px;color:#718096;margin-bottom:12px;display:flex;gap:4px;">
                 <span>Holec Trading</span> › <span>Trade</span> › <span style="color:#2d3748;font-weight:500;">Sale & Invoicing</span>
@@ -4995,44 +5002,24 @@ function init_holec_trading_engine() {
                 </div>
             </div>
 
-            <div style="${CARD_BOX}">
-                <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Weighbridge Slip</h3>
-                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
-                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge slip at customer (delivery)</label>
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <button type="button" id="upload-delivery-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;width:fit-content;font-size:13px;color:#2d3748;">⬆ Upload Delivery Slip</button>
-                        <span id="delivery-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
-                    </div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${field({ label: 'Gross Weight (kg) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || '' })}
-                    ${field({ label: 'Tare Weight (kg) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || '' })}
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Net Weight Delivered (Calculated)</label>
-                        <div id="delivered-calc-box" style="padding:8px 12px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">0 kg</div>
-                        <span style="font-size:12px;color:#a0aec0;">Gross minus tare. Used as Delivered Quantity and for revenue.</span>
-                    </div>
-                </div>
-            </div>
-
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
                 <!-- Left Box: Customer Weighbridge Slip -->
                 <div style="${CARD_BOX}margin-bottom:0;">
                     <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Customer Weighbridge Slip</h3>
                     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
-                        <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">WEIGHBRIDGE SLIP (DELIVERY)</label>
+                        <label style="font-size:13px;font-weight:500;color:#4a5568;">Weighbridge slip at customer (delivery)</label>
                         <div style="display:flex;align-items:center;gap:12px;">
-                            <button type="button" id="upload-delivery-slip" style="padding:6px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#2d3748;font-weight:500;">⬆ Upload Delivery Slip</button>
-                            <span id="delivery-file-name" style="font-size:12px;color:#718096;font-style:italic;">No file chosen</span>
+                            <button type="button" id="upload-delivery-slip" style="padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;color:#2d3748;font-weight:500;">⬆ Upload Delivery Slip</button>
+                            <span id="delivery-file-name" style="font-size:13px;color:#718096;font-style:italic;">No file chosen</span>
                         </div>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
-                        ${field({ label: 'GROSS (KG) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || 1000 })}
-                        ${field({ label: 'TARE (KG) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || 590 })}
+                        ${field({ label: 'Gross Weight (kg) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || '' })}
+                        ${field({ label: 'Tare Weight (kg) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || '' })}
                         <div style="display:flex;flex-direction:column;gap:6px;">
                             <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">CALCULATED NET DELIVERED</label>
-                            <div id="delivered-calc-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#1a202c;font-weight:600;height:38px;display:flex;align-items:center;">410 kg</div>
-                            <span style="font-size:11px;color:#718096;">Feeds Invoice quantity and revenue.</span>
+                            <div id="delivered-calc-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#1a202c;font-weight:600;height:38px;display:flex;align-items:center;">${fmtKg(initialDelivered)}</div>
+                            <span style="font-size:11px;color:#718096;">Gross minus tare. Used as Delivered Quantity and for revenue.</span>
                         </div>
                     </div>
                 </div>
@@ -5043,11 +5030,11 @@ function init_holec_trading_engine() {
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
                         <div style="display:flex;flex-direction:column;gap:6px;">
                             <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">EXPECTED (KG)</label>
-                            <div style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#2d3748;font-weight:600;height:38px;display:flex;align-items:center;">${(computePayable(l).acceptedNetKg || 520).toLocaleString('en-KE')} kg</div>
+                            <div style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#2d3748;font-weight:600;height:38px;display:flex;align-items:center;">${fmtKg(expectedQty)}</div>
                         </div>
                         <div style="display:flex;flex-direction:column;gap:6px;">
                             <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">DELIVERED (KG)</label>
-                            <div id="delivered-qty-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#2d3748;font-weight:600;height:38px;display:flex;align-items:center;">410 kg</div>
+                            <div id="delivered-qty-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#2d3748;font-weight:600;height:38px;display:flex;align-items:center;">${fmtKg(initialDelivered)}</div>
                         </div>
                     </div>
                     <div id="loss-alert-box" style="border-radius:6px;padding:12px 16px;font-size:12px;display:flex;flex-direction:column;gap:4px;">
@@ -5101,19 +5088,22 @@ function init_holec_trading_engine() {
             </div>
         `;
 
-        const expectedQty = computePayable(l).acceptedNetKg || (flt(l.gross_weight_kg) - flt(l.tare_weight_kg)) || 520;
-        const getDelivered = () => Math.max(0, flt($('#f-d-gross').val()) - flt($('#f-d-tare').val()));
+        const getDelivered = () => {
+            const gross = flt($('#f-d-gross').val());
+            const tare = flt($('#f-d-tare').val());
+            if (gross > 0 && tare > 0) return Math.max(0, gross - tare);
+            return flt(l.delivered_quantity_kg || 0);
+        };
 
         const updateCalculations = () => {
             const gross = flt($('#f-d-gross').val());
             const tare = flt($('#f-d-tare').val());
-            if (gross > 0 && tare > 0 && gross > tare) {
-                l.delivery_gross_kg = gross;
-                l.delivery_tare_kg = tare;
-                l.delivered_quantity_kg = gross - tare;
-            }
+            const delivered = (gross > 0 && tare > 0) ? Math.max(0, gross - tare) : (flt(l.delivered_quantity_kg) || 0);
 
-            const delivered = getDelivered();
+            l.delivery_gross_kg = gross || '';
+            l.delivery_tare_kg = tare || '';
+            l.delivered_quantity_kg = delivered;
+
             const diff = expectedQty - delivered;
             const alertBox = $('#loss-alert-box');
             const alertText = $('#loss-alert-text');
@@ -5158,7 +5148,51 @@ function init_holec_trading_engine() {
         };
 
         $('#f-sell-rate, #f-d-gross, #f-d-tare').on('input', updateCalculations);
+        $('#f-customer').on('change', updateCalculations);
         updateCalculations();
+
+        // Auto-save delivery weights on change
+        $('#f-d-gross, #f-d-tare').on('change', async () => {
+            const gross = flt($('#f-d-gross').val());
+            const tare = flt($('#f-d-tare').val());
+            const delivQty = (gross > 0 && tare > 0) ? Math.max(0, gross - tare) : 0;
+            try {
+                await frappe.db.set_value('Buy Ticket', l.name, {
+                    delivery_gross_kg: gross,
+                    delivery_tare_kg: tare,
+                    delivered_quantity_kg: delivQty
+                });
+                l.delivery_gross_kg = gross;
+                l.delivery_tare_kg = tare;
+                l.delivered_quantity_kg = delivQty;
+            } catch (err) {
+                console.error('Failed to save delivery weights:', err);
+            }
+        });
+
+        $('#f-sell-rate').on('change', async () => {
+            const sellRate = flt($('#f-sell-rate').val());
+            if (sellRate > 0) {
+                try {
+                    await frappe.db.set_value('Buy Ticket', l.name, 'sell_rate', sellRate);
+                    l.sell_rate = sellRate;
+                } catch (err) {
+                    console.error('Failed to save sell rate:', err);
+                }
+            }
+        });
+
+        $('#f-customer').on('change', async () => {
+            const customer = $('#f-customer').val();
+            if (customer) {
+                try {
+                    await frappe.db.set_value('Buy Ticket', l.name, 'customer', customer);
+                    l.customer = customer;
+                } catch (err) {
+                    console.error('Failed to save customer:', err);
+                }
+            }
+        });
 
         // Delivery slip upload
         const uploadSlipBtn = document.getElementById('upload-delivery-slip');
@@ -5178,7 +5212,7 @@ function init_holec_trading_engine() {
                             args: { filedata: ev.target.result, slip_type: 'delivery', ticket_name: l.name, filename: file.name },
                             freeze: true,
                             freeze_message: 'Reading delivery weighbridge slip...',
-                            callback: (r) => {
+                            callback: async (r) => {
                                 if (r.exc || !r.message || !r.message.success) {
                                     showToast((r.message && r.message.message) || 'Could not read the slip. Enter gross and tare manually.', 'orange');
                                     $('#delivery-file-name').text(file.name);
@@ -5190,6 +5224,19 @@ function init_holec_trading_engine() {
                                 if (has(d.tare_weight)) $('#f-d-tare').val(d.tare_weight);
                                 $('#delivery-file-name').text(file.name).css({ color: '#276749', 'font-style': 'normal', 'font-weight': '500' });
                                 updateCalculations();
+
+                                const gross = flt($('#f-d-gross').val());
+                                const tare = flt($('#f-d-tare').val());
+                                const delivQty = (gross > 0 && tare > 0) ? Math.max(0, gross - tare) : 0;
+                                await frappe.db.set_value('Buy Ticket', l.name, {
+                                    delivery_gross_kg: gross,
+                                    delivery_tare_kg: tare,
+                                    delivered_quantity_kg: delivQty
+                                });
+                                l.delivery_gross_kg = gross;
+                                l.delivery_tare_kg = tare;
+                                l.delivered_quantity_kg = delivQty;
+
                                 showToast('Delivery slip read successfully. Please check the weights.');
                             },
                             error: () => showToast('Error while reading the delivery slip.', 'red')
@@ -5241,11 +5288,12 @@ function init_holec_trading_engine() {
 
                 const gross = flt($('#f-d-gross').val());
                 const tare = flt($('#f-d-tare').val());
+                const delivQty = (gross > 0 && tare > 0) ? Math.max(0, gross - tare) : 0;
                 if (gross > 0 && tare > 0 && gross > tare) {
                     await frappe.db.set_value('Buy Ticket', l.name, {
                         delivery_gross_kg: gross,
                         delivery_tare_kg: tare,
-                        delivered_quantity_kg: gross - tare
+                        delivered_quantity_kg: delivQty
                     });
                 }
 
@@ -5254,7 +5302,10 @@ function init_holec_trading_engine() {
                     args: {
                         ticket: l.name,
                         customer: customer,
-                        sell_rate: sellRate
+                        sell_rate: sellRate,
+                        delivery_gross: gross,
+                        delivery_tare: tare,
+                        delivered_quantity: delivQty
                     },
                     freeze: true,
                     freeze_message: 'Submitting Sales Invoice & Transmitting to eTIMS...',
