@@ -25,7 +25,13 @@ frappe.pages['holec_trading'].on_page_load = function (wrapper) {
 };
 
 function init_holec_trading_engine() {
-    const fmtKES = (n) => 'KES ' + Math.round(flt(n)).toLocaleString('en-KE');
+    const fmtKES = (n) => {
+        const val = flt(n);
+        if (val < 0) {
+            return '- KES ' + Math.abs(val).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        return 'KES ' + val.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
     const fmtKg = (n) => Math.round(flt(n)).toLocaleString('en-KE') + ' kg';
     const fmtKg1 = (n) => flt(n).toLocaleString('en-KE', { maximumFractionDigits: 1 }) + ' kg';
 
@@ -876,7 +882,7 @@ function init_holec_trading_engine() {
                 <td>${escHtml(x.desc)}</td>
                 <td class="r">${flt(x.qty).toLocaleString('en-KE', { maximumFractionDigits: 1 })}</td>
                 <td class="r">${flt(x.rate).toLocaleString('en-KE', { maximumFractionDigits: 2 })}</td>
-                <td class="r">${Math.round(flt(x.amount)).toLocaleString('en-KE')}</td>
+                <td class="r">${flt(x.amount).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             </tr>`).join('')}
         </tbody>
     </table>
@@ -1086,7 +1092,7 @@ function init_holec_trading_engine() {
         const rows = customers.map(c => {
             const st = stOf(c);
             const creditLimitVal = (c.credit_limits && c.credit_limits.length > 0) ? c.credit_limits[0].credit_limit : 0;
-            const creditLimitStr = creditLimitVal ? `KES ${flt(creditLimitVal).toLocaleString('en-KE')}` : '—';
+            const creditLimitStr = creditLimitVal ? fmtKES(creditLimitVal) : '—';
 
             return `
                 <tr class="cus-row" data-id="${escHtml(c.name)}" style="border-bottom:1px solid #edf2f7;cursor:pointer;" onmouseover="this.style.background='#f7fafc'" onmouseout="this.style.background='transparent'">
@@ -2890,7 +2896,7 @@ function init_holec_trading_engine() {
         const l = LIVE_STORE.lots.find(x => x.name === params.id) || LIVE_STORE.lots[0];
         if (!l) return navigate('lots');
         const m = computeMargin(l);
-        const amountDue = Math.round(m.revenue);
+        const amountDue = flt(m.revenue);
 
         // Only Bank-type Mode of Payment records (customer bank receipt)
         let modeOfPayments = ['Bank Draft', 'Wire Transfer', 'RTGS', 'Pesalink'];
@@ -2920,7 +2926,7 @@ function init_holec_trading_engine() {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="font-size:13px;font-weight:500;color:#4a5568;">Amount Due</label>
-                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">KES ${amountDue.toLocaleString('en-KE')}</div>
+                        <div style="padding:8px 12px;background:#f7fafc;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;color:#2d3748;font-weight:600;">${fmtKES(amountDue)}</div>
                     </div>
                     ${field({ label: 'Mode of Payment', id: 'f-payment-rail', type: 'select', value: modeOfPayments.includes('Bank Draft') ? 'Bank Draft' : (modeOfPayments[0] || ''), options: modeOfPayments })}
                 </div>
@@ -3037,7 +3043,7 @@ function init_holec_trading_engine() {
             totalRealisedMargin += m.margin;
             totalTonnes += m.soldKg / 1000;
         });
-        const avgMarginPerTonne = totalTonnes > 0 ? Math.round(totalRealisedMargin / totalTonnes) : 0;
+        const avgMarginPerTonne = totalTonnes > 0 ? (totalRealisedMargin / totalTonnes) : 0;
 
         const buyRows = LIVE_STORE.lots.map(l => {
             const p = computePayable(l);
@@ -3146,7 +3152,7 @@ function init_holec_trading_engine() {
         const cessRows = Object.keys(cessMap).map(cty => `
             <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid #edf2f7;font-size:14px;max-width:400px;">
                 <span style="color:#2d3748;font-weight:500;">${cty}</span>
-                <strong style="color:#2d3748;">KES ${cessMap[cty].toLocaleString('en-KE')}</strong>
+                <strong style="color:#2d3748;">${fmtKES(cessMap[cty])}</strong>
             </div>`).join('');
 
         const cessBars = Object.keys(cessMap).map(cty => {
@@ -3444,7 +3450,7 @@ function init_holec_trading_engine() {
                 <td style="padding:12px 16px;font-family:monospace;font-weight:600;color:#2d3748;">${pe.name}</td>
                 <td style="padding:12px 16px;color:#2d3748;">${pe.party || '—'}</td>
                 <td style="padding:12px 16px;color:#718096;">${pe.party_type || 'Customer'}</td>
-                <td style="padding:12px 16px;color:#2d3748;font-weight:500;">KES ${flt(pe.paid_amount).toLocaleString('en-KE')}</td>
+                <td style="padding:12px 16px;color:#2d3748;font-weight:500;">${fmtKES(pe.paid_amount)}</td>
                 <td style="padding:12px 16px;color:#718096;">${pe.mode_of_payment || '—'}</td>
                 <td style="padding:12px 16px;"><span style="display:inline-flex;align-items:center;gap:6px;background:#f0fff4;color:#276749;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:500;"><span style="width:6px;height:6px;background:#38a169;border-radius:50%;"></span>Completed</span></td>
             </tr>`).join('');
@@ -3655,7 +3661,7 @@ function init_holec_trading_engine() {
                     ${readonlyBox('Accepted Net Quantity', fmtKg1(p.acceptedNetKg), true)}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${readonlyBox('Reference Rate', `KES ${p.refRate}/kg`)}
+                    ${readonlyBox('Reference Rate', `KES ${flt(p.refRate).toFixed(2)}/kg`)}
                     ${field({
             label: 'Company *',
             id: 'f-sp-company',
@@ -3693,7 +3699,7 @@ function init_holec_trading_engine() {
             step: '0.01',
             required: true,
             placeholder: 'Enter payment amount',
-            value: amount
+            value: flt(amount).toFixed(2)
         })}
                     ${field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
                     ${field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || l.name })}
@@ -4719,7 +4725,7 @@ function init_holec_trading_engine() {
             const matchStatusEl = $('#supplier-invoice-match-status');
             if (invAmount > 0) {
                 const diff = Math.abs(invAmount - p.netPayable);
-                if (diff < 1) {
+                if (diff < 0.01) {
                     matchStatusEl.css('color', '#276749').text(`✓ Supplier Invoice (${fmtKES(invAmount)}) matches calculated Net Payable (${fmtKES(p.netPayable)}).`);
                 } else {
                     matchStatusEl.css('color', '#c53030').text(`❌ Invoice Mismatch: Supplier Invoice (${fmtKES(invAmount)}) does not match Net Payable (${fmtKES(p.netPayable)}). Difference: ${fmtKES(diff)}.`);
@@ -4778,7 +4784,7 @@ function init_holec_trading_engine() {
             l.hema_rate_per_bag = flt($('#f-hema-rate').val());
 
             const p = computePayable(l, rate);
-            if (invAmount > 0 && Math.abs(invAmount - p.netPayable) >= 1) {
+            if (invAmount > 0 && Math.abs(invAmount - p.netPayable) >= 0.01) {
                 frappe.msgprint(__('Supplier Invoice Amount ({0}) does not match Net Payable ({1}). Cannot proceed until invoice matches.', [fmtKES(invAmount), fmtKES(p.netPayable)]));
                 return;
             }
@@ -5014,10 +5020,10 @@ function init_holec_trading_engine() {
                 const totOffloading = offloadingRate * selBags;
                 const totCombined = totHaulage + totOffloading + cessTotal;
 
-                $(`#tot-haulage-${safeId}`).text(`KES ${totHaulage.toLocaleString('en-KE')}`);
-                $(`#tot-offloading-${safeId}`).text(`KES ${totOffloading.toLocaleString('en-KE')}`);
-                $(`#tot-cess-${safeId}`).text(`KES ${cessTotal.toLocaleString('en-KE')}`);
-                $(`#tot-combined-${safeId}`).text(`KES ${totCombined.toLocaleString('en-KE')}`);
+                $(`#tot-haulage-${safeId}`).text(fmtKES(totHaulage));
+                $(`#tot-offloading-${safeId}`).text(fmtKES(totOffloading));
+                $(`#tot-cess-${safeId}`).text(fmtKES(cessTotal));
+                $(`#tot-combined-${safeId}`).text(fmtKES(totCombined));
             };
 
             $(`#select-all-${safeId}`).on('change', function () {
@@ -5076,7 +5082,7 @@ function init_holec_trading_engine() {
 
                         const lotHaulage = haulageRate * lotBags;
                         const lotOffloading = offloadingRate * lotBags;
-                        const lotCess = totalSelBags > 0 ? Math.round((cessTotal * lotBags) / totalSelBags) : Math.round(cessTotal / checkedChks.length);
+                        const lotCess = totalSelBags > 0 ? ((cessTotal * lotBags) / totalSelBags) : (cessTotal / checkedChks.length);
 
                         const updateVals = {
                             status: 'Position',
@@ -5276,7 +5282,7 @@ function init_holec_trading_engine() {
                 } else {
                     alertBox.css({ background: '#fffaf0', border: '1px solid #feebc8', color: '#c05621' });
                     alertIcon.text('⚠');
-                    alertText.text(`${diff.toLocaleString('en-KE')} kg loss exceeds ${tolerance} kg tolerance. Transporter recovery: KES ${recoveredKES.toLocaleString('en-KE')}`);
+                    alertText.text(`${diff.toLocaleString('en-KE')} kg loss exceeds ${tolerance} kg tolerance. Transporter recovery: ${fmtKES(recoveredKES)}`);
                 }
             }
 
