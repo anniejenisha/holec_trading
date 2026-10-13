@@ -8,26 +8,6 @@ frappe.ui.form.on('Buy Ticket', {
             };
         });
     },
-    refresh(frm) {
-        inject_portal_form_styles();
-        if (frm.is_new()) {
-            render_custom_new_ticket_page(frm);
-        } else if (frm.doc.status === 'Ticket' || !frm.doc.status) {
-            render_custom_ticket_details_page(frm);
-        } else if (frm.doc.status === 'Intake') {
-            render_intake_quality_capture_page(frm);
-        } else if (frm.doc.status === 'Lot') {
-            render_transport_loss_page(frm);
-        } else if (frm.doc.status === 'Position') {
-            render_position_overview_page(frm);
-        } else if (frm.doc.status === 'Invoiced') {
-            render_invoiced_overview_page(frm);
-        } else if (frm.doc.status === 'Settled') {
-            render_settled_overview_page(frm);
-        } else {
-            render_custom_ticket_details_page(frm);
-        }
-    }
 });
 
 function clear_all_custom_views(frm) {
@@ -296,7 +276,7 @@ function render_custom_new_ticket_page(frm) {
     frappe.call({
         method: 'frappe.client.get_list',
         args: { doctype: 'Supplier', filters: { supplier_group: ['in', ['Farmer', 'Farmers']] }, fields: ['name', 'supplier_name'], limit_page_length: 100 },
-        callback: function(r) {
+        callback: function (r) {
             if (r.message && r.message.length) {
                 const $supplierSelect = $('#custom_supplier_select');
                 r.message.forEach(s => {
@@ -310,7 +290,7 @@ function render_custom_new_ticket_page(frm) {
     frappe.call({
         method: 'frappe.client.get_list',
         args: { doctype: 'Item', fields: ['name', 'item_name'], filters: { disabled: 0 }, limit_page_length: 200, order_by: 'item_name asc' },
-        callback: function(r) {
+        callback: function (r) {
             const $itemSelect = $('#custom_item_select');
             $itemSelect.empty();
             if (r.message && r.message.length) {
@@ -327,7 +307,7 @@ function render_custom_new_ticket_page(frm) {
         }
     });
 
-    $('#btn_custom_save').on('click', function() {
+    $('#btn_custom_save').on('click', function () {
         const supplier = $('#custom_supplier_select').val();
         const item = $('#custom_item_select').val();
         const qty = parseFloat($('#custom_qty_input').val()) || 0;
@@ -442,7 +422,7 @@ function render_intake_quality_capture_page(frm) {
 
     const meta = frappe.get_meta('Buy Ticket');
     const transporterField = meta && meta.fields ? meta.fields.find(df => df.fieldname === 'transporter') : null;
-    
+
     let transporterOptions = [];
     if (transporterField && transporterField.options) {
         transporterOptions = transporterField.options.split('\n').map(opt => opt.trim()).filter(Boolean);
@@ -539,7 +519,7 @@ function render_intake_quality_capture_page(frm) {
     frappe.call({
         method: 'frappe.client.get_list',
         args: { doctype: 'Supplier', filters: { supplier_group: ['in', ['Transporter', 'Transporters']] }, fields: ['name', 'supplier_name'], limit_page_length: 250 },
-        callback: function(r) {
+        callback: function (r) {
             const $transporterSelect = $('#intake_transporter_select');
             $transporterSelect.empty();
             $transporterSelect.append('<option value="" disabled selected>Select transporter...</option>');
@@ -552,7 +532,7 @@ function render_intake_quality_capture_page(frm) {
         }
     });
 
-    $('.calculate-net').on('input', function() {
+    $('.calculate-net').on('input', function () {
         const g = parseFloat($('#intake_gross_weight').val()) || 0;
         const t = parseFloat($('#intake_tare_weight').val()) || 0;
         const net = Math.max(0, g - t);
@@ -573,7 +553,7 @@ function render_intake_quality_capture_page(frm) {
         });
     });
 
-    $('#btn_submit_intake_create_lot').on('click', function() {
+    $('#btn_submit_intake_create_lot').on('click', function () {
         const gross = parseFloat($('#intake_gross_weight').val()) || 0;
         const tare = parseFloat($('#intake_tare_weight').val()) || 0;
         const bags = parseInt($('#intake_bag_count').val()) || 0;
@@ -600,7 +580,7 @@ function render_intake_quality_capture_page(frm) {
         if (frm.fields_dict['moisture_percent']) frm.set_value('moisture_percent', moistureVal);
         if (frm.fields_dict['foreign_matter_percent']) frm.set_value('foreign_matter_percent', foreignMatterVal);
         if (frm.fields_dict['aflatoxin_ppb']) frm.set_value('aflatoxin_ppb', aflatoxinVal);
-        
+
         if (frm.fields_dict['country']) {
             frm.set_value('country', selectedCounty);
         } else if (frm.fields_dict['county']) {
@@ -716,7 +696,7 @@ function render_deductions_payable_page(frm, selectedDoc) {
             limit_page_length: 50,
             order_by: 'creation desc'
         },
-        callback: function(r) {
+        callback: function (r) {
             const previousLots = r.message || [];
             let readyLots = [...previousLots];
             if (activeDoc.name && !readyLots.find(l => l.name === activeDoc.name)) {
@@ -840,13 +820,13 @@ function render_deductions_payable_page(frm, selectedDoc) {
             $('body').append(get_portal_shell_html('Deductions & payable', 'Trade', 'Deductions & payable', contentHtml));
             attach_portal_events(frm);
 
-            $('.btn-ready-lot-pill').on('click', function() {
+            $('.btn-ready-lot-pill').on('click', function () {
                 const targetName = $(this).data('name');
                 if (targetName) {
                     frappe.call({
                         method: 'frappe.client.get',
                         args: { doctype: 'Buy Ticket', name: targetName },
-                        callback: function(res) {
+                        callback: function (res) {
                             if (res.message) {
                                 render_deductions_payable_page(frm, res.message);
                             }
@@ -868,9 +848,9 @@ function render_deductions_payable_page(frm, selectedDoc) {
                 frm.set_value('status', 'Lot');
 
                 frm.save().then(() => {
-                    frappe.show_alert({ 
-                        message: __(`Net invoice ${invoiceNumber} saved! Status updated to Lot.`), 
-                        indicator: 'green' 
+                    frappe.show_alert({
+                        message: __(`Net invoice ${invoiceNumber} saved! Status updated to Lot.`),
+                        indicator: 'green'
                     });
                     render_transport_loss_page(frm);
                 });
@@ -904,7 +884,7 @@ function render_transport_loss_page(frm, selectedDoc) {
             limit_page_length: 50,
             order_by: 'creation desc'
         },
-        callback: function(r) {
+        callback: function (r) {
             const previousLots = r.message || [];
             let readyLots = [...previousLots];
             if (activeDoc.name && !readyLots.find(l => l.name === activeDoc.name)) {
@@ -969,13 +949,13 @@ function render_transport_loss_page(frm, selectedDoc) {
             $('body').append(get_portal_shell_html('Transport & loss', 'Trade', 'Transport & loss', contentHtml));
             attach_portal_events(frm);
 
-            $('.btn-ready-lot-pill').on('click', function() {
+            $('.btn-ready-lot-pill').on('click', function () {
                 const targetName = $(this).data('name');
                 if (targetName) {
                     frappe.call({
                         method: 'frappe.client.get',
                         args: { doctype: 'Buy Ticket', name: targetName },
-                        callback: function(res) {
+                        callback: function (res) {
                             if (res.message) {
                                 render_transport_loss_page(frm, res.message);
                             }
@@ -984,7 +964,7 @@ function render_transport_loss_page(frm, selectedDoc) {
                 }
             });
 
-            $('#btn_capitalise_move_position').on('click', function() {
+            $('#btn_capitalise_move_position').on('click', function () {
                 const haulageVal = parseFloat($('#inp_haulage').val()) || 0;
                 const cessVal = parseFloat($('#inp_cess').val()) || 0;
                 const offloadingVal = parseFloat($('#inp_offloading').val()) || 0;
@@ -1214,7 +1194,7 @@ function render_customer_payment_page(frm) {
         frappe.call({
             method: 'frappe.client.get_list',
             args: { doctype: 'Sales Invoice', filters: { name: invoiceNum }, fields: ['name', 'outstanding_amount'] },
-            callback: function(r) {
+            callback: function (r) {
                 const salesInv = (r.message && r.message.length) ? r.message[0] : null;
                 const paymentDoc = {
                     doctype: 'Payment Entry',
@@ -1239,7 +1219,7 @@ function render_customer_payment_page(frm) {
                 frappe.call({
                     method: 'frappe.client.insert',
                     args: { doc: paymentDoc },
-                    callback: function(pe_res) {
+                    callback: function (pe_res) {
                         const peName = pe_res.message ? pe_res.message.name : `PAY-${Math.floor(7100 + Math.random() * 90)}`;
                         if (pe_res.message) {
                             frappe.call({
@@ -1359,7 +1339,7 @@ function render_payments_dashboard_page(frm) {
             limit_page_length: 50,
             order_by: 'creation desc'
         },
-        callback: function(r) {
+        callback: function (r) {
             const allTickets = r.message || [];
             const transporterRows = allTickets.filter(t => (parseFloat(t.haulage_kes) > 0 || parseFloat(t.cess_kes) > 0));
             const receivableRows = allTickets.filter(t => t.status === 'Invoiced' || t.sales_invoice_number);
@@ -1423,7 +1403,7 @@ function render_payments_dashboard_page(frm) {
             $('body').append(get_portal_shell_html('Payments', 'Finance', 'Payments', contentHtml));
             attach_portal_events(frm);
 
-            $('.btn-record-customer-pay').on('click', function() {
+            $('.btn-record-customer-pay').on('click', function () {
                 const targetName = $(this).data('name');
                 if (targetName && targetName !== frm.doc.name) {
                     frappe.set_route('Form', 'Buy Ticket', targetName);
