@@ -4586,9 +4586,8 @@ function init_holec_trading_engine() {
                     <div>
                         <div style="display:flex;align-items:center;gap:12px;">
                             <span style="color:#4a5568;">Foreign Matter Deduction</span>
-                            <select id="f-fm" style="width:80px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
-                                ${['0', '0.5', '1', '2', '3', '5'].map(v => `<option value="${v}" ${(l.foreign_matter_ != null ? String(l.foreign_matter_) : '2') === v ? 'selected' : ''}>${v}%</option>`).join('')}
-                            </select>
+                            <input type="number" id="f-fm" value="${l.foreign_matter_ != null ? l.foreign_matter_ : 0}" step="0.1" min="0" max="100" style="width:70px;padding:4px 8px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-weight:600;">
+                            <span style="color:#4a5568;font-weight:500;">%</span>
                         </div>
                         <span id="d-fm-sub" style="font-size:12px;color:#718096;display:block;margin-top:4px;"></span>
                     </div>
