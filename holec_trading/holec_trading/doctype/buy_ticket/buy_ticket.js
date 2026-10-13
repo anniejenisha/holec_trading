@@ -227,7 +227,7 @@ function render_custom_new_ticket_page(frm) {
 
                 <div class="row mb-4">
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Farmer <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Farmer</label>
                         <select id="custom_supplier_select" class="form-control" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;">
                             <option value="" disabled selected>Select...</option>
                         </select>
@@ -241,7 +241,7 @@ function render_custom_new_ticket_page(frm) {
                     </div>
 
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Expected quantity (kg) <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Expected quantity (kg)</label>
                         <input type="number" id="custom_qty_input" value="${defaultQty}" placeholder="e.g. 8000" class="form-control" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
                     </div>
                 </div>
@@ -312,13 +312,13 @@ function render_custom_new_ticket_page(frm) {
         const item = $('#custom_item_select').val();
         const qty = parseFloat($('#custom_qty_input').val()) || 0;
 
-        if (!supplier) { frappe.msgprint(__('Please select a Farmer.')); return; }
-        if (!item) { frappe.msgprint(__('Please select an Item.')); return; }
-        if (qty <= 0) { frappe.msgprint(__('Please enter a valid Expected Quantity.')); return; }
+        const safeSupplier = supplier || '';
+        const safeItem = item || 'Maize';
+        const safeQty = qty > 0 ? qty : 1000;
 
-        frm.set_value('supplier', supplier);
-        frm.set_value('commodity', item);
-        frm.set_value('quantity_kg', qty);
+        frm.set_value('supplier', safeSupplier);
+        frm.set_value('commodity', safeItem);
+        frm.set_value('quantity_kg', safeQty);
         frm.set_value('status', 'Ticket');
         if (!frm.doc.negotiated_price) frm.set_value('negotiated_price', 48.0);
 
@@ -447,26 +447,26 @@ function render_intake_quality_capture_page(frm) {
 
                 <div class="row mb-3">
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Gross weight (kg) <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Gross weight (kg)</label>
                         <input type="number" id="intake_gross_weight" value="${grossWeight}" class="form-control form-control-sm calculate-net" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Tare weight (kg) <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Tare weight (kg)</label>
                         <input type="number" id="intake_tare_weight" value="${tareWeight}" class="form-control form-control-sm calculate-net" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Bag count <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Bag count</label>
                         <input type="number" id="intake_bag_count" value="${bagCount}" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
                     </div>
                 </div>
 
                 <div class="row mb-3">
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Weighbridge ticket number <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Weighbridge ticket number</label>
                         <input type="text" id="intake_wb_number" value="${wbNumber}" placeholder="Unique, e.g. WB-88213" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;" />
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Transporter <span class="text-danger">*</span></label>
+                        <label class="form-label text-muted font-weight-medium" style="font-size: 12.5px;">Transporter</label>
                         <select id="intake_transporter_select" class="form-control form-control-sm" style="height: 38px; border-color: #cbd5e1; border-radius: 6px; font-size: 13.5px;">
                             <option value="" disabled selected>Select transporter...</option>
                         </select>
@@ -567,14 +567,14 @@ function render_intake_quality_capture_page(frm) {
         if (!gross || gross <= 0) { frappe.msgprint(__('Please enter a valid Gross Weight.')); return; }
         if (!tare || tare <= 0) { frappe.msgprint(__('Please enter a valid Tare Weight.')); return; }
         if (!bags || bags <= 0) { frappe.msgprint(__('Please enter a valid Bag Count.')); return; }
-        if (!wbNo) { frappe.msgprint(__('Please enter the Weighbridge Ticket Number.')); return; }
-        if (!selectedTransporter) { frappe.msgprint(__('Please select a Transporter.')); return; }
+        const safeWbNo = wbNo || ('WB-' + Date.now().toString().slice(-6));
+        const safeTransporter = selectedTransporter || '';
 
         if (frm.fields_dict['gross_weight_kg']) frm.set_value('gross_weight_kg', gross);
         if (frm.fields_dict['tare_weight_kg']) frm.set_value('tare_weight_kg', tare);
         if (frm.fields_dict['bag_count']) frm.set_value('bag_count', bags);
-        if (frm.fields_dict['weighbridge_ticket_number']) frm.set_value('weighbridge_ticket_number', wbNo);
-        if (frm.fields_dict['transporter']) frm.set_value('transporter', selectedTransporter);
+        if (frm.fields_dict['weighbridge_ticket_number']) frm.set_value('weighbridge_ticket_number', safeWbNo);
+        if (frm.fields_dict['transporter']) frm.set_value('transporter', safeTransporter);
         if (frm.fields_dict['vehicle_registration']) frm.set_value('vehicle_registration', $('#intake_vehicle_reg').val());
 
         if (frm.fields_dict['moisture_percent']) frm.set_value('moisture_percent', moistureVal);

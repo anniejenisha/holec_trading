@@ -1,46 +1,50 @@
 {
-  "doctype": "DocType",
-  "name": "Rail Routing Band",
-  "module": "Holec Trading",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "autoname": "hash",
-  "sort_field": "sort_order",
-  "sort_order": "ASC",
-  "fields": [
-    {
-      "fieldname": "amount_upto",
-      "label": "Amount Up To (KES)",
-      "fieldtype": "Currency",
-      "reqd": 1,
-      "in_list_view": 1,
-      "description": "Leave blank on the last row to mean 'above all other bands'."
-    },
-    {
-      "fieldname": "rail",
-      "label": "Rail",
-      "fieldtype": "Select",
-      "options": "Mpesa\nPesaLink\nBank Transfer",
-      "reqd": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "sort_order",
-      "label": "Sort Order",
-      "fieldtype": "Int",
-      "reqd": 1,
-      "description": "Bands are evaluated in this order, lowest first."
-    }
-  ],
-  "permissions": [
-    {
-      "role": "System Manager",
-      "read": 1, "write": 1, "create": 1, "delete": 1
-    },
-    {
-      "role": "Accounts Manager",
-      "read": 1, "write": 1
-    }
-  ]
+ "doctype": "DocType",
+ "name": "Rail Routing Band",
+ "module": "Holec Trading",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "autoname": "hash",
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "fields": [
+  {
+   "fieldname": "amount_upto",
+   "label": "Amount Up To (KES)",
+   "fieldtype": "Currency",
+   "reqd": 0,
+   "in_list_view": 1,
+   "description": "Leave blank on the last row to mean 'above all other bands'."
+  },
+  {
+   "fieldname": "rail",
+   "label": "Rail",
+   "fieldtype": "Select",
+   "options": "Mpesa\nPesaLink\nBank Transfer",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sort_order",
+   "label": "Sort Order",
+   "fieldtype": "Int",
+   "reqd": 0,
+   "description": "Bands are evaluated in this order, lowest first."
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "write": 1
+  }
+ ]
 }

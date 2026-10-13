@@ -1,102 +1,102 @@
 {
-  "doctype": "DocType",
-  "name": "Cost Ledger Entry",
-  "module": "Holec Trading",
-  "custom": 0,
-  "istable": 1,
-  "issingle": 0,
-  "editable_grid": 1,
-  "fields": [
-    {
-      "fieldname": "charge_type",
-      "label": "Charge",
-      "fieldtype": "Link",
-      "options": "Charge Master",
-      "reqd": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "amount",
-      "label": "Amount (KES)",
-      "fieldtype": "Currency",
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "weight_deduction_kg",
-      "label": "Weight Deduction (kg)",
-      "fieldtype": "Float",
-      "description": "Only used when posting_treatment = Reduces Payable Weight (moisture, foreign matter).",
-      "depends_on": "eval:doc.posting_treatment=='Reduces Payable Weight'"
-    },
-    {
-      "fieldname": "direction",
-      "label": "Direction",
-      "fieldtype": "Select",
-      "options": "Buy-side\nSell-side\nInternal",
-      "read_only": 1,
-      "fetch_from": "charge_type.direction"
-    },
-    {
-      "fieldname": "borne_by",
-      "label": "Borne By",
-      "fieldtype": "Select",
-      "options": "Supplier\nHolec\nTransporter\nPetty Cash\nCustomer Master",
-      "in_list_view": 1,
-      "description": "Defaults from Charge Master, overridable per line."
-    },
-    {
-      "fieldname": "posting_treatment",
-      "label": "Posting Treatment",
-      "fieldtype": "Select",
-      "options": "Reduces Payable Weight\nCash Deduction\nCapitalised to Lot\nGL Split",
-      "read_only": 1,
-      "fetch_from": "charge_type.posting_treatment"
-    },
-    {
-      "fieldname": "gl_account",
-      "label": "GL Account",
-      "fieldtype": "Link",
-      "options": "Account",
-      "read_only": 1,
-      "fetch_from": "charge_type.gl_account"
-    },
-    {
-      "fieldname": "reason_code",
-      "label": "Reason Code",
-      "fieldtype": "Select",
-      "options": "\nVisual Condition\nOrigin Risk\nNew Supplier\nCustomer Requirement",
-      "description": "Required if Charge Master flags this charge as requires_reason_code."
-    },
-    {
-      "fieldname": "posted_at_state",
-      "label": "Posted At State",
-      "fieldtype": "Select",
-      "options": "Ticket\nIntake\nLot\nPosition\nInvoiced\nSettled",
-      "read_only": 1,
-      "description": "Which Lot state this entry was created at. Used by the state-enforcement check."
-    },
-    {
-      "fieldname": "gl_entry_reference",
-      "label": "GL Entry Reference",
-      "fieldtype": "Link",
-      "options": "GL Entry",
-      "read_only": 1
-    },
-    {
-      "fieldname": "is_reversal",
-      "label": "Is Reversal",
-      "fieldtype": "Check",
-      "default": "0",
-      "read_only": 1,
-      "description": "Set automatically when this entry reverses an earlier one. Original entries are never edited."
-    },
-    {
-      "fieldname": "reverses_entry",
-      "label": "Reverses Entry",
-      "fieldtype": "Data",
-      "read_only": 1,
-      "depends_on": "is_reversal",
-      "description": "Row name of the entry being reversed."
-    }
-  ]
+ "doctype": "DocType",
+ "name": "Cost Ledger Entry",
+ "module": "Holec Trading",
+ "custom": 0,
+ "istable": 1,
+ "issingle": 0,
+ "editable_grid": 1,
+ "fields": [
+  {
+   "fieldname": "charge_type",
+   "label": "Charge",
+   "fieldtype": "Link",
+   "options": "Charge Master",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "amount",
+   "label": "Amount (KES)",
+   "fieldtype": "Currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "weight_deduction_kg",
+   "label": "Weight Deduction (kg)",
+   "fieldtype": "Float",
+   "description": "Only used when posting_treatment = Reduces Payable Weight (moisture, foreign matter).",
+   "depends_on": "eval:doc.posting_treatment=='Reduces Payable Weight'"
+  },
+  {
+   "fieldname": "direction",
+   "label": "Direction",
+   "fieldtype": "Select",
+   "options": "Buy-side\nSell-side\nInternal",
+   "read_only": 1,
+   "fetch_from": "charge_type.direction"
+  },
+  {
+   "fieldname": "borne_by",
+   "label": "Borne By",
+   "fieldtype": "Select",
+   "options": "Supplier\nHolec\nTransporter\nPetty Cash\nCustomer Master",
+   "in_list_view": 1,
+   "description": "Defaults from Charge Master, overridable per line."
+  },
+  {
+   "fieldname": "posting_treatment",
+   "label": "Posting Treatment",
+   "fieldtype": "Select",
+   "options": "Reduces Payable Weight\nCash Deduction\nCapitalised to Lot\nGL Split",
+   "read_only": 1,
+   "fetch_from": "charge_type.posting_treatment"
+  },
+  {
+   "fieldname": "gl_account",
+   "label": "GL Account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "read_only": 1,
+   "fetch_from": "charge_type.gl_account"
+  },
+  {
+   "fieldname": "reason_code",
+   "label": "Reason Code",
+   "fieldtype": "Select",
+   "options": "\nVisual Condition\nOrigin Risk\nNew Supplier\nCustomer Requirement",
+   "description": "Required if Charge Master flags this charge as requires_reason_code."
+  },
+  {
+   "fieldname": "posted_at_state",
+   "label": "Posted At State",
+   "fieldtype": "Select",
+   "options": "Ticket\nIntake\nLot\nPosition\nInvoiced\nSettled",
+   "read_only": 1,
+   "description": "Which Lot state this entry was created at. Used by the state-enforcement check."
+  },
+  {
+   "fieldname": "gl_entry_reference",
+   "label": "GL Entry Reference",
+   "fieldtype": "Link",
+   "options": "GL Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_reversal",
+   "label": "Is Reversal",
+   "fieldtype": "Check",
+   "default": "0",
+   "read_only": 1,
+   "description": "Set automatically when this entry reverses an earlier one. Original entries are never edited."
+  },
+  {
+   "fieldname": "reverses_entry",
+   "label": "Reverses Entry",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "depends_on": "is_reversal",
+   "description": "Row name of the entry being reversed."
+  }
+ ]
 }

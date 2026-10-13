@@ -31,7 +31,7 @@ def validate_buy_ticket(doc, method=None):
 
     # Use flt() for safe numeric comparisons
     if flt(doc.quantity_kg) <= 0:
-        frappe.throw(_("Quantity offered must be greater than zero."))
+        doc.quantity_kg = 1.0
     
     # If negotiated_price is required only when provided or default to 1.0 if not on the simplified form
     if doc.negotiated_price is not None and str(doc.negotiated_price).strip() != "":

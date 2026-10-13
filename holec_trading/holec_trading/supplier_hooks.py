@@ -30,38 +30,32 @@ def validate_supplier(doc, method=None):
 def _validate_contacts(doc):
 	contacts = doc.get("holec_contacts") or []
 
-	if len(contacts) < 1:
-		frappe.throw(_("At least one Contact Person is required."))
 	if len(contacts) > 3:
 		frappe.throw(_("A maximum of 3 Contact Persons is allowed."))
 
 	primary_count = 0
 	for row in contacts:
-		if not row.phone or not KE_PHONE_RE.match(row.phone.strip()):
+		if row.phone and not KE_PHONE_RE.match(row.phone.strip()):
 			frappe.throw(
 				_("Row {0}: Phone number must be in the format +254XXXXXXXXX.").format(row.idx)
 			)
-		if row.same_as_phone:
+		if row.same_as_phone and row.phone:
 			row.whatsapp = row.phone
 		if row.is_primary:
 			primary_count += 1
 
-	if primary_count == 0:
-		frappe.throw(_("Exactly one Contact Person must be marked as Primary Contact."))
 	if primary_count > 1:
 		frappe.throw(_("Only one Contact Person can be marked as Primary Contact."))
 
 
 def _validate_kra_pin(doc):
-	if not doc.get("kra_pin"):
-		frappe.throw(_("KRA PIN is required (upload the certificate to auto-fill, or enter manually)."))
+	# Optional for now
+	pass
 
 
 def _validate_aflatoxin_licence(doc):
-	if doc.get("supplier_group") not in GRAIN_HANDLING_GROUPS:
-		return
-	if doc.get("aflatoxin_licence_on_file") and not doc.get("aflatoxin_licence_upload"):
-		frappe.throw(_("Please upload the aflatoxin / food-safety licence."))
+	# Optional for now
+	pass
 
 
 def _validate_banking(doc):

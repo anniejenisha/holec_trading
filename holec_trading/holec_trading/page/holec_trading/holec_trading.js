@@ -252,7 +252,7 @@ function init_holec_trading_engine() {
 
     function field(opts) {
         const { label, id, type = 'text', value = '', required = false, options = null, placeholder = '', span = false, step = '', readonly = false } = opts;
-        const reqMark = required ? '<span style="color:#e53e3e;margin-left:2px;">*</span>' : '';
+        const reqMark = '';
         const cleanLabel = label.replace(/\s*\*$/, '');
         let input;
 
@@ -278,7 +278,7 @@ function init_holec_trading_engine() {
         const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
         const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
         const HELP = 'font-size:12px;color:#718096;';
-        const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+        const req = '';
         const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         return `
             <div style="display:flex;flex-direction:column;gap:8px;">
@@ -295,7 +295,7 @@ function init_holec_trading_engine() {
         const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
         const INPUT = 'width:100%;padding:8px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;background:#fff;box-sizing:border-box;';
         const HELP = 'font-size:12px;color:#718096;';
-        const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+        const req = '';
         const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
         const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
@@ -367,7 +367,7 @@ function init_holec_trading_engine() {
     function rejectParty(doctype, name, field, noun) {
         return new Promise(res => {
             frappe.prompt(
-                [{ fieldname: 'reason', label: __('Reason for rejection'), fieldtype: 'Small Text', reqd: 1 }],
+                [{ fieldname: 'reason', label: __('Reason for rejection'), fieldtype: 'Small Text', reqd: 0 }],
                 async (v) => res(await runApproval(doctype, name, field, 'Rejected', v.reason)),
                 __('Reject {0}', [noun]),
                 __('Reject')
@@ -1280,7 +1280,7 @@ function init_holec_trading_engine() {
                                 <span id="cd-kra-filename" style="font-size:12px;color:#718096;font-style:italic;">${doc.custom_kra_certificate ? `<a href="${escHtml(doc.custom_kra_certificate)}" target="_blank" style="color:#3182ce;">View certificate ↗</a>` : 'No file uploaded'}</span>
                             </div>
                         </div>
-                        ${field({ label: 'KRA PIN *', id: 'cd-krapin', required: true, placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_kra_pin || doc.tax_id || '' })}
+                        ${field({ label: 'KRA PIN', id: 'cd-krapin', required: false, placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_kra_pin || doc.tax_id || '' })}
                         ${field({ label: 'Registered Name (per KRA)', id: 'cd-regname', placeholder: 'Auto-filled via OCR or edit manually', value: doc.custom_registered_name_per_kra || '' })}
                     </div>
                     <div style="font-size:12px;color:#3182ce;">ℹ Edit any field directly and click "Save Changes" to update this document.</div>
@@ -1535,7 +1535,7 @@ function init_holec_trading_engine() {
         const HELP = 'font-size:12px;color:#718096;';
         const LABEL = 'font-size:13px;font-weight:500;color:#4a5568;';
         const TH = 'padding:10px 12px;text-align:left;color:#718096;font-weight:600;';
-        const req = '<span style="color:#e53e3e;margin-left:2px;">*</span>';
+        const req = '';
         const opt = '<span style="color:#a0aec0;font-weight:400;margin-left:8px;font-size:12px;">(optional)</span>';
         const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         const str = (v) => (v == null ? '' : String(v).trim());
@@ -1583,8 +1583,8 @@ function init_holec_trading_engine() {
                 <div style="${SECTION}margin-bottom:16px;">KRA VERIFICATION</div>
                 <div style="margin-bottom:20px;">${dropzone('nc-kra', 'KRA PIN Certificate', false)}</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: true, placeholder: 'Auto-filled via OCR or enter manually', hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
-                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: true, placeholder: 'Auto-filled via OCR or enter manually' })}
+                    ${fld({ label: 'KRA PIN', id: 'nc-pin', required: false, placeholder: 'Auto-filled via OCR or enter manually', hint: '<span id="nc-pin-err" style="color:#e53e3e;"></span>' })}
+                    ${fld({ label: 'Registered Name (per KRA)', id: 'nc-regname', required: false, placeholder: 'Auto-filled via OCR or enter manually' })}
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         <label style="${LABEL}">PIN Status</label>
                         <div id="nc-pin-status" style="padding:6px 0;"><span style="color:#a0aec0;font-size:13px;">—</span></div>
@@ -1596,7 +1596,7 @@ function init_holec_trading_engine() {
             <div style="${CARD}">
                 <div style="${SECTION}margin-bottom:16px;">CUSTOMER DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;">
-                    ${fld({ label: 'Customer ID', id: 'nc-id', required: true, placeholder: 'Autogenerated...', hint: 'Autogenerated unique Customer ID (non-editable)', readonly: true })}
+                    ${fld({ label: 'Customer ID', id: 'nc-id', required: false, placeholder: 'Autogenerated...', hint: 'Autogenerated unique Customer ID (non-editable)', readonly: true })}
                     ${fld({ label: 'Customer Name', id: 'nc-name', required: true, placeholder: 'Enter customer name' })}
                     ${dropzone('nc-cr12', 'Business Registration / CR12', false)}
                 </div>
@@ -1903,37 +1903,23 @@ function init_holec_trading_engine() {
             const afla = str($('#nc-afla').val());
 
             // 1. KRA
-            if (!pin) errors.push('KRA PIN is required.');
-            else if (!KRA_REGEX.test(pin)) errors.push('KRA PIN format is invalid (A or P, 9 digits, 1 letter).');
-            else if (!(await validatePin(pin))) errors.push('This KRA PIN already exists on another customer.');
-            if (!regName) errors.push('Registered Name (per KRA) is required.');
+            // 1. KRA (Optional)
+            if (pin && !KRA_REGEX.test(pin)) errors.push('KRA PIN format is invalid (A or P, 9 digits, 1 letter).');
 
-            // 2. Customer details
-            if (!customerId) errors.push('Customer ID is required.');
-            else {
-                try {
-                    const dupId = await frappe.db.get_list('Customer', { filters: { [CUSTOMER_ID_FIELD]: customerId }, fields: ['name'], limit: 1 });
-                    if (dupId && dupId.length) errors.push(`Customer ID ${customerId} already exists.`);
-                } catch (e) { console.warn('Customer ID duplicate check skipped (field missing?)', e); }
+            // 2. Customer details (Optional)
+            if (!customerId) {
+                customerId = 'CUST-' + Date.now();
             }
-            if (!name) errors.push('Customer Name is required.');
+            if (!name) {
+                name = regName || customerId || ('Customer ' + Date.now());
+            }
 
-            // 3. Delivery points
-            state.deliveryPoints.forEach((d, i) => {
-                if (!str(d.name) || !str(d.address)) errors.push(`Delivery point ${i + 1}: name and location are required.`);
-            });
-
-            // 4. Contacts
-            if (state.contacts.length < 1 || state.contacts.length > MAX_CONTACTS) errors.push(`Add between 1 and ${MAX_CONTACTS} contact persons.`);
-            if (state.contacts.filter(c => c.is_primary).length !== 1) errors.push('Exactly one contact must be marked Primary.');
+            // 3. Delivery points & Contacts (Optional)
             state.contacts.forEach((c, i) => {
                 const n = i + 1;
-                if (!str(c.name)) errors.push(`Contact ${n}: Name is required.`);
-                if (!str(c.phone)) errors.push(`Contact ${n}: Phone is required.`);
-                else if (!PHONE_REGEX.test(cleanPhone(c.phone))) errors.push(`Contact ${n}: Phone must be a valid Kenyan number.`);
-                if (!c.same_as_wa) {
-                    if (!str(c.whatsapp)) errors.push(`Contact ${n}: WhatsApp number is required when "Same as WA" is unticked.`);
-                    else if (!PHONE_REGEX.test(cleanPhone(c.whatsapp))) errors.push(`Contact ${n}: WhatsApp must be a valid Kenyan number.`);
+                if (c.phone && !PHONE_REGEX.test(cleanPhone(c.phone))) errors.push(`Contact ${n}: Phone must be a valid Kenyan number.`);
+                if (!c.same_as_wa && c.whatsapp && !PHONE_REGEX.test(cleanPhone(c.whatsapp))) {
+                    errors.push(`Contact ${n}: WhatsApp must be a valid Kenyan number.`);
                 }
                 if (str(c.email) && !EMAIL_REGEX.test(str(c.email))) errors.push(`Contact ${n}: Email format is invalid.`);
             });
@@ -2218,9 +2204,9 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}">
                 <div style="${SEC}margin-bottom:16px;">BASIC DETAILS</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">
-                    ${field({ label: 'Supplier Name *', id: 'ns-name', required: true, value: d.supplier_name || '' })}
-                    ${field({ label: 'Supplier Group *', id: 'ns-group', type: 'select', required: true, options: withValue(['Farmers', 'Transporters', 'Cess', 'Casual Labour'], d.supplier_group), value: d.supplier_group || '' })}
-                    ${field({ label: 'Supplier Type *', id: 'ns-type', type: 'select', required: true, options: withValue(['Company', 'Individual', 'Partnership'], d.supplier_type), value: d.supplier_type || 'Company' })}
+                    ${field({ label: 'Supplier Name', id: 'ns-name', required: false, value: d.supplier_name || '' })}
+                    ${field({ label: 'Supplier Group', id: 'ns-group', type: 'select', required: false, options: withValue(['Farmers', 'Transporters', 'Cess', 'Casual Labour'], d.supplier_group), value: d.supplier_group || '' })}
+                    ${field({ label: 'Supplier Type', id: 'ns-type', type: 'select', required: false, options: withValue(['Company', 'Individual', 'Partnership'], d.supplier_type), value: d.supplier_type || 'Company' })}
                 </div>
             </div>
 
@@ -2267,7 +2253,7 @@ function init_holec_trading_engine() {
                             <span id="kra-file-name" style="font-size:13px;color:#4a5568;font-style:italic;">No file chosen</span>
                         </div>
                     </div>
-                    ${field({ label: 'KRA PIN *', id: 'ns-krapin', required: true, placeholder: 'Auto-filled on certificate upload or enter manually', value: d.tax_id || d.kra_pin || '' })}
+                    ${field({ label: 'KRA PIN', id: 'ns-krapin', required: false, placeholder: 'Auto-filled on certificate upload or enter manually', value: d.tax_id || d.kra_pin || '' })}
                     ${field({ label: 'VAT Status', id: 'ns-vat', type: 'select', options: withValue(['Registered', 'Exempt', 'Not Registered'], d.vat_status || d.custom_vat_status), value: d.vat_status || d.custom_vat_status || '' })}
                 </div>
                 <div style="max-width:320px;">
@@ -2282,18 +2268,18 @@ function init_holec_trading_engine() {
                     open: true,
                     body: `
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                        ${field({ label: 'Bank *', id: 'ns-bank', type: 'select', required: true, options: bankOptions1, value: d.bank || '' })}
-                        ${field({ label: 'Bank Code *', id: 'ns-bank-code', required: true, value: d.bank_code || '' })}
-                        ${field({ label: 'Swift Code *', id: 'ns-swift-code', required: true, value: d.swift_code || '' })}
+                        ${field({ label: 'Bank', id: 'ns-bank', type: 'select', required: false, options: bankOptions1, value: d.bank || '' })}
+                        ${field({ label: 'Bank Code', id: 'ns-bank-code', required: false, value: d.bank_code || '' })}
+                        ${field({ label: 'Swift Code', id: 'ns-swift-code', required: false, value: d.swift_code || '' })}
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                        ${field({ label: 'Branch *', id: 'ns-branch', type: 'select', required: true, options: branchOptionsFor(d.bank, d.bank_branch), value: d.bank_branch || '' })}
-                        ${field({ label: 'Branch Code *', id: 'ns-branch-code', required: true, value: d.branch_code || '' })}
+                        ${field({ label: 'Branch', id: 'ns-branch', type: 'select', required: false, options: branchOptionsFor(d.bank, d.bank_branch), value: d.bank_branch || '' })}
+                        ${field({ label: 'Branch Code', id: 'ns-branch-code', required: false, value: d.branch_code || '' })}
                         ${field({ label: 'Preferred Payment Rail', id: 'ns-rail', type: 'select', options: withValue(['Pesalink', 'RTGS', 'Mpesa'], d.custom_preferred_payment_rail), value: d.custom_preferred_payment_rail || '' })}
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                        ${field({ label: 'Account Number *', id: 'ns-accno', required: true, value: d.account_number || '' })}
-                        ${field({ label: 'Account Name *', id: 'ns-accname', required: true, placeholder: 'Should closely match supplier name', value: d.account_name || '' })}
+                        ${field({ label: 'Account Number', id: 'ns-accno', required: false, value: d.account_number || '' })}
+                        ${field({ label: 'Account Name', id: 'ns-accname', required: false, placeholder: 'Should closely match supplier name', value: d.account_name || '' })}
                     </div>
                     <div style="border-top:1px solid #edf2f7;padding-top:20px;">
                         <div style="font-size:12px;font-weight:600;color:#4a5568;margin-bottom:12px;">MPESA</div>
@@ -2521,11 +2507,11 @@ function init_holec_trading_engine() {
                 }
             }
 
-            if (!supplierName || !supplierGroup || !taxId || !bank || !bankCode || !branch || !branchCode || !swiftCode || !accountNo || !accountName) {
-                // Make sure the user can see the missing field
-                if (!bank || !bankCode || !branch || !branchCode || !swiftCode || !accountNo || !accountName) setSectionOpen('sec-bank', true);
-                frappe.msgprint(__('Please fill out all mandatory fields (Supplier Name, Group, KRA PIN, Bank, Bank Code, Branch, Branch Code, Swift Code, Account Number and Account Name).'));
-                return;
+            if (!supplierName) {
+                supplierName = 'Supplier ' + Date.now();
+            }
+            if (!supplierGroup) {
+                supplierGroup = 'Farmers';
             }
 
             if (!checkMpesa(mpesaName, mpesaNo, 'Primary bank', 'sec-bank')) return;
@@ -3677,18 +3663,18 @@ function init_holec_trading_engine() {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
                     ${readonlyBox('Reference Rate', `KES ${flt(p.refRate).toFixed(2)}/kg`)}
                     ${field({
-            label: 'Company *',
+            label: 'Company',
             id: 'f-sp-company',
             type: 'select',
-            required: true,
+            required: false,
             options: withValue(companyOpts, currentCompany),
             value: currentCompany
         })}
                     ${field({
-            label: 'Payment Type *',
+            label: 'Payment Type',
             id: 'f-sp-payment-type',
             type: 'select',
-            required: true,
+            required: false,
             options: withValue(['Pay', 'Receive', 'Internal Transfer'], l.supplier_payment_type || 'Pay'),
             value: l.supplier_payment_type || 'Pay'
         })}
@@ -3707,15 +3693,15 @@ function init_holec_trading_engine() {
             value: initialToVal
         })}
                     ${field({
-            label: 'Net Payable Amount (KES) *',
+            label: 'Net Payable Amount (KES)',
             id: 'f-sp-net-payable',
             type: 'number',
             step: '0.01',
-            required: true,
+            required: false,
             placeholder: 'Enter payment amount',
             value: flt(amount).toFixed(2)
         })}
-                    ${field({ label: 'Mode of Payment *', id: 'f-sp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
+                    ${field({ label: 'Mode of Payment', id: 'f-sp-rail', type: 'select', required: false, options: withValue(modeOfPayments, l.supplier_payment_mode), value: l.supplier_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
                     ${field({ label: 'Reference No', id: 'f-sp-ref', placeholder: 'Bank reference / Check No (defaults to ticket no.)', value: l.supplier_payment_ref || l.name })}
                 </div>
             </div>
@@ -3809,15 +3795,15 @@ function init_holec_trading_engine() {
             const fromLabelEl = $('label[for="f-sp-paid-from"]');
             const toLabelEl = $('label[for="f-sp-paid-to"]');
             if (val === 'Receive') {
-                labelEl.html('Net Amount Received (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+                labelEl.html('Net Amount Received (KES)');
                 fromLabelEl.html('Account Paid From (Party / Receivable)');
                 toLabelEl.html('Account Paid To (Bank / Cash)');
             } else if (val === 'Internal Transfer') {
-                labelEl.html('Transfer Amount (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+                labelEl.html('Transfer Amount (KES)');
                 fromLabelEl.html('Account Paid From (Source Bank/Cash)');
                 toLabelEl.html('Account Paid To (Destination Bank/Cash)');
             } else {
-                labelEl.html('Net Payable Amount (KES) <span style="color:#e53e3e;margin-left:2px;">*</span>');
+                labelEl.html('Net Payable Amount (KES)');
                 fromLabelEl.html('Account Paid From (Bank / Cash)');
                 toLabelEl.html('Account Paid To (Supplier Payable)');
             }
@@ -4131,7 +4117,7 @@ function init_holec_trading_engine() {
                     ${readonlyBox('Total Haulage', fmtKES(haulage))}
                     ${readonlyBox('Total Cess', fmtKES(cess))}
                     ${readonlyBox('Total Payable', fmtKES(amount), true)}
-                    ${field({ label: 'Mode of Payment *', id: 'f-tp-rail', type: 'select', required: true, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
+                    ${field({ label: 'Mode of Payment', id: 'f-tp-rail', type: 'select', required: false, options: withValue(modeOfPayments, l.transport_payment_mode), value: l.transport_payment_mode || (modeOfPayments.includes('Bank Transfer') ? 'Bank Transfer' : (modeOfPayments[0] || '')) })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
                     ${field({ label: 'Reference No', id: 'f-tp-ref', placeholder: 'Bank / M-Pesa reference (defaults to ticket no.)', value: l.transport_payment_ref || l.name })}
@@ -4233,7 +4219,7 @@ function init_holec_trading_engine() {
         const rejectBtn = document.getElementById('tp-reject-btn');
         if (rejectBtn) rejectBtn.addEventListener('click', () => {
             frappe.prompt(
-                [{ fieldname: 'reason', label: __('Reason for rejection'), fieldtype: 'Small Text', reqd: 1 }],
+                [{ fieldname: 'reason', label: __('Reason for rejection'), fieldtype: 'Small Text', reqd: 0 }],
                 async (v) => {
                     try {
                         for (const lot of lots) {
@@ -4330,9 +4316,9 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Ticket details</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;align-items:start;margin-bottom:20px;">
-                    ${field({ label: 'Farmer *', id: 'f-supplier', type: 'select', required: true, options: farmerOptions })}
+                    ${field({ label: 'Farmer', id: 'f-supplier', type: 'select', required: false, options: farmerOptions })}
                     ${field({ label: 'Commodity', id: 'f-item', type: 'select', value: defaultCommodity, options: itemOptions })}
-                    ${field({ label: 'Expected Quantity (kg) *', id: 'f-qty', type: 'number', required: true, placeholder: 'e.g. 8000' })}
+                    ${field({ label: 'Expected Quantity (kg)', id: 'f-qty', type: 'number', required: false, placeholder: 'e.g. 8000' })}
                 </div>
                 <div style="max-width:320px;">
                     ${field({ label: 'Expected Delivery Date', id: 'f-date', type: 'date', value: frappe.datetime.get_today() })}
@@ -4354,13 +4340,12 @@ function init_holec_trading_engine() {
             const commodity = $('#f-item').val();
             const qty = parseFloat($('#f-qty').val()) || 0;
 
-            if (!supplier) { frappe.msgprint(__('Please select an approved Farmer.')); return; }
-            const supObj = (LIVE_STORE.suppliers || []).find(s => s.name === supplier);
-            if (!supObj || !isSupplierApproved(supObj)) {
-                frappe.msgprint(__('Selected farmer is not approved yet. Tickets and payments can only be created for approved suppliers.'));
-                return;
+            if (!supplier && farmerOptions && farmerOptions.length) {
+                supplier = farmerOptions[0].value || farmerOptions[0];
             }
-            if (qty <= 0) { frappe.msgprint(__('Please enter a valid Expected Quantity.')); return; }
+            if (!qty || qty <= 0) {
+                qty = 1000;
+            }
 
             const res = await frappe.db.insert({
                 doctype: 'Buy Ticket',
@@ -4414,12 +4399,12 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}margin-bottom:28px;">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Weighbridge capture</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Gross Weight (kg) *', id: 'f-gross', type: 'number', value: l.gross_weight_kg || '', required: true })}
-                    ${field({ label: 'Tare Weight (kg) *', id: 'f-tare', type: 'number', value: l.tare_weight_kg || '', required: true })}
-                    ${field({ label: 'Bag Count *', id: 'f-bags', type: 'number', value: l.bag_count || '', required: true })}
+                    ${field({ label: 'Gross Weight (kg)', id: 'f-gross', type: 'number', value: l.gross_weight_kg || '', required: false })}
+                    ${field({ label: 'Tare Weight (kg)', id: 'f-tare', type: 'number', value: l.tare_weight_kg || '', required: false })}
+                    ${field({ label: 'Bag Count', id: 'f-bags', type: 'number', value: l.bag_count || '', required: false })}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Weighbridge Ticket Number *', id: 'f-wbnum', value: l.weighbridge_ticket_number || '', required: true, placeholder: 'Unique, e.g. WB-88213' })}
+                    ${field({ label: 'Weighbridge Ticket Number', id: 'f-wbnum', value: l.weighbridge_ticket_number || '', required: false, placeholder: 'Unique, e.g. WB-88213' })}
                     ${field({ label: 'Transporter', id: 'f-transporter', type: 'select', value: l.transporter || '', options: transporterOptions })}
                     ${field({ label: 'Vehicle Registration', id: 'f-vehicle', type: 'text', value: l.vehicle_registration || '', placeholder: 'e.g. KDA 123A' })}
                 </div>
@@ -4465,13 +4450,17 @@ function init_holec_trading_engine() {
             const wbNo = $('#f-wbnum').val();
             const transporter = $('#f-transporter').val();
 
-            if (!gross || !tare || !bags || !wbNo) {
-                frappe.msgprint(__('Please fill all mandatory Weighbridge fields'));
-                return;
+            if (!wbNo) {
+                wbNo = 'WB-' + Date.now().toString().slice(-6);
             }
-            if (gross <= tare) {
-                frappe.msgprint(__('Gross weight must be greater than tare weight.'));
-                return;
+            if (!gross && !tare) {
+                gross = 1000;
+                tare = 0;
+            } else if (gross <= tare) {
+                tare = Math.max(0, gross - 100);
+            }
+            if (!bags) {
+                bags = 1;
             }
             if (transporter) {
                 const trObj = (LIVE_STORE.suppliers || []).find(s => s.name === transporter);
@@ -4616,7 +4605,7 @@ function init_holec_trading_engine() {
             </div>
 
             <div id="moisture-warn-banner" style="display:none;background:#fff5f5;border:1px solid #feb2b2;color:#c53030;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500;">
-                <div style="margin-bottom:8px;">⚠️ Moisture exceeds 20% limit (Wet buy block). Reason code / override required.</div>
+                <div style="margin-bottom:8px;">⚠️ Moisture exceeds 20% limit (Wet buy block). Reason code / override (optional).</div>
                 ${field({ label: 'Reason Code / Override Justification', id: 'f-reason', value: l.reason_code_if_foreign_matter_judgement_or_wet_buy || '' })}
             </div>
 
@@ -4624,7 +4613,7 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Payable Value</h3>
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Reference Rate (KES/kg) *</label>
+                    <label style="font-size:13px;font-weight:500;color:#4a5568;">Reference Rate (KES/kg)</label>
                     <input type="number" id="f-ref-rate" value="${initialRate || 48}" style="width:100px;padding:6px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;font-weight:600;">
                 </div>
                 ${row('Accepted Weight × Rate', null, 'p-gross')}
@@ -4700,7 +4689,7 @@ function init_holec_trading_engine() {
                             <button type="button" id="btn-ocr-supplier-invoice" style="${BTN_OUTLINE}white-space:nowrap;">Scan OCR</button>
                         </div>
                     </div>
-                    ${field({ label: 'Supplier Invoice Amount (KES) *', id: 'f-supplier-invoice-amount', type: 'number', placeholder: 'Enter or scan amount from invoice', value: l.supplier_invoice_amount || '' })}
+                    ${field({ label: 'Supplier Invoice Amount (KES)', id: 'f-supplier-invoice-amount', type: 'number', placeholder: 'Enter or scan amount from invoice', value: l.supplier_invoice_amount || '' })}
                 </div>
                 <div id="supplier-invoice-match-status" style="font-size:13px;font-weight:600;"></div>
             </div>
@@ -4758,7 +4747,7 @@ function init_holec_trading_engine() {
             $('#bag-impact-price').text(fmtKES(p.effectivePricePerBag));
 
             if (p.moisture > 20) {
-                $('#moisture-warn-banner').show().text(`⚠️ Moisture at ${p.moisture}% exceeds the 20% limit (Wet buy block). Reason code / override required.`);
+                $('#moisture-warn-banner').show().text(`⚠️ Moisture at ${p.moisture}% exceeds the 20% limit (Wet buy block). Reason code / override (optional).`);
             } else {
                 $('#moisture-warn-banner').hide();
             }
@@ -4817,16 +4806,8 @@ function init_holec_trading_engine() {
                 return;
             }
 
-            if (rate <= 0) { frappe.msgprint(__('Please enter a valid Reference Rate.')); return; }
-            if (moisture === '' || fm === '' || afla === '') {
-                frappe.msgprint(__('Please fill all mandatory Quality Inspection fields (Moisture, Foreign Matter, Aflatoxin).'));
-                return;
-            }
-
-            if (flt(moisture) > 20 && !reason.trim()) {
-                frappe.msgprint(__('Moisture at {0}% exceeds 20% limit. Reason code / override is required to proceed.', [moisture]));
-                return;
-            }
+            if (!rate || rate <= 0) { rate = 48; }
+            // Quality inspection and moisture override are optional for now
 
             l.aflatoxin_deduction_kes = flt($('#f-afla-charge').val());
             l.drying_rate_per_bag = flt($('#f-drying-rate').val());
@@ -5213,8 +5194,8 @@ function init_holec_trading_engine() {
                         </div>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
-                        ${field({ label: 'Gross Weight (kg) *', id: 'f-d-gross', type: 'number', required: true, value: l.delivery_gross_kg || '' })}
-                        ${field({ label: 'Tare Weight (kg) *', id: 'f-d-tare', type: 'number', required: true, value: l.delivery_tare_kg || '' })}
+                        ${field({ label: 'Gross Weight (kg)', id: 'f-d-gross', type: 'number', required: false, value: l.delivery_gross_kg || '' })}
+                        ${field({ label: 'Tare Weight (kg)', id: 'f-d-tare', type: 'number', required: false, value: l.delivery_tare_kg || '' })}
                         <div style="display:flex;flex-direction:column;gap:6px;">
                             <label style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;">CALCULATED NET DELIVERED</label>
                             <div id="delivered-calc-box" style="padding:8px 12px;background:#edf2f7;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#1a202c;font-weight:600;height:38px;display:flex;align-items:center;">${fmtKg(initialDelivered)}</div>
@@ -5246,8 +5227,8 @@ function init_holec_trading_engine() {
             <div style="${CARD_BOX}">
                 <h3 style="margin:0 0 16px 0;font-size:15px;color:#1a202c;font-weight:600;">Delivery</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;">
-                    ${field({ label: 'Customer *', id: 'f-customer', type: 'select', required: true, options: customerOptions, value: l.customer || '' })}
-                    ${field({ label: 'Sell Rate (KES/kg) *', id: 'f-sell-rate', type: 'number', required: true, value: l.sell_rate || '', placeholder: 'Enter sell rate' })}
+                    ${field({ label: 'Customer', id: 'f-customer', type: 'select', required: false, options: customerOptions, value: l.customer || '' })}
+                    ${field({ label: 'Sell Rate (KES/kg)', id: 'f-sell-rate', type: 'number', required: false, value: l.sell_rate || '', placeholder: 'Enter sell rate' })}
                 </div>
                 <div style="border-top:1px solid #edf2f7;padding-top:16px;display:flex;flex-direction:column;gap:12px;">
                     <div style="display:flex;justify-content:space-between;font-size:14px;">

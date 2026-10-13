@@ -1,23 +1,33 @@
 {
-  "doctype": "DocType",
-  "name": "Origin County",
-  "module": "Holec Trading",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "autoname": "field:county_name",
-  "fields": [
-    {
-      "fieldname": "county_name",
-      "label": "County Name",
-      "fieldtype": "Data",
-      "reqd": 1,
-      "unique": 1,
-      "in_list_view": 1
-    }
-  ],
-  "permissions": [
-    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
-    { "role": "Trading Officer", "read": 1, "create": 1 }
-  ]
+ "doctype": "DocType",
+ "name": "Origin County",
+ "module": "Holec Trading",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "autoname": "field:county_name",
+ "fields": [
+  {
+   "fieldname": "county_name",
+   "label": "County Name",
+   "fieldtype": "Data",
+   "reqd": 0,
+   "unique": 1,
+   "in_list_view": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "Trading Officer",
+   "read": 1,
+   "create": 1
+  }
+ ]
 }

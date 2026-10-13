@@ -1,62 +1,67 @@
 {
-  "doctype": "DocType",
-  "name": "Lot Event Log",
-  "module": "Holec Trading",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "autoname": "hash",
-  "in_create": 1,
-  "sort_field": "changed_at",
-  "sort_order": "DESC",
-  "fields": [
-    {
-      "fieldname": "lot",
-      "label": "Lot",
-      "fieldtype": "Link",
-      "options": "Lot",
-      "reqd": 1,
-      "in_list_view": 1,
-      "in_standard_filter": 1
-    },
-    {
-      "fieldname": "state",
-      "label": "State",
-      "fieldtype": "Data",
-      "reqd": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "changed_by",
-      "label": "Changed By",
-      "fieldtype": "Link",
-      "options": "User",
-      "reqd": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "changed_at",
-      "label": "Changed At",
-      "fieldtype": "Datetime",
-      "reqd": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "attached_document",
-      "label": "Attached Document",
-      "fieldtype": "Attach",
-      "description": "Weighbridge chit, lab result, or eTIMS invoice for this state change."
-    }
-  ],
-  "permissions": [
-    {
-      "role": "System Manager",
-      "read": 1, "write": 0, "create": 1, "delete": 0
-    },
-    {
-      "role": "Trading Officer",
-      "read": 1, "write": 0, "create": 0
-    }
-  ],
-  "description": "Append-only. No write/delete permission granted to any role - records are created only by the system when a Lot's state changes."
+ "doctype": "DocType",
+ "name": "Lot Event Log",
+ "module": "Holec Trading",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "autoname": "hash",
+ "in_create": 1,
+ "sort_field": "changed_at",
+ "sort_order": "DESC",
+ "fields": [
+  {
+   "fieldname": "lot",
+   "label": "Lot",
+   "fieldtype": "Link",
+   "options": "Lot",
+   "reqd": 0,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "state",
+   "label": "State",
+   "fieldtype": "Data",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "changed_by",
+   "label": "Changed By",
+   "fieldtype": "Link",
+   "options": "User",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "changed_at",
+   "label": "Changed At",
+   "fieldtype": "Datetime",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "attached_document",
+   "label": "Attached Document",
+   "fieldtype": "Attach",
+   "description": "Weighbridge chit, lab result, or eTIMS invoice for this state change."
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 0,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "Trading Officer",
+   "read": 1,
+   "write": 0,
+   "create": 0
+  }
+ ],
+ "description": "Append-only. No write/delete permission granted to any role - records are created only by the system when a Lot's state changes."
 }

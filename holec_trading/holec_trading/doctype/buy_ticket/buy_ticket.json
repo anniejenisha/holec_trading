@@ -80,7 +80,7 @@
    "fieldtype": "Select",
    "label": "Series",
    "options": "TCK-.YYMM.-.####",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "default": "Draft",
@@ -104,7 +104,7 @@
    "in_list_view": 1,
    "label": "Supplier",
    "options": "Supplier",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "sec_break_trade",
@@ -117,7 +117,7 @@
    "fieldtype": "Link",
    "label": "Commodity",
    "options": "Item",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "description": "Fetched from the Supplier record - not entered per ticket.",
@@ -133,7 +133,7 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Quantity Offered (kg)",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "col_break_2",

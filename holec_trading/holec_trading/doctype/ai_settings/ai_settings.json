@@ -57,7 +57,7 @@
    "in_list_view": 1,
    "label": "Provider",
    "options": "OpenAI\nAzure OpenAI\nOllama\nCustom",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "description": "Base URL for the API endpoint",
@@ -81,7 +81,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Default Model",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "default": "0.2",

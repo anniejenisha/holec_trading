@@ -1,80 +1,85 @@
 {
-  "doctype": "DocType",
-  "name": "Charge Master",
-  "module": "Holec Trading",
-  "custom": 0,
-  "istable": 0,
-  "issingle": 0,
-  "autoname": "field:charge_name",
-  "naming_rule": "By fieldname",
-  "sort_field": "modified",
-  "sort_order": "DESC",
-  "track_changes": 1,
-  "fields": [
-    {
-      "fieldname": "charge_name",
-      "label": "Charge Name",
-      "fieldtype": "Data",
-      "reqd": 1,
-      "unique": 1,
-      "in_list_view": 1,
-      "description": "e.g. Moisture Deduction, Bagging, Haulage"
-    },
-    {
-      "fieldname": "direction",
-      "label": "Direction",
-      "fieldtype": "Select",
-      "options": "Buy-side\nSell-side\nInternal",
-      "reqd": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "default_borne_by",
-      "label": "Default Borne By",
-      "fieldtype": "Select",
-      "options": "Supplier\nHolec\nTransporter\nPetty Cash\nCustomer Master",
-      "reqd": 1,
-      "in_list_view": 1,
-      "description": "Who carries this cost by default. Can be overridden per Cost Ledger Entry."
-    },
-    {
-      "fieldname": "posting_treatment",
-      "label": "Posting Treatment",
-      "fieldtype": "Select",
-      "options": "Reduces Payable Weight\nCash Deduction\nCapitalised to Lot\nGL Split",
-      "reqd": 1,
-      "description": "Controls how this charge affects the Lot's payable_weight_kg vs its cash ledger."
-    },
-    {
-      "fieldname": "gl_account",
-      "label": "GL Account",
-      "fieldtype": "Link",
-      "options": "Account",
-      "reqd": 1,
-      "description": "Which ledger account this charge posts to."
-    },
-    {
-      "fieldname": "requires_reason_code",
-      "label": "Requires Reason Code",
-      "fieldtype": "Check",
-      "default": "0",
-      "description": "Tick for judgement fields (e.g. Foreign Matter, Aflatoxin sampling) so the reason code is mandatory."
-    },
-    {
-      "fieldname": "is_active",
-      "label": "Active",
-      "fieldtype": "Check",
-      "default": "1"
-    }
-  ],
-  "permissions": [
-    {
-      "role": "System Manager",
-      "read": 1, "write": 1, "create": 1, "delete": 1
-    },
-    {
-      "role": "Accounts Manager",
-      "read": 1, "write": 1, "create": 1
-    }
-  ]
+ "doctype": "DocType",
+ "name": "Charge Master",
+ "module": "Holec Trading",
+ "custom": 0,
+ "istable": 0,
+ "issingle": 0,
+ "autoname": "field:charge_name",
+ "naming_rule": "By fieldname",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "fields": [
+  {
+   "fieldname": "charge_name",
+   "label": "Charge Name",
+   "fieldtype": "Data",
+   "reqd": 0,
+   "unique": 1,
+   "in_list_view": 1,
+   "description": "e.g. Moisture Deduction, Bagging, Haulage"
+  },
+  {
+   "fieldname": "direction",
+   "label": "Direction",
+   "fieldtype": "Select",
+   "options": "Buy-side\nSell-side\nInternal",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "default_borne_by",
+   "label": "Default Borne By",
+   "fieldtype": "Select",
+   "options": "Supplier\nHolec\nTransporter\nPetty Cash\nCustomer Master",
+   "reqd": 0,
+   "in_list_view": 1,
+   "description": "Who carries this cost by default. Can be overridden per Cost Ledger Entry."
+  },
+  {
+   "fieldname": "posting_treatment",
+   "label": "Posting Treatment",
+   "fieldtype": "Select",
+   "options": "Reduces Payable Weight\nCash Deduction\nCapitalised to Lot\nGL Split",
+   "reqd": 0,
+   "description": "Controls how this charge affects the Lot's payable_weight_kg vs its cash ledger."
+  },
+  {
+   "fieldname": "gl_account",
+   "label": "GL Account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "reqd": 0,
+   "description": "Which ledger account this charge posts to."
+  },
+  {
+   "fieldname": "requires_reason_code",
+   "label": "Requires Reason Code",
+   "fieldtype": "Check",
+   "default": "0",
+   "description": "Tick for judgement fields (e.g. Foreign Matter, Aflatoxin sampling) so the reason code is mandatory."
+  },
+  {
+   "fieldname": "is_active",
+   "label": "Active",
+   "fieldtype": "Check",
+   "default": "1"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ]
 }
