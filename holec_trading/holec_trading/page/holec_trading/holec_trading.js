@@ -662,7 +662,11 @@ function init_holec_trading_engine() {
         // come from the Bank record; branch name comes from Bank Branch.
         try {
             const acctRows = await frappe.db.get_list('Bank Account', {
-                filters: { company: COMPANY, is_company_account: 1, disabled: 0 },
+                filters: [
+                    ['Bank Account', 'company', '=', COMPANY],
+                    ['Bank Account', 'is_company_account', '=', 1],
+                    ['Bank Account', 'disabled', '=', 0]
+                ],
                 fields: ['name', 'is_default'],
                 order_by: 'is_default desc, creation asc',
                 limit: 20
@@ -678,6 +682,14 @@ function init_holec_trading_engine() {
                 let acct = {};
                 try { acct = await frappe.db.get_doc('Bank Account', row.name); }
                 catch (e) { console.error('Bank Account load failed', row.name, e); continue; }
+
+                if (acct.company !== COMPANY || cint(acct.disabled) || !cint(acct.is_company_account)) {
+                    continue;
+                }
+                const acctNameLower = (acct.account_name || '').trim().toLowerCase();
+                if (acctNameLower === 'i&m' || acctNameLower === 'bank draft') {
+                    continue;
+                }
 
                 // Bank record (bank name, SWIFT, bank code, address)
                 let bank = {}, bankAddress = '';
@@ -789,8 +801,12 @@ function init_holec_trading_engine() {
         const companyName = co.company_name || COMPANY;
 
         const bankRow = (label, value) => `<tr><td class="bl">${label}</td><td class="bv">${escHtml(String(value || '').toUpperCase())}</td></tr>`;
-        const bankBlocks = d.bankAccounts.length
-            ? d.bankAccounts.map(b => `
+        const bankAccounts = (d.bankAccounts || []).filter(b => {
+            const n = (b.account_name || '').trim().toLowerCase();
+            return n !== 'i&m' && n !== 'bank draft';
+        });
+        const bankBlocks = bankAccounts.length
+            ? bankAccounts.map(b => `
                 <table class="bank-table">
                     ${bankRow('Account Name', b.account_name || companyName)}
                     ${bankRow('KES Account number', b.account_no)}
