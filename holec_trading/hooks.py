@@ -36,6 +36,17 @@ doc_events = {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Authentication & Response Sanitization Hooks
+# ---------------------------------------------------------------------------
+auth_hooks = [
+    "holec_trading.api.check_api_auth"
+]
+
+after_request = [
+    "holec_trading.api.sanitize_api_response"
+]
+
 website_route_rules = [
     {
         "from_route": "/some-route",

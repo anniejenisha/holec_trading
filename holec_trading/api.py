@@ -2,15 +2,16 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import time
+import requests
 import rsa
 import rsa.core
-import requests
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
 import frappe
-from frappe.utils import getdate
 from erpnext.accounts.party import get_party_account
-import re
+from frappe.utils import cint, flt, getdate, nowdate
 
 UNIDENTIFIED_CUSTOMER = "Unidentified Customer"  # adjust to your actual placeholder Customer name
 
@@ -57,6 +58,9 @@ def _resolve_pesalink_subtype(additions):
     so we can pick the right Mode of Payment and keep the detail for
     reconciliation.
     """
+    if not isinstance(additions, dict):
+        return None, None
+
     destination_type = additions.get("destinationType")  # if the bank sends it explicitly
     if destination_type:
         return destination_type, additions.get("destinationValue")
@@ -88,7 +92,7 @@ def _ensure_mode_of_payment(mode_name):
         frappe.db.commit()
         return mode_name
     except Exception:
-        pass
+        frappe.local.message_log = []
 
     # Fallback to standard existing Bank Mode of Payment in ERPNext
     for fallback in ("Wire Transfer", "Bank Draft", "Bank Transfer", "Cheque", "M-PESA"):
@@ -137,19 +141,142 @@ def _resolve_mode_of_payment(payment_type, additions, bank_acc_doc):
     return resolved_mode, None
 
 
-@frappe.whitelist(allow_guest=True)
+def _enforce_authentication():
+    """Enforce authentication on custom API endpoints.
+    Rejects any unauthenticated caller (Guest) with HTTP 401 AuthenticationError,
+    consistent with Frappe's response when invalid API credentials are provided.
+    """
+    user = getattr(frappe.session, "user", None)
+    if not user or user == "Guest":
+        frappe.local.message_log = []
+        if hasattr(frappe, "response"):
+            frappe.response.pop("_server_messages", None)
+            frappe.response.pop("__frappe_exc_id", None)
+        frappe.local.response["http_status_code"] = 401
+        raise frappe.AuthenticationError("Authentication required")
+
+
+def check_api_auth():
+    """Hook invoked during request authentication (validate_auth).
+    Immediately rejects unauthenticated requests to Holec Payment API endpoints
+    with HTTP 401 AuthenticationError before handler or whitelisting executes.
+    """
+    req = getattr(frappe, "request", None)
+    if not req:
+        return
+    path = getattr(req, "path", "")
+    if path and any(path.startswith(prefix) for prefix in (
+        "/api/method/holec_trading.api.receive_payment",
+        "/api/method/holec_trading.api.validate_customer",
+    )):
+        if frappe.session.user in ("", "Guest"):
+            frappe.local.message_log = []
+            raise frappe.AuthenticationError("Authentication required")
+
+
+def sanitize_api_response(response, request=None):
+    """Hook invoked in application finally-block for every request.
+    Strips internal debugging fields (_server_messages, __frappe_exc_id, exc_type,
+    tracebacks) from any responses on Holec Payment API endpoints.
+    Also translates Frappe 417 DataError responses into clean 400 Bad Request responses.
+    """
+    if not request:
+        request = getattr(frappe, "request", None)
+    if not request:
+        return
+
+    path = getattr(request, "path", "")
+    if not path or not any(path.startswith(prefix) for prefix in (
+        "/api/method/holec_trading.api.receive_payment",
+        "/api/method/holec_trading.api.validate_customer",
+    )):
+        return
+
+    frappe.local.message_log = []
+
+    if response and getattr(response, "data", None):
+        try:
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type or getattr(response, "mimetype", "") == "application/json":
+                data = json.loads(response.data.decode("utf-8"))
+                if isinstance(data, dict):
+                    dirty = False
+
+                    # Strip verbose internal Frappe error fields
+                    for key in (
+                        "_server_messages",
+                        "__frappe_exc_id",
+                        "exc",
+                        "_exc_source",
+                        "_error_message",
+                        "exception",
+                    ):
+                        if key in data:
+                            data.pop(key, None)
+                            dirty = True
+
+                    # Translate Frappe's 417 DataError (e.g. malformed JSON in make_form_dict)
+                    if response.status_code == 417 or data.get("exc_type") in ("DataError", "FrappeTypeError"):
+                        response.status_code = 400
+                        data = {"resultCode": 1, "resultDesc": "Invalid request"}
+                        dirty = True
+
+                    # Ensure 401 returns clean response
+                    if response.status_code == 401 or data.get("exc_type") == "AuthenticationError":
+                        response.status_code = 401
+                        data = {
+                            "resultCode": 1,
+                            "resultDesc": "Authentication required",
+                            "exc_type": "AuthenticationError",
+                        }
+                        dirty = True
+
+                    # Clean any raw Python exception text leaking inside resultDesc (top-level or nested under 'message')
+                    target_dicts = [data]
+                    if isinstance(data.get("message"), dict):
+                        target_dicts.append(data["message"])
+
+                    for target in target_dicts:
+                        desc = target.get("resultDesc")
+                        if isinstance(desc, str):
+                            leak_indicators = (
+                                "Traceback",
+                                "bad operand type",
+                                "TypeError",
+                                "ValueError",
+                                "KeyError",
+                                "AttributeError",
+                                "Exception:",
+                                "line ",
+                                "SyntaxError",
+                            )
+                            if any(marker in desc for marker in leak_indicators):
+                                target["resultDesc"] = "Invalid request"
+                                dirty = True
+
+                    if dirty:
+                        response.data = json.dumps(data).encode("utf-8")
+        except Exception:
+            pass
+
+
+@frappe.whitelist(methods=["POST"])
 def receive_payment():
     """Incoming payment hook processing requests by parsing shortCode from the URL path."""
     try:
+        _enforce_authentication()
+
         # --- Body parsing with fallback support ---
         raw_body = frappe.request.get_data(as_text=True)
         if not raw_body and frappe.local.form_dict:
-            data = frappe.local.form_dict
+            data = dict(frappe.local.form_dict)
         else:
+            if not raw_body or not raw_body.strip():
+                return {"resultCode": 1, "resultDesc": "Request body is empty"}
             try:
-                data = json.loads(raw_body) if raw_body else {}
-            except (ValueError, TypeError):
-                frappe.log_error(raw_body, "Treasury Payment API - Invalid JSON body")
+                data = json.loads(raw_body)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                frappe.log_error(title="Treasury Payment API - Invalid JSON body", message=raw_body)
                 return {"resultCode": 1, "resultDesc": "Request body is not valid JSON"}
 
         if not isinstance(data, dict):
@@ -163,26 +290,68 @@ def receive_payment():
         for key in ("shortCode", "channelId", "channel"):
             data.pop(key, None)
 
-        payment_type = data.get("paymentType")
-        transaction_reference = data.get("transactionReference")
-        transaction_date = data.get("transactionDate")
-        amount = data.get("amount")
-        currency = data.get("currency")
-
-        company = data.get("company") or data.get("companyName")
-        additions = data.get("additions") or {}
-        customer_ref = additions.get("customerRef")
-
-        if not transaction_reference:
-            return {"resultCode": 1, "resultDesc": "transactionReference is required"}
-        if not amount:
-            return {"resultCode": 1, "resultDesc": "amount is required"}
-        if not payment_type:
-            return {"resultCode": 1, "resultDesc": "paymentType is required"}
-
-        if not short_code or short_code == "receive_payment":
+        if not short_code or short_code.endswith("receive_payment"):
             return {"resultCode": 1, "resultDesc": "shortCode missing from URL path"}
 
+        # --- Validate and sanitize input fields ---
+        payment_type = data.get("paymentType")
+        if not payment_type or not isinstance(payment_type, str) or not payment_type.strip():
+            return {"resultCode": 1, "resultDesc": "paymentType is required"}
+        payment_type = payment_type.strip()
+
+        transaction_reference = data.get("transactionReference")
+        if not transaction_reference or not isinstance(transaction_reference, str) or not transaction_reference.strip():
+            return {"resultCode": 1, "resultDesc": "transactionReference is required"}
+        transaction_reference = transaction_reference.strip()
+
+        # Amount validation: strictly validate positive numeric amount
+        amount_raw = data.get("amount")
+        if amount_raw is None or amount_raw == "":
+            return {"resultCode": 1, "resultDesc": "amount is required"}
+
+        if isinstance(amount_raw, bool):
+            return {"resultCode": 1, "resultDesc": "Invalid amount: must be a positive number"}
+
+        try:
+            parsed_amount = float(amount_raw)
+        except (ValueError, TypeError):
+            return {"resultCode": 1, "resultDesc": "Invalid amount: must be a positive number"}
+
+        if parsed_amount <= 0:
+            return {"resultCode": 1, "resultDesc": "Invalid amount: must be greater than zero"}
+
+        parsed_amount = round(parsed_amount, 2)
+
+        # Date validation
+        transaction_date = data.get("transactionDate")
+        if transaction_date:
+            try:
+                parsed_date = getdate(transaction_date)
+            except Exception:
+                return {"resultCode": 1, "resultDesc": "Invalid transactionDate format"}
+        else:
+            parsed_date = getdate(nowdate())
+
+        currency = data.get("currency")
+        if currency and (not isinstance(currency, str) or not currency.strip()):
+            return {"resultCode": 1, "resultDesc": "Invalid currency format"}
+        if currency:
+            currency = currency.strip()
+
+        company = data.get("company") or data.get("companyName")
+        if company and isinstance(company, str):
+            company = company.strip()
+
+        additions = data.get("additions")
+        if additions is not None and not isinstance(additions, dict):
+            return {"resultCode": 1, "resultDesc": "additions must be a JSON object"}
+        additions = additions or {}
+
+        customer_ref = additions.get("customerRef")
+        if customer_ref is not None:
+            customer_ref = str(customer_ref).strip()
+
+        # Bank Account resolution
         bank_account_name = frappe.db.get_value(
             "Bank Account",
             {"custom_channel_id": short_code},
@@ -197,16 +366,17 @@ def receive_payment():
             company = bank_acc_doc.company
 
         if not company:
-            return {"resultCode": 1, "resultDesc": "Company could not be determined from URL shortCode mapping."}
+            return {"resultCode": 1, "resultDesc": "Company could not be determined from URL shortCode mapping"}
 
         if not paid_to:
-            return {"resultCode": 1, "resultDesc": f"Bank Account '{bank_account_name}' has no linked GL Account set (paid_to)."}
+            return {"resultCode": 1, "resultDesc": f"Bank Account '{bank_account_name}' has no linked GL Account set (paid_to)"}
 
+        # Idempotency check
         existing_payment = frappe.db.get_value("Payment Entry", {"reference_no": transaction_reference}, "name")
         if existing_payment:
             return {"resultCode": 0, "resultDesc": "Payment already processed", "erpRefId": existing_payment}
 
-        # --- Mode of Payment resolution ---
+        # Mode of Payment resolution
         mode_of_payment, pesalink_note = _resolve_mode_of_payment(payment_type, additions, bank_acc_doc)
         if not mode_of_payment:
             return {
@@ -217,15 +387,14 @@ def receive_payment():
         if not frappe.db.exists("Mode of Payment", mode_of_payment):
             return {
                 "resultCode": 1,
-                "resultDesc": f"Mode of Payment '{mode_of_payment}' (mapped from paymentType '{payment_type}') "
-                              f"does not exist in the system"
+                "resultDesc": f"Mode of Payment '{mode_of_payment}' does not exist in the system"
             }
 
-        # --- Customer validation: non-strict ---
+        # Customer validation: non-strict
         customer = None
         unmatched = False
         if customer_ref:
-            customer = frappe.db.get_value("Customer", {"alias": customer_ref}, "name")
+            customer = frappe.db.get_value("Customer", {"alias": customer_ref, "disabled": 0}, "name")
 
         if not customer:
             customer = frappe.db.get_value("Customer", {"name": UNIDENTIFIED_CUSTOMER}, "name")
@@ -233,8 +402,7 @@ def receive_payment():
             if not customer:
                 return {
                     "resultCode": 1,
-                    "resultDesc": f"Customer not found for ref '{customer_ref}' and no fallback "
-                                  f"'{UNIDENTIFIED_CUSTOMER}' customer configured"
+                    "resultDesc": f"Customer not found for ref '{customer_ref}' and no fallback '{UNIDENTIFIED_CUSTOMER}' customer configured"
                 }
 
         paid_from = get_party_account(party_type="Customer", party=customer, company=company)
@@ -248,18 +416,18 @@ def receive_payment():
         payment_entry = frappe.new_doc("Payment Entry")
         payment_entry.payment_type = "Receive"
         payment_entry.company = company
-        payment_entry.posting_date = getdate(transaction_date)
+        payment_entry.posting_date = parsed_date
         payment_entry.mode_of_payment = mode_of_payment
         payment_entry.party_type = "Customer"
         payment_entry.party = customer
         payment_entry.paid_from = paid_from
         payment_entry.paid_to = paid_to
-        payment_entry.paid_amount = amount
-        payment_entry.received_amount = amount
+        payment_entry.paid_amount = parsed_amount
+        payment_entry.received_amount = parsed_amount
         payment_entry.source_exchange_rate = 1
         payment_entry.target_exchange_rate = 1
         payment_entry.reference_no = transaction_reference
-        payment_entry.reference_date = getdate(transaction_date)
+        payment_entry.reference_date = parsed_date
 
         remarks_parts = []
         if unmatched and customer_ref:
@@ -278,12 +446,17 @@ def receive_payment():
 
         return {"resultCode": 0, "resultDesc": result_desc, "erpRefId": payment_entry.name}
 
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Treasury Payment API Error")
-        return {"resultCode": 1, "resultDesc": str(e)}
+    except frappe.AuthenticationError:
+        frappe.local.message_log = []
+        raise
+    except Exception:
+        frappe.log_error(title="Treasury Payment API Error", message=frappe.get_traceback())
+        frappe.local.message_log = []
+        if hasattr(frappe, "response"):
+            for key in ("_server_messages", "__frappe_exc_id", "exc_type", "exc", "_exc_source", "_error_message"):
+                frappe.response.pop(key, None)
+        return {"resultCode": 1, "resultDesc": "Unable to process payment request"}
 
-import frappe
-import json
 
 @frappe.whitelist(allow_guest=True)
 def im_bank_callback():
@@ -371,12 +544,7 @@ def im_bank_callback():
     return {"resultCode": 0, "resultDesc": "Received"}
 
 
-import json
-
-import frappe
-
-
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(methods=["POST", "GET"])
 def validate_customer():
     """Check whether a customer exists for a given customerRef (alias).
 
@@ -384,20 +552,24 @@ def validate_customer():
         {"customerRef": "C1012"}
     """
     try:
+        _enforce_authentication()
+
         raw_body = frappe.request.get_data(as_text=True)
         try:
             data = json.loads(raw_body) if raw_body else dict(frappe.local.form_dict)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, json.JSONDecodeError):
             return {"resultCode": 1, "resultDesc": "Request body is not valid JSON"}
 
         if not isinstance(data, dict):
             return {"resultCode": 1, "resultDesc": "Request body must be a JSON object"}
 
         customer_ref = data.get("customerRef")
-        customer_ref = str(customer_ref).strip() if customer_ref is not None else ""
-
-        if not customer_ref:
+        if customer_ref is None or not str(customer_ref).strip():
             return {"resultCode": 1, "resultDesc": "customerRef is required"}
+
+        customer_ref = str(customer_ref).strip()
+        if len(customer_ref) > 140:
+            return {"resultCode": 1, "resultDesc": "Invalid customerRef"}
 
         matches = frappe.get_all(
             "Customer",
@@ -417,6 +589,13 @@ def validate_customer():
             "customerName": matches[0].customer_name,
         }
 
+    except frappe.AuthenticationError:
+        frappe.local.message_log = []
+        raise
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "Treasury Customer Validation Error")
-        return {"resultCode": 1, "resultDesc": "Internal error"}
+        frappe.log_error(title="Treasury Customer Validation Error", message=frappe.get_traceback())
+        frappe.local.message_log = []
+        if hasattr(frappe, "response"):
+            for key in ("_server_messages", "__frappe_exc_id", "exc_type", "exc", "_exc_source", "_error_message"):
+                frappe.response.pop(key, None)
+        return {"resultCode": 1, "resultDesc": "Unable to validate customer"}
