@@ -141,6 +141,22 @@ def _resolve_mode_of_payment(payment_type, additions, bank_acc_doc):
     return resolved_mode, None
 
 
+def _is_payment_api_request(req=None):
+    if not req:
+        req = getattr(frappe, "request", None)
+    if not req:
+        return False
+    path = getattr(req, "path", "") or ""
+    cmd = (getattr(frappe.local, "form_dict", {}) or {}).get("cmd") or ""
+    endpoints = (
+        "holec_trading.api.receive_payment",
+        "holec_trading.api.validate_customer",
+        "holec_trading.im_bank",
+        "im-bank-treasury-callback",
+    )
+    return any(ep in path for ep in endpoints) or any(ep in str(cmd) for ep in endpoints)
+
+
 def _enforce_authentication():
     """Enforce authentication on custom API endpoints.
     Rejects any unauthenticated caller (Guest) with HTTP 401 AuthenticationError,
@@ -150,8 +166,8 @@ def _enforce_authentication():
     if not user or user == "Guest":
         frappe.local.message_log = []
         if hasattr(frappe, "response"):
-            frappe.response.pop("_server_messages", None)
-            frappe.response.pop("__frappe_exc_id", None)
+            for key in ("_server_messages", "__frappe_exc_id", "exc_type", "exc", "_exc_source", "_error_message"):
+                frappe.response.pop(key, None)
         frappe.local.response["http_status_code"] = 401
         raise frappe.AuthenticationError("Authentication required")
 
@@ -161,35 +177,26 @@ def check_api_auth():
     Immediately rejects unauthenticated requests to Holec Payment API endpoints
     with HTTP 401 AuthenticationError before handler or whitelisting executes.
     """
-    req = getattr(frappe, "request", None)
-    if not req:
+    if not _is_payment_api_request():
         return
-    path = getattr(req, "path", "")
-    if path and any(path.startswith(prefix) for prefix in (
-        "/api/method/holec_trading.api.receive_payment",
-        "/api/method/holec_trading.api.validate_customer",
-    )):
-        if frappe.session.user in ("", "Guest"):
-            frappe.local.message_log = []
-            raise frappe.AuthenticationError("Authentication required")
+    if getattr(frappe.session, "user", None) in ("", "Guest", None):
+        frappe.local.message_log = []
+        raise frappe.AuthenticationError("Authentication required")
 
 
 def sanitize_api_response(response, request=None):
     """Hook invoked in application finally-block for every request.
     Strips internal debugging fields (_server_messages, __frappe_exc_id, exc_type,
     tracebacks) from any responses on Holec Payment API endpoints.
-    Also translates Frappe 417 DataError responses into clean 400 Bad Request responses.
+    Also translates Frappe 417 DataError responses into clean 400 Bad Request responses,
+    and ensures clean 401 Authentication required responses without Frappe internal details.
     """
     if not request:
         request = getattr(frappe, "request", None)
     if not request:
         return
 
-    path = getattr(request, "path", "")
-    if not path or not any(path.startswith(prefix) for prefix in (
-        "/api/method/holec_trading.api.receive_payment",
-        "/api/method/holec_trading.api.validate_customer",
-    )):
+    if not _is_payment_api_request(request):
         return
 
     frappe.local.message_log = []
@@ -206,28 +213,54 @@ def sanitize_api_response(response, request=None):
                     for key in (
                         "_server_messages",
                         "__frappe_exc_id",
+                        "exc_type",
                         "exc",
                         "_exc_source",
                         "_error_message",
+                        "_debug_messages",
                         "exception",
+                        "errors",
                     ):
                         if key in data:
                             data.pop(key, None)
                             dirty = True
 
-                    # Translate Frappe's 417 DataError (e.g. malformed JSON in make_form_dict)
+                    # Translate Frappe's 417 DataError (e.g. malformed JSON in make_form_dict) into clean 400
                     if response.status_code == 417 or data.get("exc_type") in ("DataError", "FrappeTypeError"):
                         response.status_code = 400
-                        data = {"resultCode": 1, "resultDesc": "Invalid request"}
+                        data = {
+                            "resultCode": 1,
+                            "resultDesc": "Invalid request",
+                            "message": {
+                                "resultCode": 1,
+                                "resultDesc": "Invalid request"
+                            }
+                        }
                         dirty = True
 
-                    # Ensure 401 returns clean response
-                    if response.status_code == 401 or data.get("exc_type") == "AuthenticationError":
+                    # Ensure 401 returns clean response without revealing Frappe internal exception names
+                    elif response.status_code == 401 or data.get("exc_type") == "AuthenticationError":
                         response.status_code = 401
                         data = {
                             "resultCode": 1,
                             "resultDesc": "Authentication required",
-                            "exc_type": "AuthenticationError",
+                            "message": {
+                                "resultCode": 1,
+                                "resultDesc": "Authentication required"
+                            }
+                        }
+                        dirty = True
+
+                    # Translate 500 internal errors into clean generic message
+                    elif response.status_code >= 500:
+                        response.status_code = 500
+                        data = {
+                            "resultCode": 1,
+                            "resultDesc": "Unable to process payment request",
+                            "message": {
+                                "resultCode": 1,
+                                "resultDesc": "Unable to process payment request"
+                            }
                         }
                         dirty = True
 
@@ -236,28 +269,33 @@ def sanitize_api_response(response, request=None):
                     if isinstance(data.get("message"), dict):
                         target_dicts.append(data["message"])
 
+                    leak_indicators = (
+                        "Traceback",
+                        "bad operand type",
+                        "TypeError",
+                        "ValueError",
+                        "KeyError",
+                        "AttributeError",
+                        "Exception:",
+                        "line ",
+                        "SyntaxError",
+                        "DataError",
+                        "OperationalError",
+                        "ProgrammingError",
+                        "frappe.",
+                    )
+
                     for target in target_dicts:
                         desc = target.get("resultDesc")
-                        if isinstance(desc, str):
-                            leak_indicators = (
-                                "Traceback",
-                                "bad operand type",
-                                "TypeError",
-                                "ValueError",
-                                "KeyError",
-                                "AttributeError",
-                                "Exception:",
-                                "line ",
-                                "SyntaxError",
-                            )
-                            if any(marker in desc for marker in leak_indicators):
-                                target["resultDesc"] = "Invalid request"
-                                dirty = True
+                        if isinstance(desc, str) and any(marker in desc for marker in leak_indicators):
+                            target["resultDesc"] = "Invalid request"
+                            dirty = True
 
                     if dirty:
                         response.data = json.dumps(data).encode("utf-8")
         except Exception:
             pass
+
 
 
 @frappe.whitelist(methods=["POST"])
@@ -460,88 +498,98 @@ def receive_payment():
 
 @frappe.whitelist(allow_guest=True)
 def im_bank_callback():
-    # Safely pull parameters directly from the URL query string
-    args = frappe.local.request.args if frappe.local.request else {}
-    channel_id = args.get("channel_id")
-    secret = args.get("secret")
-    
-    if not channel_id:
-        frappe.local.response["http_status_code"] = 400
-        return {"message": "Missing channel_id"}
-
-    # Find the Bank Account matching this channel_id
-    bank_account_name = frappe.db.get_value(
-        "Bank Account", 
-        {"custom_channel_id": channel_id}, 
-        "name"
-    )
-
-    if not bank_account_name:
-        frappe.local.response["http_status_code"] = 404
-        return {"message": "Unknown channel ID"}
-
-    bank_doc = frappe.get_doc("Bank Account", bank_account_name)
-    expected_secret = bank_doc.get_password("custom_webhook_secret")
-
-    # Secure token validation
-    if not secret or secret != expected_secret:
-        frappe.local.response["http_status_code"] = 403
-        return {"message": "Forbidden: Invalid or missing security token"}
-
-    if frappe.request.method != "POST":
-        frappe.local.response["http_status_code"] = 405
-        return {"message": "Only POST is supported"}
-
     try:
-        raw = frappe.request.get_data(as_text=True)
-        data = json.loads(raw) if raw else {}
+        # Safely pull parameters directly from the URL query string
+        args = frappe.local.request.args if frappe.local.request else {}
+        channel_id = args.get("channel_id")
+        secret = args.get("secret")
+        
+        if not channel_id:
+            frappe.local.response["http_status_code"] = 400
+            return {"resultCode": 1, "resultDesc": "Missing channel_id"}
+
+        # Find the Bank Account matching this channel_id
+        bank_account_name = frappe.db.get_value(
+            "Bank Account", 
+            {"custom_channel_id": channel_id}, 
+            "name"
+        )
+
+        if not bank_account_name:
+            frappe.local.response["http_status_code"] = 404
+            return {"resultCode": 1, "resultDesc": "Unknown channel ID"}
+
+        bank_doc = frappe.get_doc("Bank Account", bank_account_name)
+        expected_secret = bank_doc.get_password("custom_webhook_secret")
+
+        # Secure token validation
+        if not secret or secret != expected_secret:
+            frappe.local.response["http_status_code"] = 403
+            return {"resultCode": 1, "resultDesc": "Forbidden: Invalid or missing security token"}
+
+        if frappe.request.method != "POST":
+            frappe.local.response["http_status_code"] = 405
+            return {"resultCode": 1, "resultDesc": "Only POST is supported"}
+
+        try:
+            raw = frappe.request.get_data(as_text=True)
+            data = json.loads(raw) if raw else {}
+        except Exception:
+            frappe.log_error(title="I&M Bank Callback - bad payload", message=frappe.get_traceback())
+            frappe.local.response["http_status_code"] = 400
+            return {"resultCode": 1, "resultDesc": "Invalid request"}
+
+        ref_num = (
+            data.get("requestRefNum")
+            or data.get("targetRefNumber")
+            or data.get("paymentSystemRefNumber")
+        )
+        
+        if not ref_num:
+            frappe.local.response["http_status_code"] = 400
+            return {"resultCode": 1, "resultDesc": "Missing reference number in callback"}
+
+        matches = frappe.get_all(
+            "Payment Approval Queue",
+            filters={"custom_request_ref_num": ref_num},
+            pluck="name",
+            limit=1,
+        )
+
+        if not matches:
+            frappe.local.response["http_status_code"] = 404
+            return {"resultCode": 1, "resultDesc": "Unknown reference number"}
+
+        doc = frappe.get_doc("Payment Approval Queue", matches[0])
+        doc.db_set("gateway_response", json.dumps(data, indent=2))
+
+        response_code = str(data.get("responseCode") or "").upper()
+
+        if response_code in ("SUCCESS", "COMPLETED", "APPROVED", "00", "000"):
+            doc.db_set("status", "Completed")
+            if not (doc.meta.has_field("custom_payment_entry") and doc.get("custom_payment_entry")):
+                try:
+                    from holec_trading.www.im_bank_treasury_callback import _create_payment_entry
+                    _create_payment_entry(doc, doc.get("account"), data)
+                except Exception:
+                    frappe.log_error(
+                        title=f"I&M Bank Callback: Payment Entry creation failed for {doc.name}",
+                        message=frappe.get_traceback(),
+                    )
+        elif response_code in ("FAILED", "REJECTED", "DECLINED"):
+            doc.db_set("status", "Failed")
+
+        frappe.db.commit()
+        return {"resultCode": 0, "resultDesc": "Received"}
+
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "I&M Bank Callback - bad payload")
-        frappe.local.response["http_status_code"] = 400
-        return {"message": "Invalid JSON payload"}
-
-    ref_num = (
-        data.get("requestRefNum")
-        or data.get("targetRefNumber")
-        or data.get("paymentSystemRefNumber")
-    )
-    
-    if not ref_num:
-        frappe.local.response["http_status_code"] = 400
-        return {"message": "Missing reference number in callback"}
-
-    matches = frappe.get_all(
-        "Payment Approval Queue",
-        filters={"custom_request_ref_num": ref_num},
-        pluck="name",
-        limit=1,
-    )
-
-    if not matches:
-        frappe.local.response["http_status_code"] = 404
-        return {"message": "Unknown reference number"}
-
-    doc = frappe.get_doc("Payment Approval Queue", matches[0])
-    doc.db_set("gateway_response", json.dumps(data, indent=2))
-
-    response_code = str(data.get("responseCode") or "").upper()
-
-    if response_code in ("SUCCESS", "COMPLETED", "APPROVED", "00", "000"):
-        doc.db_set("status", "Completed")
-        if not (doc.meta.has_field("custom_payment_entry") and doc.get("custom_payment_entry")):
-            try:
-                from holec_trading.www.im_bank_treasury_callback import _create_payment_entry
-                _create_payment_entry(doc, doc.get("account"), data)
-            except Exception:
-                frappe.log_error(
-                    frappe.get_traceback(),
-                    f"I&M Bank Callback: Payment Entry creation failed for {doc.name}",
-                )
-    elif response_code in ("FAILED", "REJECTED", "DECLINED"):
-        doc.db_set("status", "Failed")
-
-    frappe.db.commit()
-    return {"resultCode": 0, "resultDesc": "Received"}
+        frappe.log_error(title="I&M Bank Callback Error", message=frappe.get_traceback())
+        frappe.local.message_log = []
+        if hasattr(frappe, "response"):
+            for key in ("_server_messages", "__frappe_exc_id", "exc_type", "exc", "_exc_source", "_error_message"):
+                frappe.response.pop(key, None)
+        frappe.local.response["http_status_code"] = 500
+        return {"resultCode": 1, "resultDesc": "Unable to process callback"}
 
 
 @frappe.whitelist(methods=["POST", "GET"])

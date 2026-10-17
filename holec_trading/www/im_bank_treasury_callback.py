@@ -530,10 +530,12 @@ def test_mpesa_payment(bank_account_name, amount=10, currency="KES",
 # ===========================================================================
 
 def get_context(context):
+    frappe.local.response["type"] = "json"
+
     if frappe.request.method != "POST":
         frappe.local.response["http_status_code"] = 405
-        frappe.local.response.update({"message": "Only POST is supported"})
-        raise frappe.PermissionError
+        frappe.local.response.update({"resultCode": 1, "resultDesc": "Only POST is supported"})
+        return
 
     channel_id = frappe.form_dict.get("channel_id")
 
@@ -543,8 +545,8 @@ def get_context(context):
     except Exception:
         frappe.log_error(frappe.get_traceback(), "I&M Bank Treasury Callback - bad payload")
         frappe.local.response["http_status_code"] = 400
-        frappe.local.response.update({"message": "Invalid JSON payload"})
-        raise frappe.ValidationError
+        frappe.local.response.update({"resultCode": 1, "resultDesc": "Invalid request"})
+        return
 
     frappe.log_error(
         title="I&M Bank Treasury Callback received",
@@ -561,8 +563,8 @@ def get_context(context):
 
     if not ref_num:
         frappe.local.response["http_status_code"] = 400
-        frappe.local.response.update({"message": "Missing reference number in callback"})
-        raise frappe.ValidationError
+        frappe.local.response.update({"resultCode": 1, "resultDesc": "Missing reference number in callback"})
+        return
 
     matches = frappe.get_all(
         "Payment Approval Queue",
@@ -573,8 +575,8 @@ def get_context(context):
 
     if not matches:
         frappe.local.response["http_status_code"] = 404
-        frappe.local.response.update({"message": "Unknown reference number"})
-        raise frappe.DoesNotExistError
+        frappe.local.response.update({"resultCode": 1, "resultDesc": "Unknown reference number"})
+        return
 
     doc = frappe.get_doc("Payment Approval Queue", matches[0])
     doc.db_set("gateway_response", json.dumps(data, indent=2))

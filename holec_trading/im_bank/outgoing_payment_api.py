@@ -101,14 +101,15 @@ def _authorize():
     only proves *some* valid user is calling — the role check is what
     actually limits who that can be.
     """
-    if frappe.session.user == "Guest":
-        frappe.throw(_("Authentication required."), frappe.AuthenticationError)
+    if not frappe.session.user or frappe.session.user == "Guest":
+        frappe.local.message_log = []
+        frappe.local.response["http_status_code"] = 401
+        raise frappe.AuthenticationError("Authentication required")
 
     if REQUIRED_ROLE not in frappe.get_roles(frappe.session.user):
-        frappe.throw(
-            _("User '{0}' is not permitted to call this endpoint.").format(frappe.session.user),
-            frappe.PermissionError,
-        )
+        frappe.local.message_log = []
+        frappe.local.response["http_status_code"] = 403
+        raise frappe.PermissionError(f"User '{frappe.session.user}' is not permitted to call this endpoint")
 
 
 def _respond(http_status_code, payload):
